@@ -1386,6 +1386,8 @@ class TelegramBot:
             for device_id in devices:
                 if self.device_manager.is_alarming(device_id):
                     self.mqtt_handler.send_stop_alarm(device_id=device_id)
+                    # Reset alarming state to stop reminders
+                    self.device_manager.set_alarming_state(device_id, False)
                     device_location = self.firebase_manager.get_device_location(device_id) or device_id
                     stopped_devices.append(device_location)
                 self._clear_bengala_confirmation(device_id)

@@ -132,7 +132,7 @@ class AlarmBridgeService:
         # Delegar al TelegramBot que tiene la lógica de confirmación de bengala
         if self._loop and self.telegram.is_running():
             asyncio.run_coroutine_threadsafe(
-                self.telegram._handle_event(event),
+                self.telegram.handle_mqtt_event(event),
                 self._loop
             )
 
