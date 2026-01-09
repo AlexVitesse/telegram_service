@@ -1,0 +1,11 @@
+# MQTT Client
+paho-mqtt>=1.6.1
+
+# Telegram Bot
+python-telegram-bot>=20.7
+
+# Utilities
+python-dotenv>=1.0.0
+
+# Async support
+asyncio-mqtt>=0.16.2

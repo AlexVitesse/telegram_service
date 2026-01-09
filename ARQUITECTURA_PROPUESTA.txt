@@ -1,0 +1,817 @@
+================================================================================
+SENTINEL GUARD - DOCUMENTO MAESTRO DE ARQUITECTURA Y ROADMAP
+Sistema de Alarmas Multi-Tenant
+================================================================================
+Fecha de creacion: Enero 2026
+Ultima actualizacion: Enero 2026
+================================================================================
+
+TABLA DE CONTENIDOS
+-------------------
+1. Contexto del Proyecto
+2. Arquitectura Actual
+3. Arquitectura Propuesta (VPS Multi-Tenant)
+4. Niveles de Implementacion
+5. Reinicio Automatico con Systemd
+6. Mini Apps de Telegram (Propuesta)
+7. Roadmap de Implementacion
+8. Recursos y Costos Estimados
+9. Documentacion Relacionada
+
+================================================================================
+1. CONTEXTO DEL PROYECTO
+================================================================================
+
+OBJETIVO:
+- VPS para gestionar multiples alarmas
+- Distintos puntos geograficos
+- Distintos usuarios/clientes (multi-tenant)
+- Alta disponibilidad y tolerancia a fallos
+- Sistema critico de seguridad (debe estar siempre online)
+
+COMPONENTES ACTUALES:
+- ESP32: Dispositivos fisicos de alarma
+- Python Service: Backend que maneja logica
+- Telegram Bot: Interfaz de usuario para comandos y notificaciones
+- Firebase RTDB: Base de datos en tiempo real
+- MQTT (HiveMQ): Comunicacion con dispositivos ESP32
+- App Ionic: Aplicacion movil (desarrollo separado)
+
+================================================================================
+2. ARQUITECTURA ACTUAL
+================================================================================
+
+    Usuario                    Firebase
+    Telegram ◄──────────────► RTDB
+        │                        ▲
+        │                        │
+        ▼                        │
+    ┌────────────────────────────┴───────┐
+    │           VPS (Python)             │
+    │  ┌──────────────────────────────┐  │
+    │  │       main.py (monolitico)   │  │
+    │  │  - Telegram Bot              │  │
+    │  │  - MQTT Handler              │  │
+    │  │  - Firebase Manager          │  │
+    │  │  - Scheduler                 │  │
+    │  │  - Device Manager            │  │
+    │  └──────────────────────────────┘  │
+    └────────────────────────────────────┘
+                    │
+                    │ MQTT
+                    ▼
+            ┌──────────────┐
+            │   HiveMQ     │
+            │   Broker     │
+            └──────┬───────┘
+                   │
+        ┌──────────┼──────────┐
+        ▼          ▼          ▼
+    ┌──────┐   ┌──────┐   ┌──────┐
+    │ESP32 │   │ESP32 │   │ESP32 │
+    │User A│   │User B│   │User C│
+    └──────┘   └──────┘   └──────┘
+
+PROBLEMAS DE LA ARQUITECTURA ACTUAL:
+- Proceso monolitico: Si falla algo, falla todo
+- Sin reinicio automatico: Si el proceso muere, queda offline
+- Sin tolerancia a fallos: Un error puede tumbar todo el servicio
+- Sin monitoreo externo: No sabemos si esta caido hasta que un usuario reporta
+
+================================================================================
+3. ARQUITECTURA PROPUESTA (VPS Multi-Tenant)
+================================================================================
+
+                    ┌─────────────────────────────────────────┐
+                    │              VPS Principal              │
+                    ├─────────────────────────────────────────┤
+                    │                                         │
+   Usuarios ───────►│  ┌─────────────┐    ┌──────────────┐   │
+   Telegram         │  │   NGINX     │    │   Redis      │   │
+                    │  │  (Proxy)    │    │  (Cache/Cola)│   │
+                    │  └──────┬──────┘    └──────────────┘   │
+                    │         │                   ▲           │
+                    │         ▼                   │           │
+                    │  ┌──────────────────────────┴────────┐  │
+                    │  │         Supervisor / Systemd       │  │
+                    │  │  (Reinicio automatico de servicios)│  │
+                    │  └──────────────────────────────────┬─┘  │
+                    │         │              │            │    │
+                    │         ▼              ▼            ▼    │
+                    │  ┌──────────┐   ┌──────────┐  ┌────────┐│
+                    │  │ Worker 1 │   │ Worker 2 │  │Worker N││
+                    │  │(Telegram)│   │  (MQTT)  │  │(Backup)││
+                    │  └────┬─────┘   └────┬─────┘  └────────┘│
+                    │       │              │                   │
+                    └───────┼──────────────┼───────────────────┘
+                            │              │
+                            ▼              ▼
+                    ┌───────────┐   ┌─────────────┐
+                    │  Firebase │   │ MQTT Broker │
+                    │   (RTDB)  │   │  (HiveMQ)   │
+                    └───────────┘   └─────────────┘
+                                          │
+                            ┌─────────────┴─────────────┐
+                            ▼             ▼             ▼
+                        ┌──────┐      ┌──────┐      ┌──────┐
+                        │ESP32 │      │ESP32 │      │ESP32 │
+                        │User A│      │User B│      │User C│
+                        └──────┘      └──────┘      └──────┘
+
+================================================================================
+4. NIVELES DE IMPLEMENTACION
+================================================================================
+
+------------------------------------------------------------------------------
+NIVEL 1: BASICO (Implementar INMEDIATAMENTE) - Semana 1
+------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1.1 SYSTEMD CON REINICIO AUTOMATICO                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Proposito: Reinicio automatico si el servicio cae                           │
+│ Herramienta: systemd (ya incluido en Linux)                                 │
+│ Tiempo implementacion: 30 minutos                                           │
+│ Impacto: CRITICO - Reduce downtime de horas a segundos                      │
+│                                                                             │
+│ Beneficios:                                                                 │
+│ - Si el proceso muere, se reinicia en 5 segundos                            │
+│ - Inicia automaticamente al arrancar el servidor                            │
+│ - Logs centralizados en journald                                            │
+│ - Monitoreo de estado con systemctl                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1.2 HEALTH CHECK EXTERNO                                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Proposito: Saber si el VPS esta caido desde afuera                          │
+│ Herramienta: UptimeRobot (gratis) o Healthchecks.io                         │
+│ Tiempo implementacion: 10 minutos                                           │
+│ Impacto: ALTO - Notificacion inmediata si algo falla                        │
+│                                                                             │
+│ Beneficios:                                                                 │
+│ - Monitoreo cada 1-5 minutos desde servidores externos                      │
+│ - Notificacion por email/SMS/Telegram si el servicio cae                    │
+│ - Historial de uptime                                                       │
+│ - No depende de tu infraestructura                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1.3 LOGS CON ROTACION                                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Proposito: Evitar que los logs llenen el disco                              │
+│ Herramienta: logrotate + journald                                           │
+│ Tiempo implementacion: 15 minutos                                           │
+│ Impacto: MEDIO - Previene fallas por disco lleno                            │
+│                                                                             │
+│ Configuracion sugerida:                                                     │
+│ - Rotar logs diariamente                                                    │
+│ - Mantener ultimos 7 dias                                                   │
+│ - Comprimir logs antiguos                                                   │
+│ - Limite de tamano: 100MB por archivo                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1.4 BACKUPS AUTOMATICOS DE FIREBASE                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Proposito: Recuperar datos si se corrompen                                  │
+│ Herramienta: Script Python + cron                                           │
+│ Tiempo implementacion: 20 minutos                                           │
+│ Impacto: MEDIO - Seguro de datos                                            │
+│                                                                             │
+│ Configuracion sugerida:                                                     │
+│ - Backup diario a las 3:00 AM                                               │
+│ - Mantener ultimos 30 dias                                                  │
+│ - Guardar en directorio separado o cloud storage                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+------------------------------------------------------------------------------
+NIVEL 2: INTERMEDIO (Recomendado para produccion) - Semana 2-3
+------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.1 SEPARAR PROCESOS                                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Proposito: Aislar fallos - si uno cae, los otros siguen                     │
+│ Tiempo implementacion: 2-3 dias                                             │
+│ Impacto: ALTO - Mayor tolerancia a fallos                                   │
+│                                                                             │
+│ Estructura propuesta:                                                       │
+│ - telegram_worker.py: Maneja comandos y notificaciones                      │
+│ - mqtt_worker.py: Maneja comunicacion con ESP32                             │
+│ - scheduler_worker.py: Maneja horarios programados                          │
+│                                                                             │
+│ Comunicacion entre procesos: Redis pub/sub o colas                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.2 REDIS PARA CACHE Y COLAS                                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Proposito: Cache de Firebase + Cola de mensajes                             │
+│ Tiempo implementacion: 1-2 dias                                             │
+│ Impacto: ALTO - Mejor rendimiento y confiabilidad                           │
+│                                                                             │
+│ Beneficios:                                                                 │
+│ - Evita rate limits de Firebase/Telegram                                    │
+│ - Acelera respuestas (no consulta Firebase cada vez)                        │
+│ - Los mensajes no se pierden si hay pico de alertas                         │
+│ - Comunicacion entre workers                                                │
+│                                                                             │
+│ RAM requerida: ~50MB para empezar                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.3 WATCHDOG PARA PROCESOS COLGADOS                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Proposito: Detectar procesos que no mueren pero no responden                │
+│ Herramienta: systemd WatchdogSec                                            │
+│ Tiempo implementacion: 1 hora                                               │
+│ Impacto: MEDIO - Cubre caso edge de procesos zombies                        │
+│                                                                             │
+│ Funcionamiento:                                                             │
+│ - El proceso envia senal "estoy vivo" cada 30 segundos                      │
+│ - Si systemd no recibe senal en 60 segundos, mata y reinicia                │
+│ - Requiere modificacion minima en codigo Python                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.4 RATE LIMITING INTERNO                                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Proposito: No saturar APIs externas (Telegram, Firebase)                    │
+│ Herramienta: Semaforos/locks en codigo Python                               │
+│ Tiempo implementacion: 4 horas                                              │
+│ Impacto: MEDIO - Evitar baneos                                              │
+│                                                                             │
+│ Limites de Telegram:                                                        │
+│ - 30 mensajes por segundo a diferentes chats                                │
+│ - 1 mensaje por segundo al mismo chat                                       │
+│ - 20 mensajes por minuto al mismo grupo                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+------------------------------------------------------------------------------
+NIVEL 3: AVANZADO (Para escala grande, +50 dispositivos) - Mes 2+
+------------------------------------------------------------------------------
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3.1 VPS DE RESPALDO (Failover)                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Proposito: Continuidad si el VPS principal cae                              │
+│ Estructura: 2do VPS en modo standby                                         │
+│ Tiempo implementacion: 1 semana                                             │
+│ Costo adicional: ~$5-10 USD/mes                                             │
+│                                                                             │
+│ Funcionamiento:                                                             │
+│ - VPS secundario monitorea al primario                                      │
+│ - Si primario no responde, secundario toma control                          │
+│ - Requiere IP flotante o DNS failover                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3.2 DOCKER/KUBERNETES                                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Proposito: Orquestacion y escalado automatico                               │
+│ Tiempo implementacion: 2 semanas                                            │
+│ Impacto: ALTO para escala grande                                            │
+│                                                                             │
+│ Beneficios:                                                                 │
+│ - Despliegues reproducibles                                                 │
+│ - Escalado automatico segun demanda                                         │
+│ - Facil rollback si algo falla                                              │
+│ - Aislamiento de dependencias                                               │
+│                                                                             │
+│ Consideracion: Requiere mas RAM/CPU (overhead de contenedores)              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3.3 MONITOREO AVANZADO                                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Proposito: Dashboards, metricas, alertas inteligentes                       │
+│ Herramientas: Prometheus + Grafana                                          │
+│ Tiempo implementacion: 1 semana                                             │
+│                                                                             │
+│ Metricas a monitorear:                                                      │
+│ - Dispositivos online/offline                                               │
+│ - Tiempo de respuesta de comandos                                           │
+│ - Mensajes enviados por minuto                                              │
+│ - Uso de CPU/RAM/Disco                                                      │
+│ - Errores por tipo                                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3.4 BROKER MQTT PROPIO (Reemplazar HiveMQ)                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Proposito: Eliminar dependencia y costo de HiveMQ Cloud                     │
+│ Herramientas: Mosquitto o EMQX                                              │
+│ Tiempo implementacion: 1-2 dias                                             │
+│ Ahorro: $0-50 USD/mes (segun plan HiveMQ actual)                            │
+│                                                                             │
+│ OPCIONES DE BROKER:                                                         │
+│                                                                             │
+│ 1. MOSQUITTO (Recomendado para empezar)                                     │
+│    - Ligero: ~5MB RAM                                                       │
+│    - Facil configuracion                                                    │
+│    - Ideal para <1000 dispositivos                                          │
+│    - Instalacion: apt install mosquitto mosquitto-clients                   │
+│                                                                             │
+│ 2. EMQX (Para escala grande)                                                │
+│    - Soporta millones de conexiones                                         │
+│    - Clustering nativo                                                      │
+│    - Dashboard web incluido                                                 │
+│    - Mas recursos: ~200MB RAM minimo                                        │
+│                                                                             │
+│ CONFIGURACION MOSQUITTO BASICA:                                             │
+│                                                                             │
+│   # /etc/mosquitto/mosquitto.conf                                           │
+│   listener 1883                           # Puerto MQTT                     │
+│   listener 8883                           # Puerto MQTT + TLS               │
+│   allow_anonymous false                   # Requiere autenticacion          │
+│   password_file /etc/mosquitto/passwd     # Archivo de usuarios             │
+│   persistence true                        # Guardar mensajes en disco       │
+│   persistence_location /var/lib/mosquitto/                                  │
+│                                                                             │
+│   # TLS/SSL (Produccion)                                                    │
+│   certfile /etc/letsencrypt/live/tudominio/fullchain.pem                    │
+│   keyfile /etc/letsencrypt/live/tudominio/privkey.pem                       │
+│                                                                             │
+│ PASOS DE MIGRACION:                                                         │
+│ 1. Instalar Mosquitto en el VPS                                             │
+│ 2. Configurar autenticacion (usuario/password)                              │
+│ 3. Configurar TLS con Let's Encrypt                                         │
+│ 4. Abrir puertos en firewall (1883, 8883)                                   │
+│ 5. Actualizar config.py con nueva URL del broker                            │
+│ 6. Actualizar ESP32 con nueva URL del broker                                │
+│ 7. Probar conexion y mensajes                                               │
+│ 8. Deshabilitar HiveMQ                                                      │
+│                                                                             │
+│ SEGURIDAD:                                                                  │
+│ - Usar TLS obligatorio en produccion                                        │
+│ - Usuario/password por dispositivo (o compartido)                           │
+│ - Firewall: solo permitir IPs conocidas (opcional)                          │
+│ - ACLs: controlar que topics puede leer/escribir cada usuario               │
+│                                                                             │
+│ COMPARATIVA:                                                                │
+│                                                                             │
+│   | Aspecto              | HiveMQ Cloud    | Mosquitto Propio    |          │
+│   |----------------------|-----------------|---------------------|          │
+│   | Costo                | $0-50+/mes      | $0 (usa tu VPS)     |          │
+│   | Mantenimiento        | Ninguno         | Tu responsabilidad  |          │
+│   | Uptime garantizado   | 99.9%           | Depende de tu VPS   |          │
+│   | Escalabilidad        | Automatica      | Manual              |          │
+│   | Latencia             | Variable        | Menor (mismo VPS)   |          │
+│   | Control              | Limitado        | Total               |          │
+│   | Backups              | Incluidos       | Tu responsabilidad  |          │
+│                                                                             │
+│ RECOMENDACION:                                                              │
+│ - Empezar con Mosquitto cuando tengas tiempo para configurarlo              │
+│ - Mantener HiveMQ como backup los primeros dias                             │
+│ - Migrar ESP32 gradualmente (uno por uno)                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+5. REINICIO AUTOMATICO CON SYSTEMD - DETALLE TECNICO
+================================================================================
+
+QUE ES SYSTEMD:
+- Administrador de servicios de Linux
+- Primer proceso que arranca al encender el servidor
+- Mantiene servicios corriendo y los reinicia si fallan
+
+FLUJO DE REINICIO AUTOMATICO:
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                         SYSTEMD                                 │
+    │                    (Siempre vigilando)                          │
+    └─────────────────────────────────────────────────────────────────┘
+                                  │
+                                  │ Monitorea cada segundo
+                                  ▼
+    ┌─────────────────────────────────────────────────────────────────┐
+    │                    Tu servicio Python                           │
+    │                    (alarm_service.py)                           │
+    └─────────────────────────────────────────────────────────────────┘
+
+    ESCENARIO NORMAL:
+    Systemd: "¿Proceso vivo?" → Si → "Ok, sigo vigilando"
+
+    ESCENARIO FALLO:
+    Systemd: "¿Proceso vivo?" → No → Espera 5s → Reinicia → "Sigo vigilando"
+
+TIPOS DE FALLOS QUE CUBRE:
+
+    | Tipo de fallo                      | Detecta | Reinicia |
+    |------------------------------------|---------|----------|
+    | Excepcion Python no capturada      | Si      | Si       |
+    | sys.exit(1) o error fatal          | Si      | Si       |
+    | Proceso mata por OOM (sin memoria) | Si      | Si       |
+    | kill -9 manual                     | Si      | Si       |
+    | Servidor se reinicia               | Si      | Si       |
+    | Proceso colgado (no muere)         | No*     | No*      |
+
+    * Para procesos colgados se necesita Watchdog (Nivel 2)
+
+EJEMPLO DE ARCHIVO DE SERVICIO:
+
+    # /etc/systemd/system/alarm-service.service
+
+    [Unit]
+    Description=Sentinel Guard Alarm Service
+    After=network.target
+
+    [Service]
+    Type=simple
+    User=alarm
+    Group=alarm
+    WorkingDirectory=/opt/alarm-service/telegram_service
+    ExecStart=/opt/alarm-service/venv/bin/python main.py
+
+    # CONFIGURACION DE REINICIO
+    Restart=always              # Siempre reiniciar
+    RestartSec=5                # Esperar 5 segundos antes de reiniciar
+    StartLimitBurst=5           # Maximo 5 reinicios...
+    StartLimitIntervalSec=60    # ...en 60 segundos
+
+    # LOGS
+    StandardOutput=journal
+    StandardError=journal
+
+    # VARIABLES DE ENTORNO
+    Environment="PYTHONUNBUFFERED=1"
+
+    [Install]
+    WantedBy=multi-user.target
+
+COMPARATIVA DE TIEMPOS DE CAIDA:
+
+    SIN REINICIO AUTOMATICO:
+    ────────────────────────
+    03:00 AM  - Error, proceso muere
+    03:00 AM  - Sistema OFFLINE
+    08:00 AM  - Usuario nota el problema
+    08:30 AM  - Tu reinicias manualmente
+
+    → 5.5 HORAS sin proteccion
+
+    CON REINICIO AUTOMATICO:
+    ────────────────────────
+    03:00:00  - Error, proceso muere
+    03:00:00  - Systemd detecta
+    03:00:05  - Systemd reinicia
+    03:00:08  - Sistema funcionando
+
+    → 8 SEGUNDOS sin proteccion
+
+COMANDOS UTILES:
+
+    # Ver estado
+    sudo systemctl status alarm-service
+
+    # Ver logs en tiempo real
+    sudo journalctl -u alarm-service -f
+
+    # Reiniciar
+    sudo systemctl restart alarm-service
+
+    # Detener
+    sudo systemctl stop alarm-service
+
+    # Iniciar
+    sudo systemctl start alarm-service
+
+    # Habilitar inicio automatico
+    sudo systemctl enable alarm-service
+
+================================================================================
+6. MINI APPS DE TELEGRAM - PROPUESTA FUTURA
+================================================================================
+
+QUE SON:
+- Aplicaciones web que corren DENTRO de Telegram
+- El usuario no sale de la app
+- Interfaz completa tipo web/movil
+- Acceso a datos del usuario de Telegram
+
+VISUALIZACION:
+
+    ┌─────────────────────────────────────┐
+    │         TELEGRAM                    │
+    │  ┌───────────────────────────────┐  │
+    │  │                               │  │
+    │  │      TU MINI APP              │  │
+    │  │   (HTML/CSS/JavaScript)       │  │
+    │  │                               │  │
+    │  │   ┌─────────┐ ┌────────┐      │  │
+    │  │   │ ARMAR   │ │DESARMAR│      │  │
+    │  │   └─────────┘ └────────┘      │  │
+    │  │                               │  │
+    │  │   Estado: ARMADO              │  │
+    │  │   Sensores: 5 activos         │  │
+    │  │                               │  │
+    │  └───────────────────────────────┘  │
+    │  [Cerrar]                           │
+    └─────────────────────────────────────┘
+
+VENTAJAS PARA ESTE PROYECTO:
+
+    | Ventaja              | Descripcion                          | Impacto |
+    |----------------------|--------------------------------------|---------|
+    | UI rica              | Dashboards, graficos, mapas          | Alto    |
+    | Config visual        | Arrastrar sensores, config zonas     | Alto    |
+    | Historial visual     | Linea de tiempo de eventos           | Medio   |
+    | Multi-dispositivo    | Ver todos los dispositivos en 1 vista| Alto    |
+    | Onboarding           | Wizard para nuevos usuarios          | Medio   |
+    | Sin instalar         | No necesitan otra app                | Alto    |
+
+CASOS DE USO ESPECIFICOS:
+
+    ACTUAL (Solo comandos):
+    Usuario: /status
+    Bot: Merida - ARMADO, Caracas - Sin respuesta
+    Usuario: /horarios
+    Bot: (texto largo)
+
+    CON MINI APP:
+    Usuario: Toca boton "Panel de Control"
+    ┌─────────────────────────────────────┐
+    │  MIS ALARMAS                        │
+    │  ┌───────────┐  ┌───────────┐       │
+    │  │ Merida    │  │ Caracas   │       │
+    │  │ ARMADO    │  │ OFFLINE   │       │
+    │  │ [DESARMAR]│  │[REINTENTAR│       │
+    │  └───────────┘  └───────────┘       │
+    │                                     │
+    │  HORARIOS                           │
+    │  Activar:   [22:00]                 │
+    │  Desactivar:[06:00]                 │
+    │  [━━━━━●━━━] Habilitado             │
+    │                                     │
+    │  ULTIMOS EVENTOS                    │
+    │  • 14:32 - Sensor cocina            │
+    │  • 09:15 - Sistema desarmado        │
+    └─────────────────────────────────────┘
+
+DESVENTAJAS / CONSIDERACIONES:
+
+    | Desventaja           | Descripcion                     | Severidad |
+    |----------------------|---------------------------------|-----------|
+    | Desarrollo adicional | Necesitas crear frontend web    | Media     |
+    | Hosting adicional    | Mini App necesita servidor web  | Baja      |
+    | HTTPS obligatorio    | Telegram requiere SSL valido    | Baja      |
+    | No reemplaza alertas | Notificaciones siguen = mensajes| Info      |
+    | Mas complejidad      | Mas codigo que mantener         | Media     |
+
+ARQUITECTURA CON MINI APP:
+
+                                    ┌──────────────────┐
+                                    │   Mini App       │
+                                    │  (Frontend Web)  │
+                                    │  HTML/CSS/JS     │
+                                    └────────┬─────────┘
+                                             │ HTTPS
+                                             ▼
+    ┌─────────────┐    Comandos     ┌────────────────────────┐
+    │  Telegram   │◄───────────────►│    Tu VPS              │
+    │  (Usuario)  │   Notificaciones│  ┌──────────────────┐  │
+    └─────────────┘                 │  │  Python Backend  │  │
+                                    │  │  (API REST)      │  │
+                                    │  └────────┬─────────┘  │
+                                    │           │            │
+                                    │  ┌────────▼─────────┐  │
+                                    │  │  MQTT + Firebase │  │
+                                    │  └──────────────────┘  │
+                                    └────────────────────────┘
+
+VIABILIDAD:
+
+    | Aspecto                      | Evaluacion | Notas                    |
+    |------------------------------|------------|--------------------------|
+    | Complejidad implementacion   | Media      | 2-3 semanas para MVP     |
+    | Recursos VPS                 | Bajo       | Solo archivos estaticos  |
+    | Conocimientos requeridos     | HTML/JS    | O framework Vue/React    |
+    | Integracion sistema actual   | Buena      | Backend Python ya existe |
+    | Mantenimiento                | Moderado   | Dos codebases            |
+
+RECOMENDACION:
+- VIABLE: Si, definitivamente
+- CUANDO: Despues de estabilizar el sistema base (Nivel 1 y 2)
+- PARA QUE:
+  * Panel de administracion
+  * Vista multi-dispositivo
+  * Historial de eventos
+  * Configuracion inicial de usuarios
+- NO REEMPLAZA:
+  * Notificaciones de alarma (siguen siendo mensajes)
+  * Comandos rapidos (/on, /off, /status)
+  * Recordatorios de bengala
+
+================================================================================
+7. ROADMAP DE IMPLEMENTACION
+================================================================================
+
+------------------------------------------------------------------------------
+SEMANA 1 - ESTABILIDAD BASICA (CRITICO)
+------------------------------------------------------------------------------
+[ ] Configurar systemd con reinicio automatico
+[ ] Configurar health check externo (UptimeRobot)
+[ ] Configurar logrotate para logs
+[ ] Probar escenarios de fallo y recuperacion
+
+------------------------------------------------------------------------------
+MODULARIZACION ESP32 (Paralelo a otras tareas)
+------------------------------------------------------------------------------
+Estado actual:
+- alarma_modulos.ino: 2660 lineas (MUY GRANDE)
+- mqtt_client.h/cpp: Ya modularizado
+- mqtt_protocol.h: Ya separado
+- config.h: Ya separado
+
+Modulos propuestos a crear:
+
+[ ] wifi_manager.h/cpp
+    - Conexion WiFi
+    - Reconexion automatica
+    - Portal de configuracion (AP mode)
+    - Manejo de credenciales
+
+[ ] ble_manager.h/cpp
+    - Configuracion BLE
+    - Servicios y caracteristicas
+    - Callbacks de conexion
+    - Comunicacion con App
+
+[ ] alarm_controller.h/cpp
+    - Logica de armado/desarmado
+    - Estado del sistema
+    - Tiempo de salida (bomba)
+    - Control de sirena
+
+[ ] sensor_manager.h/cpp
+    - Lectura de sensores PIR
+    - Deteccion de movimiento
+    - Debounce de sensores
+    - Estado de sensores
+
+[ ] bengala_controller.h/cpp
+    - Control de bengala/humo
+    - Modos de disparo
+    - Seguridad de disparo
+    - Estado de bengala
+
+[ ] buzzer_controller.h/cpp
+    - Patrones de sonido
+    - Diferentes alertas
+    - Control de volumen/duracion
+
+[ ] led_controller.h/cpp
+    - Estados de LEDs
+    - Indicadores visuales
+    - Patrones de parpadeo
+
+[ ] alexa_handler.h/cpp (si se usa)
+    - Integracion con Alexa
+    - Comandos de voz
+    - FauxmoESP
+
+[ ] schedule_manager.h/cpp
+    - Horarios programados
+    - Activacion/desactivacion automatica
+    - Sincronizacion con servidor
+
+Beneficios de modularizar:
+- Codigo mas facil de mantener
+- Testing individual de modulos
+- Reutilizacion de codigo
+- Menor acoplamiento
+- Compilacion mas rapida (cambios parciales)
+- Mejor organizacion del proyecto
+
+Orden sugerido de modularizacion:
+1. wifi_manager (base de conectividad)
+2. alarm_controller (logica principal)
+3. sensor_manager (entrada de datos)
+4. bengala_controller (salida critica)
+5. ble_manager (configuracion)
+6. Resto de modulos
+
+------------------------------------------------------------------------------
+SEMANA 2 - TOLERANCIA A FALLOS
+------------------------------------------------------------------------------
+[ ] Separar procesos (Telegram/MQTT/Scheduler)
+[ ] Configurar watchdog en systemd
+[ ] Implementar comunicacion entre procesos
+
+------------------------------------------------------------------------------
+SEMANA 3 - OPTIMIZACION
+------------------------------------------------------------------------------
+[ ] Instalar y configurar Redis
+[ ] Implementar cache de Firebase con Redis
+[ ] Implementar cola de mensajes
+[ ] Rate limiting interno
+
+------------------------------------------------------------------------------
+SEMANA 4 - BACKUPS Y MONITOREO
+------------------------------------------------------------------------------
+[ ] Script de backup automatico de Firebase
+[ ] Configurar alertas en UptimeRobot
+[ ] Documentar procedimientos de recuperacion
+
+------------------------------------------------------------------------------
+MES 2 - MEJORAS (OPCIONAL)
+------------------------------------------------------------------------------
+[ ] Evaluar necesidad de VPS de respaldo
+[ ] Considerar Docker para despliegues
+[ ] Monitoreo con Prometheus/Grafana
+[ ] Implementar broker MQTT propio (Mosquitto) para eliminar costo HiveMQ
+    - Instalar y configurar Mosquitto en VPS
+    - Configurar TLS/SSL con Let's Encrypt
+    - Migrar ESP32 gradualmente
+    - Mantener HiveMQ como backup durante transicion
+
+------------------------------------------------------------------------------
+MES 3+ - MINI APP (OPCIONAL)
+------------------------------------------------------------------------------
+[ ] Disenar UI/UX de la Mini App
+[ ] Desarrollar frontend (HTML/CSS/JS o React/Vue)
+[ ] Crear API REST en Python
+[ ] Integrar con Telegram Web App API
+[ ] Testing y despliegue
+
+================================================================================
+8. RECURSOS Y COSTOS ESTIMADOS
+================================================================================
+
+RECURSOS MINIMOS RECOMENDADOS PARA VPS:
+- CPU: 1 vCPU (2 vCPU recomendado)
+- RAM: 1GB minimo (2GB recomendado con Redis)
+- Disco: 20GB SSD
+- SO: Ubuntu 22.04 LTS o Debian 12
+- Ancho de banda: 1TB/mes (suficiente para ~100 dispositivos)
+
+ESTIMACION DE CAPACIDAD:
+
+    | Configuracion          | Dispositivos | Usuarios |
+    |------------------------|--------------|----------|
+    | VPS basico (1GB RAM)   | 50-100       | 20-50    |
+    | VPS + Redis (2GB RAM)  | 200-500      | 50-200   |
+    | VPS + Workers separados| 500-1000     | 200-500  |
+
+COSTOS MENSUALES ESTIMADOS:
+
+    | Servicio                | Costo USD/mes | Notas              |
+    |-------------------------|---------------|---------------------|
+    | VPS basico              | $5-10         | DigitalOcean, Vultr|
+    | VPS con mas RAM (2GB)   | $10-15        | Para Redis          |
+    | Redis                   | $0            | Self-hosted         |
+    | UptimeRobot             | $0            | Plan gratuito       |
+    | Firebase RTDB           | $0*           | Hasta cierto limite |
+    | HiveMQ                  | $0*           | Plan gratuito       |
+    | Dominio (opcional)      | $1/mes        | Para Mini App       |
+    | SSL (Let's Encrypt)     | $0            | Gratuito            |
+    |-------------------------|---------------|---------------------|
+    | TOTAL MINIMO            | $5-10/mes     |                     |
+    | TOTAL RECOMENDADO       | $10-20/mes    |                     |
+
+    * Planes gratuitos tienen limites de uso
+
+PROVEEDORES VPS RECOMENDADOS:
+- DigitalOcean: $5/mes (1GB RAM, 25GB SSD)
+- Vultr: $5/mes (1GB RAM, 25GB SSD)
+- Hetzner: €3.79/mes (2GB RAM, 20GB SSD) - Mejor precio/rendimiento
+- Linode: $5/mes (1GB RAM, 25GB SSD)
+
+================================================================================
+9. DOCUMENTACION RELACIONADA
+================================================================================
+
+ARCHIVOS DE DOCUMENTACION EN ESTE PROYECTO:
+
+1. COMANDOS_TELEGRAM.md
+   - Documentacion completa de todos los comandos del bot
+   - Permisos requeridos por comando
+   - Ejemplos de uso
+   - Callbacks de botones inline
+   - Sistema anti-spam
+
+2. ARQUITECTURA_PROPUESTA.txt (este archivo)
+   - Arquitectura actual y propuesta
+   - Niveles de implementacion
+   - Roadmap
+   - Costos estimados
+
+ARCHIVOS DE CONFIGURACION:
+- config.py: Configuracion del servicio
+- requirements.txt: Dependencias de Python
+
+ARCHIVOS PRINCIPALES DEL SERVICIO:
+- main.py: Punto de entrada, orquestador
+- telegram_bot.py: Logica del bot de Telegram
+- mqtt_handler.py: Comunicacion MQTT con ESP32
+- firebase_manager.py: Interaccion con Firebase RTDB
+- device_manager.py: Estado de dispositivos
+- scheduler.py: Horarios programados
+
+================================================================================
+FIN DEL DOCUMENTO
+================================================================================
+Proyecto: Sentinel Guard - Sistema de Alarmas Multi-Tenant
+Mantenido por: [Tu nombre/empresa]
+================================================================================
