@@ -95,15 +95,27 @@ class DeviceManager:
     def get_alarming_devices(self, reminder_interval_seconds: int = 60) -> List[Dict[str, Any]]:
         """
         Retorna una lista de dispositivos que están en alarma y necesitan un recordatorio.
+        Solo incluye dispositivos que están ONLINE para evitar enviar recordatorios
+        cuando el dispositivo está desconectado.
         Actualiza `last_reminder_time` para los dispositivos que se retornan.
         """
         now = time.time()
         reminders_needed = []
         for device_id, data in self.devices_state.items():
-            if data["is_alarming"]:
+            # Solo enviar recordatorios si el dispositivo está en alarma Y online
+            # Si está offline, no tiene sentido enviar recordatorios porque
+            # el usuario no puede interactuar con el dispositivo
+            if data["is_alarming"] and data.get("is_online", False):
                 if (now - data["last_reminder_time"]) >= reminder_interval_seconds:
                     reminders_needed.append(data)
                     data["last_reminder_time"] = now # Actualizar el tiempo del último recordatorio
+            elif data["is_alarming"] and not data.get("is_online", False):
+                # Si está alarmando pero offline, resetear el estado de alarma
+                # ya que no podemos confirmar que la alarma sigue activa
+                logger.warning(f"Dispositivo {device_id} estaba alarmando pero está offline. Reseteando estado de alarma.")
+                data["is_alarming"] = False
+                data["last_alarm_event_time"] = 0.0
+                data["last_reminder_time"] = 0.0
         return reminders_needed
 
     def get_device_info(self, device_id: str) -> Optional[Dict[str, Any]]:
