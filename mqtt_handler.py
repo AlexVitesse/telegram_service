@@ -375,14 +375,24 @@ class MqttHandler:
         return self.send_command(Command.BEEP.value, {"count": count}, device_id=device_id)
 
     def send_set_schedule(self, enabled: bool, on_hour: int, on_minute: int,
-                          off_hour: int, off_minute: int, device_id: str = None) -> bool:
-        """Configura horarios automaticos"""
+                          off_hour: int, off_minute: int, days: list = None,
+                          device_id: str = None) -> bool:
+        """
+        Configura horarios automaticos.
+        days: Lista de índices de días [0-6] donde 0=Domingo, 1=Lunes, etc.
+              Si es None, se envían todos los días.
+        """
+        # Si no se especifican días, usar todos
+        if days is None:
+            days = [0, 1, 2, 3, 4, 5, 6]
+
         args = {
             "enabled": enabled,
             "on_hour": on_hour,
             "on_minute": on_minute,
             "off_hour": off_hour,
-            "off_minute": off_minute
+            "off_minute": off_minute,
+            "days": days
         }
         return self.send_command(Command.SET_SCHEDULE.value, args, device_id=device_id)
 

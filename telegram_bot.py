@@ -332,6 +332,40 @@ class TelegramBot:
         )
 
     # ========================================
+    # Helpers de Control de Concurrencia
+    # ========================================
+    
+    async def _acquire_command_lock(self, chat_id: str, command_name: str, cooldown_seconds: int = 5) -> Optional[asyncio.Lock]:
+        """
+        Intenta adquirir un lock para un comando y verifica el cooldown.
+        Retorna el Lock adquirido si se puede proceder, o None si se debe ignorar.
+        """
+        key = f"{chat_id}:{command_name}"
+        now = time.time()
+        
+        # 1. Verificar Cooldown (Tiempo)
+        last_time = self._command_cooldowns.get(key, 0)
+        if now - last_time < cooldown_seconds:
+            # Ignorar silenciosamente si está en cooldown
+            return None
+
+        # 2. Verificar Lock (Ejecución en curso)
+        if key not in self._command_locks:
+            self._command_locks[key] = asyncio.Lock()
+        
+        lock = self._command_locks[key]
+        
+        if lock.locked():
+            # Ignorar silenciosamente si ya se está ejecutando
+            return None
+            
+        await lock.acquire()
+        
+        # Actualizar timestamp solo si logramos adquirir el lock
+        self._command_cooldowns[key] = now
+        return lock
+
+    # ========================================
     # Handlers de comandos
     # ========================================
 
@@ -407,12 +441,16 @@ class TelegramBot:
         help_text += "`/si` - Confirmar disparo de bengala\n"
         help_text += "`/no` - Cancelar disparo de bengala\n\n"
         help_text += "🔗 *Dispositivos:*\n"
-        help_text += "`/desvincular` - Desvincular un dispositivo\n"
+        help_text += "`/desvincular` - Desvincular un dispositivo\n\n"
+        help_text += "⏰ *Horarios:*\n"
+        help_text += "`/horarios` - Ver programacion\n"
+        help_text += "`/horarios on HH:MM` - Hora de armado\n"
+        help_text += "`/horarios off HH:MM` - Hora de desarmado\n"
+        help_text += "`/horarios dias [L,M,X,J,V|todos|semana|finde]`\n\n"
 
         if self._is_user_admin(chat_id):
-            help_text += "\n⚙️ *Admin:*\n"
+            help_text += "⚙️ *Admin:*\n"
             help_text += "`/permisos` - Gestionar usuarios\n"
-            help_text += "`/horarios` - Programacion automatica\n"
             help_text += "`/sensors` - Ver sensores\n"
             help_text += "`/adduser` - Agregar usuario\n"
 
@@ -423,44 +461,52 @@ class TelegramBot:
         )
 
     @require_auth
-    @command_cooldown(cooldown_seconds=8, use_lock=True)
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler para /status con selección de dispositivo"""
+        """Handler para /status. Silencioso en flood."""
         user = update.effective_user
         chat_id = str(update.effective_chat.id)
-        logger.info(f"/status de {user.first_name}")
+        
+        # Intentar adquirir lock y verificar cooldown (5 segundos)
+        lock = await self._acquire_command_lock(chat_id, "status", cooldown_seconds=5)
+        if not lock:
+            return # Ignorar silenciosamente
 
-        if not self.mqtt_handler:
-            await update.message.reply_text("❌ Error: El servicio no está conectado al sistema.")
-            return
+        try:
+            logger.info(f"/status de {user.first_name}")
 
-        devices = self.firebase_manager.get_authorized_devices(chat_id)
-        if not devices:
-            await update.message.reply_text("No tienes dispositivos autorizados.")
-            return
+            if not self.mqtt_handler:
+                await update.message.reply_text("❌ Error: El servicio no está conectado al sistema.")
+                return
 
-        # Si solo hay 1 dispositivo, consultar directamente
-        if len(devices) == 1:
-            await self._get_device_status(update, devices)
-            return
+            devices = self.firebase_manager.get_authorized_devices(chat_id)
+            if not devices:
+                await update.message.reply_text("No tienes dispositivos autorizados.")
+                return
 
-        # Si hay más de 1, mostrar menú de selección
-        buttons = []
-        for device_id in devices:
-            location = self.firebase_manager.get_device_location(device_id) or device_id
-            buttons.append([InlineKeyboardButton(f"📊 {location}", callback_data=f"status_{device_id}")])
+            # Si solo hay 1 dispositivo, consultar directamente
+            if len(devices) == 1:
+                await self._get_device_status(update, devices)
+                return
 
-        # Agregar opción para consultar todos
-        buttons.append([InlineKeyboardButton("📊 Ver TODOS", callback_data="status_all")])
+            # Si hay más de 1, mostrar menú de selección
+            buttons = []
+            for device_id in devices:
+                location = self.firebase_manager.get_device_location(device_id) or device_id
+                buttons.append([InlineKeyboardButton(f"📊 {location}", callback_data=f"status_{device_id}")])
 
-        keyboard = InlineKeyboardMarkup(buttons)
+            # Agregar opción para consultar todos
+            buttons.append([InlineKeyboardButton("📊 Ver TODOS", callback_data="status_all")])
 
-        await update.message.reply_text(
-            "📊 *Selecciona el dispositivo a consultar:*\n\n"
-            f"Tienes {len(devices)} dispositivo(s) disponibles.",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=keyboard
-        )
+            keyboard = InlineKeyboardMarkup(buttons)
+
+            await update.message.reply_text(
+                "📊 *Selecciona el dispositivo a consultar:*\n\n"
+                f"Tienes {len(devices)} dispositivo(s) disponibles.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=keyboard
+            )
+        finally:
+            lock.release()
 
     async def _get_device_status(self, update_or_query, devices: List[str]):
         """Consulta el estado de uno o varios dispositivos"""
@@ -526,44 +572,51 @@ class TelegramBot:
             await self.send_message(chat_id, "🤷‍♂️ Ningún dispositivo respondió a la solicitud de estado.")
 
     @require_auth
-    @command_cooldown(cooldown_seconds=8, use_lock=True)
     async def _cmd_on(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler para /on - Armar sistema con selección de dispositivo"""
+        """Handler para /on - Armar sistema. Silencioso en flood."""
         user = update.effective_user
         chat_id = str(update.effective_chat.id)
-        logger.info(f"/on de {user.first_name}")
-
-        if not self.mqtt_handler:
-            await update.message.reply_text("❌ Error: El servicio no está conectado al sistema.")
+        
+        lock = await self._acquire_command_lock(chat_id, "on", cooldown_seconds=5)
+        if not lock:
             return
 
-        devices = self.firebase_manager.get_authorized_devices(chat_id)
-        if not devices:
-            await update.message.reply_text("No tienes dispositivos autorizados.")
-            return
+        try:
+            logger.info(f"/on de {user.first_name}")
 
-        # Si solo hay 1 dispositivo, armar directamente
-        if len(devices) == 1:
-            await self._arm_devices(update, devices)
-            return
+            if not self.mqtt_handler:
+                await update.message.reply_text("❌ Error: El servicio no está conectado al sistema.")
+                return
 
-        # Si hay más de 1, mostrar menú de selección
-        buttons = []
-        for device_id in devices:
-            location = self.firebase_manager.get_device_location(device_id) or device_id
-            buttons.append([InlineKeyboardButton(f"🔒 {location}", callback_data=f"arm_{device_id}")])
+            devices = self.firebase_manager.get_authorized_devices(chat_id)
+            if not devices:
+                await update.message.reply_text("No tienes dispositivos autorizados.")
+                return
 
-        # Agregar opción para armar todos
-        buttons.append([InlineKeyboardButton("🔒 Armar TODOS", callback_data="arm_all")])
+            # Si solo hay 1 dispositivo, armar directamente
+            if len(devices) == 1:
+                await self._arm_devices(update, devices)
+                return
 
-        keyboard = InlineKeyboardMarkup(buttons)
+            # Si hay más de 1, mostrar menú de selección
+            buttons = []
+            for device_id in devices:
+                location = self.firebase_manager.get_device_location(device_id) or device_id
+                buttons.append([InlineKeyboardButton(f"🔒 {location}", callback_data=f"arm_{device_id}")])
 
-        await update.message.reply_text(
-            "🔒 *Selecciona el dispositivo a armar:*\n\n"
-            f"Tienes {len(devices)} dispositivo(s) disponibles.",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=keyboard
-        )
+            # Agregar opción para armar todos
+            buttons.append([InlineKeyboardButton("🔒 Armar TODOS", callback_data="arm_all")])
+
+            keyboard = InlineKeyboardMarkup(buttons)
+
+            await update.message.reply_text(
+                "🔒 *Selecciona el dispositivo a armar:*\n\n"
+                f"Tienes {len(devices)} dispositivo(s) disponibles.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=keyboard
+            )
+        finally:
+            lock.release()
 
     async def _arm_devices(self, update_or_query, devices: List[str], single_device: bool = False):
         """Arma uno o varios dispositivos y espera confirmación"""
@@ -604,83 +657,51 @@ class TelegramBot:
             await self.send_message(chat_id, "❌ Ningún dispositivo confirmó el armado. Puede que estén offline.", "Markdown")
 
     @require_auth
-    @command_cooldown(cooldown_seconds=8, use_lock=True)
     async def _cmd_off(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler para /off - Desarmar sistema con selección de dispositivo"""
+        """Handler para /off - Desarmar sistema. Silencioso en flood."""
         user = update.effective_user
         chat_id = str(update.effective_chat.id)
-        logger.info(f"/off de {user.first_name}")
-
-        if not self.mqtt_handler:
-            await update.message.reply_text("❌ Error: El servicio no está conectado al sistema.")
+        
+        lock = await self._acquire_command_lock(chat_id, "off", cooldown_seconds=5)
+        if not lock:
             return
 
-        devices = self.firebase_manager.get_authorized_devices(chat_id)
-        if not devices:
-            await update.message.reply_text("No tienes dispositivos autorizados.")
-            return
+        try:
+            logger.info(f"/off de {user.first_name}")
 
-        # Si solo hay 1 dispositivo, desarmar directamente
-        if len(devices) == 1:
-            await self._disarm_devices(update, devices)
-            return
+            if not self.mqtt_handler:
+                await update.message.reply_text("❌ Error: El servicio no está conectado al sistema.")
+                return
 
-        # Si hay más de 1, mostrar menú de selección
-        buttons = []
-        for device_id in devices:
-            location = self.firebase_manager.get_device_location(device_id) or device_id
-            buttons.append([InlineKeyboardButton(f"🔓 {location}", callback_data=f"disarm_{device_id}")])
+            devices = self.firebase_manager.get_authorized_devices(chat_id)
+            if not devices:
+                await update.message.reply_text("No tienes dispositivos autorizados.")
+                return
 
-        # Agregar opción para desarmar todos
-        buttons.append([InlineKeyboardButton("🔓 Desarmar TODOS", callback_data="disarm_all")])
+            # Si solo hay 1 dispositivo, desarmar directamente
+            if len(devices) == 1:
+                await self._disarm_devices(update, devices)
+                return
 
-        keyboard = InlineKeyboardMarkup(buttons)
+            # Si hay más de 1, mostrar menú de selección
+            buttons = []
+            for device_id in devices:
+                location = self.firebase_manager.get_device_location(device_id) or device_id
+                buttons.append([InlineKeyboardButton(f"🔓 {location}", callback_data=f"disarm_{device_id}")])
 
-        await update.message.reply_text(
-            "🔓 *Selecciona el dispositivo a desarmar:*\n\n"
-            f"Tienes {len(devices)} dispositivo(s) disponibles.",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=keyboard
-        )
+            # Agregar opción para desarmar todos
+            buttons.append([InlineKeyboardButton("🔓 Desarmar TODOS", callback_data="disarm_all")])
 
-    async def _disarm_devices(self, update_or_query, devices: List[str]):
-        """Desarma uno o varios dispositivos y espera confirmación"""
-        # Determinar si es un Update o CallbackQuery
-        # CallbackQuery tiene 'data', Update tiene 'effective_chat'
-        is_callback = hasattr(update_or_query, 'data')
+            keyboard = InlineKeyboardMarkup(buttons)
 
-        if is_callback:
-            reply_func = update_or_query.edit_message_text
-            chat_id = str(update_or_query.message.chat_id)
-        else:
-            reply_func = update_or_query.message.reply_text
-            chat_id = str(update_or_query.effective_chat.id)
-
-        device_count = len(devices)
-        device_text = "1 dispositivo" if device_count == 1 else f"{device_count} dispositivos"
-
-        await reply_func(
-            f"🔓 Enviando comando para *desarmar* {device_text}... Esperando confirmación (7s).",
-            parse_mode=ParseMode.MARKDOWN
-        )
-
-        for device_id in devices:
-            self.mqtt_handler.send_disarm(device_id=device_id)
-
-        await asyncio.sleep(5)
-
-        # Verificar confirmación por ID original o truncado
-        disarmed_count = 0
-        for device_id in devices:
-            truncated_id = self.mqtt_handler.truncate_device_id(device_id)
-            is_disarmed = not self.device_manager.is_armed(device_id) or not self.device_manager.is_armed(truncated_id)
-            if is_disarmed:
-                disarmed_count += 1
-
-        if disarmed_count > 0:
-            await self.send_message(chat_id, f"✅ {disarmed_count}/{device_count} dispositivo(s) desarmado(s) correctamente.", "Markdown")
-        else:
-            await self.send_message(chat_id, "❌ Ningún dispositivo confirmó el desarmado. Puede que estén offline.", "Markdown")
+            await update.message.reply_text(
+                "🔓 *Selecciona el dispositivo a desarmar:*\n\n"
+                f"Tienes {len(devices)} dispositivo(s) disponibles.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=keyboard
+            )
+        finally:
+            lock.release()
 
     @require_auth
     @command_cooldown(cooldown_seconds=8, use_lock=True)
@@ -1041,7 +1062,11 @@ class TelegramBot:
             status += "`/horarios on` - Habilitar\n"
             status += "`/horarios off` - Deshabilitar\n"
             status += "`/horarios activar HH:MM` - Hora activacion\n"
-            status += "`/horarios desactivar HH:MM` - Hora desactivacion"
+            status += "`/horarios desactivar HH:MM` - Hora desactivacion\n"
+            status += "`/horarios dias L,M,X,J,V` - Configurar dias\n"
+            status += "`/horarios dias todos` - Todos los dias\n"
+            status += "`/horarios dias semana` - Lunes a Viernes\n"
+            status += "`/horarios dias finde` - Fin de semana"
 
             await update.message.reply_text(
                 status,
@@ -1051,6 +1076,7 @@ class TelegramBot:
             return
 
         subcommand = args[0].lower()
+        chat_id = str(update.effective_chat.id)
 
         # Habilitar/Deshabilitar
         if subcommand == "on":
@@ -1113,6 +1139,37 @@ class TelegramBot:
                 )
             return
 
+        # Configurar días de la semana
+        if subcommand == "dias" and len(args) >= 2:
+            dias_arg = args[1].lower()
+
+            # Atajos especiales
+            if dias_arg == "todos":
+                days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+            elif dias_arg == "semana":
+                days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes']
+            elif dias_arg == "finde" or dias_arg == "findesemana":
+                days = ['Sábado', 'Domingo']
+            else:
+                # Parsear días separados por coma: L,M,X,J,V
+                days = [d.strip() for d in args[1].split(',')]
+
+            if scheduler.set_days(days):
+                # Sincronizar con ESP32 y Firebase
+                await self._sync_schedule_to_devices(chat_id)
+                await update.message.reply_text(
+                    f"✅ *Días configurados*\n\n"
+                    f"📅 {scheduler.format_days()}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await update.message.reply_text(
+                    "❌ Días no válidos.\n"
+                    "Usa: L,M,X,J,V,S,D o 'todos', 'semana', 'finde'",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            return
+
         # Comando no reconocido
         await update.message.reply_text(
             "❓ Subcomando no reconocido.\n"
@@ -1122,21 +1179,128 @@ class TelegramBot:
 
     @require_auth
     async def _cmd_sensors(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler para /sensors"""
+        """Handler para /sensors - Muestra info detallada de dispositivos y sensores"""
         user = update.effective_user
+        chat_id = str(update.effective_chat.id)
         logger.info(f"/sensors de {user.first_name}")
 
-        if self.mqtt_handler:
-            self.mqtt_handler.send_get_status()
+        # Obtener dispositivos autorizados
+        devices = self.firebase_manager.get_authorized_devices(chat_id)
+        if not devices:
             await update.message.reply_text(
-                "⏳ Consultando sensores...",
+                "No tienes dispositivos autorizados.",
                 reply_markup=self._get_keyboard()
             )
+            return
+
+        response = "📡 *INFORMACIÓN DE DISPOSITIVOS*\n"
+        response += "━" * 25 + "\n\n"
+
+        for device_id in devices:
+            # Obtener telemetria del MQTT handler
+            telemetry = self.mqtt_handler.get_device_telemetry(device_id) if self.mqtt_handler else None
+            device_info = self.device_manager.get_device_info(device_id) if self.device_manager else None
+
+            # Nombre y ubicacion
+            name = "Sin nombre"
+            location = ""
+            if device_info:
+                name = device_info.get("name") or device_info.get("location") or device_id
+                location = device_info.get("location", "")
+            if telemetry:
+                if telemetry.name:
+                    name = telemetry.name
+                if telemetry.location:
+                    location = telemetry.location
+
+            response += f"🏠 *{name}*\n"
+            if location and location != name:
+                response += f"📍 {location}\n"
+            response += f"🆔 `{device_id}`\n\n"
+
+            # Estado online/offline
+            is_online = device_info.get("is_online", False) if device_info else False
+            online_icon = "🟢" if is_online else "🔴"
+            online_text = "En línea" if is_online else "Desconectado"
+            response += f"{online_icon} Estado: *{online_text}*\n"
+
+            if is_online and telemetry:
+                # Señal WiFi
+                rssi = telemetry.wifi_rssi
+                if rssi >= -50:
+                    wifi_icon = "📶"
+                    wifi_text = "Excelente"
+                elif rssi >= -60:
+                    wifi_icon = "📶"
+                    wifi_text = "Buena"
+                elif rssi >= -70:
+                    wifi_icon = "📶"
+                    wifi_text = "Regular"
+                else:
+                    wifi_icon = "📶"
+                    wifi_text = "Débil"
+                response += f"{wifi_icon} WiFi: {wifi_text} ({rssi} dBm)\n"
+
+                # Memoria
+                heap_kb = telemetry.heap_free / 1024
+                heap_icon = "✅" if heap_kb > 50 else "⚠️"
+                response += f"{heap_icon} Memoria: {heap_kb:.1f} KB libres\n"
+
+                # Uptime
+                uptime_sec = telemetry.uptime_sec
+                if uptime_sec >= 86400:
+                    uptime_text = f"{uptime_sec // 86400}d {(uptime_sec % 86400) // 3600}h"
+                elif uptime_sec >= 3600:
+                    uptime_text = f"{uptime_sec // 3600}h {(uptime_sec % 3600) // 60}m"
+                else:
+                    uptime_text = f"{uptime_sec // 60}m"
+                response += f"⏱ Uptime: {uptime_text}\n"
+
+                # Sensores LoRa
+                lora_count = telemetry.lora_sensors_active
+                lora_icon = "📻" if lora_count > 0 else "📻"
+                response += f"{lora_icon} Sensores LoRa: *{lora_count}* activos\n"
+
+            # Estado de seguridad
+            if device_info:
+                is_armed = device_info.get("is_armed", False)
+                is_alarming = device_info.get("is_alarming", False)
+
+                if is_alarming:
+                    response += f"🚨 Alarma: *DISPARADA*\n"
+                elif is_armed:
+                    response += f"🔒 Sistema: *ARMADO*\n"
+                else:
+                    response += f"🔓 Sistema: *DESARMADO*\n"
+
+                # Bengala
+                bengala_mode = device_info.get("bengala_mode", 1)
+                bengala_enabled = device_info.get("bengala_enabled", True)
+                if bengala_enabled:
+                    mode_text = "Automático" if bengala_mode == 0 else "Con pregunta"
+                    response += f"🔥 Bengala: {mode_text}\n"
+                else:
+                    response += f"🔥 Bengala: Deshabilitada\n"
+
+            # Horario programado
+            if telemetry and telemetry.auto_schedule_enabled:
+                response += f"⏰ Horario: Activo\n"
+
+            response += "\n"
+
+        await update.message.reply_text(
+            response,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=self._get_keyboard()
+        )
 
     async def _sync_schedule_to_devices(self, chat_id: str):
         """Sincroniza los horarios del scheduler con ESP32 y Firebase"""
         # Obtener dispositivos autorizados para este chat
         devices = self.firebase_manager.get_authorized_devices(chat_id)
+
+        # Obtener índices de días para enviar al ESP32
+        days_indices = scheduler.get_days_indices()
 
         for device_id in devices:
             # 1. Enviar al ESP32
@@ -1147,10 +1311,11 @@ class TelegramBot:
                     scheduler.config.on_minute,
                     scheduler.config.off_hour,
                     scheduler.config.off_minute,
+                    days=days_indices,
                     device_id=device_id
                 )
 
-            # 2. Actualizar Firebase
+            # 2. Actualizar Firebase (con nombres de días para la App)
             if self.firebase_manager.is_available():
                 try:
                     schedule_path = f"Horarios/{chat_id}/devices/{device_id}"
@@ -1158,11 +1323,11 @@ class TelegramBot:
                         "activationTime": scheduler.config.format_on_time(),
                         "deactivationTime": scheduler.config.format_off_time(),
                         "enabled": scheduler.config.enabled,
-                        "days": [],  # Por ahora sin días específicos
+                        "days": scheduler.get_days(),  # Lista de nombres: ['Lunes', 'Martes', ...]
                         "lastUpdatedBy": "telegram"
                     }
                     self.firebase_manager.db.reference(schedule_path).set(schedule_data)
-                    logger.info(f"Horario sincronizado a Firebase: {schedule_path}")
+                    logger.info(f"Horario sincronizado a Firebase: {schedule_path} (días: {scheduler.format_days()})")
                 except Exception as e:
                     logger.error(f"Error sincronizando horario a Firebase: {e}")
 

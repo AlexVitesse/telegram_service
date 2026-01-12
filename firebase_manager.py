@@ -262,6 +262,7 @@ class FirebaseManager:
                 enabled = schedule_data.get('enabled', False)
                 activation_time = schedule_data.get('activationTime', '')
                 deactivation_time = schedule_data.get('deactivationTime', '')
+                days = schedule_data.get('days', [])  # Lista de días: ['Lunes', 'Martes', ...]
                 updated_by = schedule_data.get('lastUpdatedBy', '')
 
                 # Parsear horas (formato "HH:MM")
@@ -278,15 +279,31 @@ class FirebaseManager:
                     off_hour = int(parts_time[0])
                     off_minute = int(parts_time[1])
 
+                # Convertir nombres de días a índices (0=Domingo, 1=Lunes, ...)
+                day_name_to_index = {
+                    'Domingo': 0, 'Lunes': 1, 'Martes': 2, 'Miércoles': 3,
+                    'Jueves': 4, 'Viernes': 5, 'Sábado': 6
+                }
+                days_indices = []
+                for day_name in days:
+                    if day_name in day_name_to_index:
+                        days_indices.append(day_name_to_index[day_name])
+                days_indices.sort()
+
+                # Si no hay días configurados, usar todos
+                if not days_indices:
+                    days_indices = [0, 1, 2, 3, 4, 5, 6]
+
                 # Enviar al ESP32 (a cada dispositivo)
                 for dev_id in device_ids:
-                    logger.info(f"Comando de App: HORARIO para {dev_id} - Enabled={enabled}, On={on_hour:02d}:{on_minute:02d}, Off={off_hour:02d}:{off_minute:02d}")
+                    logger.info(f"Comando de App: HORARIO para {dev_id} - Enabled={enabled}, On={on_hour:02d}:{on_minute:02d}, Off={off_hour:02d}:{off_minute:02d}, Days={days_indices}")
                     self.mqtt_handler.send_set_schedule(
                         enabled=enabled,
                         on_hour=on_hour,
                         on_minute=on_minute,
                         off_hour=off_hour,
                         off_minute=off_minute,
+                        days=days_indices,
                         device_id=dev_id
                     )
 
@@ -297,8 +314,13 @@ class FirebaseManager:
                     scheduler.config.on_minute = on_minute
                     scheduler.config.off_hour = off_hour
                     scheduler.config.off_minute = off_minute
+                    # Sincronizar días
+                    if days:
+                        scheduler.config.days = days
+                    else:
+                        scheduler.config.days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
                     scheduler._save_config()
-                    logger.info(f"Scheduler local sincronizado desde App")
+                    logger.info(f"Scheduler local sincronizado desde App (días: {scheduler.format_days()})")
 
             except Exception as e:
                 logger.error(f"Error procesando horario: {e}")

@@ -1,9 +1,13 @@
 {
   "enabled": false,
-  "on_hour": 9,
+  "on_hour": 16,
   "on_minute": 0,
-  "off_hour": 19,
+  "off_hour": 22,
   "off_minute": 0,
+  "days": [
+    "S\u00e1bado",
+    "Domingo"
+  ],
   "notify_before_minutes": 5,
   "last_on_executed": "",
   "last_off_executed": ""

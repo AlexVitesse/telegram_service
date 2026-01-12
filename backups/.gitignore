@@ -1,0 +1,3 @@
+# Ignorar archivos de backup (contienen datos sensibles)
+*.json
+!.gitignore
