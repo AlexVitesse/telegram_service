@@ -34,3 +34,8 @@ alarm_service.log
 
 # Mac
 .DS_Store
+
+# Test/Simulator files (development only)
+test_mqtt_simulator.py
+test_components.py
+esp32_simulator.py
