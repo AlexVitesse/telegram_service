@@ -46,6 +46,10 @@ class MqttHandler:
         # Usado para evitar que telemetría vieja sobrescriba el estado
         self.last_arm_event_time: Dict[str, float] = {}
 
+        # Tiempo de salida (bomba) por dispositivo - usado para calcular gracia
+        # Se actualiza desde telemetría del ESP32
+        self.device_exit_time: Dict[str, int] = {}  # Default 60 segundos
+
         # Callbacks para eventos
         self._on_event_callback: Optional[Callable] = None
         self._on_telemetry_callback: Optional[Callable] = None
@@ -187,17 +191,24 @@ class MqttHandler:
                 if hasattr(self, '_on_reconnect_callback') and self._on_reconnect_callback:
                     self._on_reconnect_callback(telemetry.device_id)
 
+            # Actualizar tiempo de salida desde telemetría del ESP32
+            if telemetry.tiempo_bomba > 0:
+                self.device_exit_time[telemetry.device_id] = telemetry.tiempo_bomba
+
             # Verificar si hubo un evento de armado/desarmado reciente
             # Si lo hubo, no sobrescribir el estado de armado con telemetría vieja
+            # Usar el tiempo_bomba del dispositivo + 5 segundos de margen
             last_event_time = self.last_arm_event_time.get(telemetry.device_id, 0)
+            exit_time = self.device_exit_time.get(telemetry.device_id, 60)  # Default 60s
+            grace_period = exit_time + 5  # tiempo_bomba + 5 segundos de margen
             time_since_event = time.time() - last_event_time
-            should_update_armed_state = time_since_event > 5  # 5 segundos de gracia
+            should_update_armed_state = time_since_event > grace_period
 
             # Informar al DeviceManager sobre el estado de armado y otra info de telemetria
             if should_update_armed_state:
                 self.device_manager.set_armed_state(telemetry.device_id, telemetry.armed)
             else:
-                logger.debug(f"Ignorando estado de armado de telemetría (evento reciente hace {time_since_event:.1f}s)")
+                logger.debug(f"Ignorando estado de armado de telemetría (evento reciente hace {time_since_event:.1f}s, gracia={grace_period}s)")
 
             # Actualizar otros datos de telemetría (excepto is_armed si hay evento reciente)
             device_info = {
@@ -211,7 +222,21 @@ class MqttHandler:
             }
             if should_update_armed_state:
                 device_info["is_armed"] = telemetry.armed
+
+            # Solo actualizar bengala_enabled si no hay período de gracia activo
+            # Nota: 5 min de gracia porque ESP32 actual no envía bengala_enabled correctamente
+            device_state = self.device_manager.devices_state.get(telemetry.device_id, {})
+            bengala_enabled_set_time = device_state.get("bengala_enabled_set_time", 0)
+            if time.time() - bengala_enabled_set_time > 300:  # 5 minutos de gracia
+                device_info["bengala_enabled"] = telemetry.bengala_enabled
+
             self.device_manager.update_device_info(telemetry.device_id, device_info)
+
+            # Sincronizar modo bengala desde telemetría (el ESP32 tiene el valor real)
+            self.device_manager.sync_bengala_mode_from_telemetry(
+                telemetry.device_id,
+                telemetry.bengala_mode
+            )
 
             logger.debug(f"Telemetria de {telemetry.device_id}: armed={telemetry.armed}")
 
@@ -309,32 +334,50 @@ class MqttHandler:
     def process_pending_commands(self, device_id: str):
         """
         Procesa y envía comandos pendientes cuando un dispositivo vuelve online.
+        Busca también comandos encolados con ID alternativo (completo/truncado).
         Elimina comandos más antiguos que 24 horas.
         """
-        if device_id not in self._pending_commands:
-            return
+        # Buscar comandos pendientes tanto por ID exacto como por variantes
+        ids_to_check = [device_id]
+        truncated = self.truncate_device_id(device_id)
+        if truncated != device_id:
+            ids_to_check.append(truncated)
 
-        pending = self._pending_commands[device_id]
-        if not pending:
-            return
+        # Buscar IDs completos que empiecen con este ID truncado
+        for pending_id in list(self._pending_commands.keys()):
+            if pending_id.startswith(device_id) or device_id.startswith(pending_id):
+                if pending_id not in ids_to_check:
+                    ids_to_check.append(pending_id)
 
         now = time.time()
         max_age = 24 * 60 * 60  # 24 horas
+        total_sent = 0
 
-        # Filtrar comandos viejos
-        valid_commands = [(cmd, args, ts) for cmd, args, ts in pending if now - ts < max_age]
-        expired_count = len(pending) - len(valid_commands)
-        if expired_count > 0:
-            logger.info(f"Descartados {expired_count} comandos expirados para {device_id}")
+        for check_id in ids_to_check:
+            if check_id not in self._pending_commands:
+                continue
 
-        # Enviar comandos válidos
-        for cmd, args, ts in valid_commands:
-            logger.info(f"Enviando comando pendiente a {device_id}: {cmd}")
-            self.send_command(cmd, args, device_id, queue_if_offline=False)
+            pending = self._pending_commands[check_id]
+            if not pending:
+                continue
 
-        # Limpiar la cola
-        del self._pending_commands[device_id]
-        logger.info(f"Cola de comandos pendientes para {device_id} procesada. Enviados: {len(valid_commands)}")
+            # Filtrar comandos viejos
+            valid_commands = [(cmd, args, ts) for cmd, args, ts in pending if now - ts < max_age]
+            expired_count = len(pending) - len(valid_commands)
+            if expired_count > 0:
+                logger.info(f"Descartados {expired_count} comandos expirados para {check_id}")
+
+            # Enviar comandos válidos (usar device_id truncado para el envío)
+            for cmd, args, ts in valid_commands:
+                logger.info(f"Enviando comando pendiente a {device_id}: {cmd} (encolado para {check_id})")
+                self.send_command(cmd, args, device_id, queue_if_offline=False)
+                total_sent += 1
+
+            # Limpiar la cola
+            del self._pending_commands[check_id]
+
+        if total_sent > 0:
+            logger.info(f"Cola de comandos pendientes para {device_id} procesada. Enviados: {total_sent}")
 
     def get_pending_commands_count(self, device_id: str = None) -> int:
         """Obtiene el número de comandos pendientes para un dispositivo o todos."""
@@ -472,13 +515,25 @@ class MqttHandler:
     # ========================================
 
     def is_device_online(self, device_id: str = None, timeout_sec: int = 60) -> bool:
-        """Verifica si el dispositivo esta online"""
+        """Verifica si el dispositivo esta online (busca por ID completo y truncado)"""
         target = device_id or self.device_id
-        if not target or target not in self.last_telemetry_time:
+        if not target:
             return False
 
-        elapsed = time.time() - self.last_telemetry_time[target]
-        return elapsed < timeout_sec
+        # Buscar por ID completo
+        if target in self.last_telemetry_time:
+            elapsed = time.time() - self.last_telemetry_time[target]
+            if elapsed < timeout_sec:
+                return True
+
+        # Buscar por ID truncado (fallback)
+        truncated = self.truncate_device_id(target)
+        if truncated != target and truncated in self.last_telemetry_time:
+            elapsed = time.time() - self.last_telemetry_time[truncated]
+            if elapsed < timeout_sec:
+                return True
+
+        return False
 
     def get_online_devices(self, timeout_sec: int = 90) -> List[str]:
         """

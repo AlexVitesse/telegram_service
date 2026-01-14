@@ -49,6 +49,8 @@ class FirebaseManager:
 
     # TTL del caché en segundos (60 segundos)
     CACHE_TTL_SECONDS = 60
+    # Timeout para detectar listener desconectado (5 minutos)
+    LISTENER_TIMEOUT_SECONDS = 300
 
     def __init__(self):
         self.db = None
@@ -62,6 +64,12 @@ class FirebaseManager:
         self._cache_timestamp: float = 0  # Timestamp de cuando se cacheó
 
         self.mqtt_handler: Optional['MqttHandler'] = None
+
+        # Listener monitoring
+        self._last_listener_event_time: float = 0
+        self._listener_active: bool = False
+        self._devices_listener = None
+        self._schedules_listener = None
 
     def initialize(self) -> bool:
         """Inicializa la conexion con Firebase RTDB"""
@@ -105,24 +113,80 @@ class FirebaseManager:
             return
 
         self.mqtt_handler = mqtt_handler_instance
+        self._start_listeners()
+
+    def _start_listeners(self) -> None:
+        """Inicia los listeners de Firebase (interno)."""
+        # Cerrar listeners existentes si los hay
+        if self._devices_listener:
+            try:
+                self._devices_listener.close()
+            except:
+                pass
+        if self._schedules_listener:
+            try:
+                self._schedules_listener.close()
+            except:
+                pass
 
         # Listener para comandos de dispositivos (ESP32)
         devices_ref = self.db.reference('ESP32')
         logger.info("Iniciando listener de comandos de la App en Firebase Realtime Database...")
-        devices_ref.listen(self._app_command_listener)
+        self._devices_listener = devices_ref.listen(self._app_command_listener)
         logger.info("Listener de comandos de la App iniciado.")
 
         # Listener para horarios programados
         schedules_ref = self.db.reference('Horarios')
         logger.info("Iniciando listener de horarios en Firebase...")
-        schedules_ref.listen(self._schedule_listener)
+        self._schedules_listener = schedules_ref.listen(self._schedule_listener)
         logger.info("Listener de horarios iniciado.")
+
+        # Marcar como activo
+        self._listener_active = True
+        self._last_listener_event_time = time.time()
+
+    def check_listener_health(self) -> bool:
+        """
+        Verifica si los listeners de Firebase están activos.
+        Retorna True si están saludables, False si necesitan reconexión.
+        """
+        if not self._listener_active:
+            return False
+
+        # Si no se ha recibido ningún evento en LISTENER_TIMEOUT_SECONDS, reconectar
+        time_since_last_event = time.time() - self._last_listener_event_time
+        if time_since_last_event > self.LISTENER_TIMEOUT_SECONDS:
+            logger.warning(f"Firebase listener sin eventos por {time_since_last_event:.0f}s - reconectando...")
+            return False
+
+        return True
+
+    def reconnect_listeners(self) -> bool:
+        """
+        Reconecta los listeners de Firebase.
+        Retorna True si la reconexión fue exitosa.
+        """
+        if not self.is_available() or not self.mqtt_handler:
+            logger.error("No se puede reconectar: Firebase o MQTT Handler no disponible")
+            return False
+
+        try:
+            logger.info("Reconectando listeners de Firebase...")
+            self._listener_active = False
+            self._start_listeners()
+            return True
+        except Exception as e:
+            logger.error(f"Error reconectando listeners de Firebase: {e}")
+            return False
 
     def _app_command_listener(self, event) -> None:
         """
         Callback para procesar eventos de Firebase (comandos desde la app).
         Maneja tanto eventos 'put' con path específico como eventos 'patch' con diccionario.
         """
+        # Actualizar timestamp del último evento recibido
+        self._last_listener_event_time = time.time()
+
         # Invalidar el caché de dispositivos en cualquier cambio para recargar los permisos.
         self.invalidate_cache()
 
@@ -195,6 +259,9 @@ class FirebaseManager:
         Path: /Horarios/{userTelegramId}/devices/{deviceMac}
         Data: {activationTime: "22:00", deactivationTime: "07:00", enabled: true, days: [...]}
         """
+        # Actualizar timestamp del último evento recibido
+        self._last_listener_event_time = time.time()
+
         if not self.mqtt_handler:
             return
 
@@ -330,23 +397,55 @@ class FirebaseManager:
         Actualiza el estado de un dispositivo en Firebase.
         - is_armed -> /ESP32/{device_id}/Estado (boolean directo para compatibilidad con App)
         - is_alarming -> /ESP32/{device_id}/Alarming (boolean)
+
+        Busca el dispositivo tanto por ID exacto como por variantes (truncado/completo).
+        Actualiza TODAS las variantes encontradas para mantener sincronización con la App.
+        Solo actualiza si al menos una variante tiene Telegram_ID configurado.
         """
         if not self.is_available():
             logger.error("Firebase no está disponible para actualizar el estado del dispositivo.")
             return
 
         try:
-            device_ref = self.db.reference(f'ESP32/{device_id}')
+            all_devices = self._get_all_devices()
+            if not all_devices:
+                logger.warning(f"[{device_id}] No hay dispositivos en Firebase")
+                return
 
-            # Escribir Estado como boolean directo (compatibilidad con App Ionic)
-            if "is_armed" in state_payload:
-                device_ref.child('Estado').set(state_payload["is_armed"])
-                logger.info(f"[{device_id}] Estado actualizado en Firebase: {state_payload['is_armed']}")
+            # Buscar todas las variantes del device_id (truncado y completo)
+            device_ids_to_update = []
+            has_telegram_id = False
 
-            # Escribir Alarming como boolean
-            if "is_alarming" in state_payload:
-                device_ref.child('Alarming').set(state_payload["is_alarming"])
-                logger.info(f"[{device_id}] Alarming actualizado en Firebase: {state_payload['is_alarming']}")
+            for dev_id, dev_data in all_devices.items():
+                if not isinstance(dev_data, dict):
+                    continue
+                # Verificar si es el mismo dispositivo (uno es prefijo del otro)
+                if dev_id.startswith(device_id) or device_id.startswith(dev_id):
+                    device_ids_to_update.append(dev_id)
+                    if dev_data.get('Telegram_ID'):
+                        has_telegram_id = True
+
+            if not device_ids_to_update:
+                logger.warning(f"[{device_id}] Dispositivo no encontrado en Firebase")
+                return
+
+            if not has_telegram_id:
+                logger.warning(f"[{device_id}] Ninguna variante tiene Telegram_ID - ignorando actualización")
+                return
+
+            # Actualizar todas las variantes encontradas
+            for dev_id in device_ids_to_update:
+                device_ref = self.db.reference(f'ESP32/{dev_id}')
+
+                # Escribir Estado como boolean directo (compatibilidad con App Ionic)
+                if "is_armed" in state_payload:
+                    device_ref.child('Estado').set(state_payload["is_armed"])
+                    logger.info(f"[{dev_id}] Estado actualizado en Firebase: {state_payload['is_armed']}")
+
+                # Escribir Alarming como boolean
+                if "is_alarming" in state_payload:
+                    device_ref.child('Alarming').set(state_payload["is_alarming"])
+                    logger.info(f"[{dev_id}] Alarming actualizado en Firebase: {state_payload['is_alarming']}")
 
         except Exception as e:
             logger.error(f"Error al actualizar el estado de {device_id} en Firebase: {e}")
@@ -387,6 +486,7 @@ class FirebaseManager:
         """
         Obtiene la lista de device_ids autorizados para un chat_id de Telegram.
         Busca en /ESP32 todos los dispositivos donde Telegram_ID o Group_ID coincida.
+        Filtra duplicados (IDs truncados vs completos) retornando solo el más corto (truncado).
         """
         if not self.is_available():
             return []
@@ -409,8 +509,27 @@ class FirebaseManager:
                 if telegram_id == chat_id_str or group_id == chat_id_str:
                     authorized.append(device_id)
 
-            logger.debug(f"Dispositivos autorizados para chat {chat_id}: {authorized}")
-            return authorized
+            # Filtrar duplicados: si hay ID truncado y completo, quedarse solo con el truncado
+            # Ejemplo: ['6C_C8_40_4F_C7', '6C_C8_40_4F_C7_B2'] -> ['6C_C8_40_4F_C7']
+            unique_devices = []
+            for dev_id in authorized:
+                # Verificar si este ID es un prefijo de otro (es el truncado)
+                is_truncated = any(
+                    other_id != dev_id and other_id.startswith(dev_id)
+                    for other_id in authorized
+                )
+                # Verificar si otro ID es prefijo de este (este es el completo)
+                has_truncated_version = any(
+                    other_id != dev_id and dev_id.startswith(other_id)
+                    for other_id in authorized
+                )
+
+                # Solo agregar si es el truncado o si no tiene versión truncada
+                if is_truncated or not has_truncated_version:
+                    unique_devices.append(dev_id)
+
+            logger.debug(f"Dispositivos autorizados para chat {chat_id}: {unique_devices}")
+            return unique_devices
 
         except Exception as e:
             logger.error(f"Error obteniendo dispositivos autorizados: {e}")
@@ -419,6 +538,7 @@ class FirebaseManager:
     def get_authorized_chats(self, device_id: str) -> List[str]:
         """
         Obtiene la lista de chat_ids autorizados para un dispositivo.
+        Busca en todas las variantes del device_id (truncado/completo).
         Retorna Telegram_ID y Group_ID si existen.
         """
         if not self.is_available():
@@ -426,40 +546,51 @@ class FirebaseManager:
 
         try:
             all_devices = self._get_all_devices()
-            if not all_devices or device_id not in all_devices:
+            if not all_devices:
                 return []
 
-            device_data = all_devices.get(device_id, {})
-            if not isinstance(device_data, dict):
-                return []
+            # Buscar en todas las variantes del device_id
+            chats = set()  # Usar set para evitar duplicados
 
-            chats = []
-            telegram_id = device_data.get('Telegram_ID')
-            group_id = device_data.get('Group_ID')
+            for dev_id, dev_data in all_devices.items():
+                if not isinstance(dev_data, dict):
+                    continue
+                # Verificar si es el mismo dispositivo (uno es prefijo del otro)
+                if dev_id.startswith(device_id) or device_id.startswith(dev_id):
+                    telegram_id = dev_data.get('Telegram_ID')
+                    group_id = dev_data.get('Group_ID')
 
-            if telegram_id:
-                chats.append(str(telegram_id))
-            if group_id:
-                chats.append(str(group_id))
+                    if telegram_id:
+                        chats.add(str(telegram_id))
+                    if group_id:
+                        chats.add(str(group_id))
 
-            return chats
+            return list(chats)
 
         except Exception as e:
             logger.error(f"Error obteniendo chats autorizados para {device_id}: {e}")
             return []
 
     def get_device_location(self, device_id: str) -> Optional[str]:
-        """Obtiene la ubicación/nombre de un dispositivo"""
+        """Obtiene la ubicación/nombre de un dispositivo. Busca en todas las variantes."""
         if not self.is_available():
             return None
 
         try:
             all_devices = self._get_all_devices()
-            if not all_devices or device_id not in all_devices:
+            if not all_devices:
                 return None
 
-            device_data = all_devices.get(device_id, {})
-            return device_data.get('Nombre', 'Desconocido')
+            # Buscar en todas las variantes del device_id
+            for dev_id, dev_data in all_devices.items():
+                if not isinstance(dev_data, dict):
+                    continue
+                if dev_id.startswith(device_id) or device_id.startswith(dev_id):
+                    nombre = dev_data.get('Nombre')
+                    if nombre:
+                        return nombre
+
+            return 'Desconocido'
 
         except Exception as e:
             logger.error(f"Error obteniendo ubicación de {device_id}: {e}")

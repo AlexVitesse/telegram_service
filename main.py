@@ -55,6 +55,7 @@ class AlarmBridgeService:
         self.firebase_available = False
         self._connection_monitor_task = None
         self._alarm_reminder_task = None
+        self._firebase_monitor_task = None
 
         # Registrar callbacks de MQTT
         self._setup_mqtt_callbacks()
@@ -195,6 +196,7 @@ class AlarmBridgeService:
         """
         Tarea que envía recordatorios periódicos cuando hay alarmas activas.
         Solo aplica cuando is_alarming=True (alarma sonando), NO cuando se pierde conexión.
+        Los recordatorios solo se envían a chats privados, NO a grupos.
         """
         # Esperar 30 segundos antes de empezar
         await asyncio.sleep(30)
@@ -215,51 +217,65 @@ class AlarmBridgeService:
 
                     logger.info(f"Enviando recordatorio de alarma activa para {device_id} (bengala_mode={bengala_mode})")
 
-                    # Mensaje base para grupos (siempre sin pregunta de bengala)
-                    notification_message = (
-                        "🚨 *ALARMA SIGUE ACTIVA*\n\n"
-                        f"📍 *{display_name}*\n\n"
-                        "Contactar con usuario."
-                    )
-
                     # Solo preguntar por bengala si está en modo pregunta (bengala_mode=1)
                     if bengala_mode == 1:
-                        # Modo pregunta: incluir pregunta de bengala
+                        # Modo pregunta: incluir botones de bengala
                         message = (
                             "🚨 *ALARMA SIGUE ACTIVA*\n\n"
-                            f"📍 *{display_name}*\n\n"
-                            "La sirena continúa sonando.\n"
-                            "🔥 ¿Disparar bengala?"
+                            f"📍 *{display_name}*"
                         )
                         keyboard = InlineKeyboardMarkup([
                             [
-                                InlineKeyboardButton("🔥 Disparar bengala", callback_data="bengala_confirm"),
-                                InlineKeyboardButton("🔒 Dejar Armado", callback_data="bengala_cancel")
+                                InlineKeyboardButton("🔥 Disparar bengala", callback_data="bengala_confirm")
                             ],
                             [
+                                InlineKeyboardButton("🔒 Dejar armado", callback_data="bengala_cancel"),
                                 InlineKeyboardButton("🔓 Desactivar sistema", callback_data="disarm_all")
                             ]
                         ])
-                        self._schedule_telegram_broadcast_with_buttons(device_id, message, keyboard, notification_message)
                     else:
-                        # Modo automático (bengala_mode=0): solo recordatorio sin pregunta de bengala
+                        # Modo automático (bengala_mode=0): solo botones de dejar armado y desactivar
                         message = (
                             "🚨 *ALARMA SIGUE ACTIVA*\n\n"
-                            f"📍 *{display_name}*\n\n"
-                            "La sirena continúa sonando."
+                            f"📍 *{display_name}*"
                         )
                         keyboard = InlineKeyboardMarkup([
                             [
+                                InlineKeyboardButton("🔒 Dejar armado", callback_data="bengala_cancel"),
                                 InlineKeyboardButton("🔓 Desactivar sistema", callback_data="disarm_all")
                             ]
                         ])
-                        self._schedule_telegram_broadcast_with_buttons(device_id, message, keyboard, notification_message)
+
+                    # Enviar solo a chats privados (no a grupos)
+                    self._schedule_telegram_reminder_private_only(device_id, message, keyboard)
 
             except Exception as e:
                 logger.error(f"Error enviando recordatorios de alarma: {e}")
 
             # Verificar cada 15 segundos (el interval real de 60s lo controla get_alarming_devices)
             await asyncio.sleep(15)
+
+    async def _monitor_firebase_listener(self):
+        """Tarea que monitorea la salud del listener de Firebase y reconecta si es necesario"""
+        # Esperar 2 minutos antes de empezar a monitorear
+        await asyncio.sleep(120)
+
+        while self.running:
+            try:
+                if self.firebase_available:
+                    # Verificar si el listener está saludable
+                    if not firebase_manager.check_listener_health():
+                        logger.warning("Listener de Firebase desconectado - reconectando...")
+                        if firebase_manager.reconnect_listeners():
+                            logger.info("Listener de Firebase reconectado exitosamente")
+                        else:
+                            logger.error("Fallo la reconexión del listener de Firebase")
+
+            except Exception as e:
+                logger.error(f"Error monitoreando listener de Firebase: {e}")
+
+            # Verificar cada 60 segundos
+            await asyncio.sleep(60)
 
     def _get_authorized_chats(self, device_id: str):
         """
@@ -308,6 +324,22 @@ class AlarmBridgeService:
                 )
             else:
                 # A chats privados: mensaje completo con botones
+                asyncio.run_coroutine_threadsafe(
+                    self.telegram.send_message(chat_id, message, "Markdown", reply_markup=reply_markup),
+                    self._loop
+                )
+
+    def _schedule_telegram_reminder_private_only(self, device_id: str, message: str, reply_markup):
+        """Envia recordatorio solo a chats privados (no a grupos)"""
+        if not self._loop or not self.telegram.is_running():
+            return
+
+        chat_ids = self._get_authorized_chats(device_id)
+
+        for chat_id in chat_ids:
+            # Solo enviar a chats privados (ID positivo)
+            is_group = int(chat_id) < 0
+            if not is_group:
                 asyncio.run_coroutine_threadsafe(
                     self.telegram.send_message(chat_id, message, "Markdown", reply_markup=reply_markup),
                     self._loop
@@ -375,6 +407,12 @@ class AlarmBridgeService:
             self._send_alarm_reminders()
         )
 
+        # Iniciar tarea de monitoreo de listener de Firebase
+        if self.firebase_available:
+            self._firebase_monitor_task = asyncio.create_task(
+                self._monitor_firebase_listener()
+            )
+
         logger.info("Servicio iniciado correctamente")
         logger.info(f"Broker MQTT: {config.mqtt.broker}:{config.mqtt.port}")
         logger.info(f"TLS: {'Habilitado' if config.mqtt.use_tls else 'Deshabilitado'}")
@@ -403,6 +441,14 @@ class AlarmBridgeService:
             self._alarm_reminder_task.cancel()
             try:
                 await self._alarm_reminder_task
+            except asyncio.CancelledError:
+                pass
+
+        # Cancelar tarea de monitoreo de Firebase
+        if self._firebase_monitor_task:
+            self._firebase_monitor_task.cancel()
+            try:
+                await self._firebase_monitor_task
             except asyncio.CancelledError:
                 pass
 

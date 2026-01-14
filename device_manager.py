@@ -56,10 +56,14 @@ class DeviceManager:
             device_data["name"] = info["name"]
         if "location" in info:
             device_data["location"] = info["location"]
-        
+
         # Actualizar el estado también desde update_device_info si viene en la telemetría
         if "is_armed" in info:
             self.set_armed_state(device_id, info["is_armed"])
+
+        # Actualizar estado de bengala desde telemetría
+        if "bengala_enabled" in info:
+            device_data["bengala_enabled"] = info["bengala_enabled"]
 
         logger.debug(f"Info actualizada para {device_id}: {device_data}")
 
@@ -213,6 +217,8 @@ class DeviceManager:
         """
         device_data = self._get_device_data(device_id)
         device_data["bengala_mode"] = mode
+        # Registrar timestamp para período de gracia (no sobrescribir desde telemetría por 10s)
+        device_data["bengala_mode_set_time"] = time.time()
         logger.info(f"Modo bengala de {device_id} establecido a: {mode} ({'automático' if mode == 0 else 'pregunta'})")
 
         # Guardar en Firebase para persistencia
@@ -223,9 +229,19 @@ class DeviceManager:
         """
         Sincroniza el modo de bengala desde la telemetría del ESP32.
         Esto asegura que el servidor tenga el mismo modo que el dispositivo.
+        Respeta un período de gracia después de cambios locales para evitar sobrescribir.
         """
         device_data = self._get_device_data(device_id)
         current_mode = device_data.get("bengala_mode", 1)
+
+        # Verificar período de gracia (5 minutos después de un cambio local)
+        # Nota: Aumentado a 5 min porque ESP32 actual no envía bengala_mode en telemetría,
+        # Python usa default=1 (pregunta) y sobrescribe. Reducir a 10s cuando ESP32 esté actualizado.
+        last_set_time = device_data.get("bengala_mode_set_time", 0)
+        time_since_set = time.time() - last_set_time
+        if time_since_set < 300:  # 5 minutos de gracia
+            logger.debug(f"Ignorando sync bengala_mode de telemetría (cambio reciente hace {time_since_set:.1f}s)")
+            return
 
         if current_mode != telemetry_mode:
             logger.info(f"Sincronizando modo bengala de {device_id}: servidor={current_mode} -> ESP32={telemetry_mode}")
@@ -243,4 +259,6 @@ class DeviceManager:
         """Establece si la bengala está habilitada para un dispositivo."""
         device_data = self._get_device_data(device_id)
         device_data["bengala_enabled"] = enabled
+        # Registrar timestamp para período de gracia
+        device_data["bengala_enabled_set_time"] = time.time()
         logger.info(f"Bengala de {device_id} {'habilitada' if enabled else 'deshabilitada'}")

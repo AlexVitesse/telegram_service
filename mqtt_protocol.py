@@ -116,11 +116,14 @@ class MqttTelemetry:
     armed: bool
     alarm_active: bool
     bengala_enabled: bool
+    bengala_mode: int  # 0=automático, 1=con pregunta
     wifi_rssi: int
     heap_free: int
     uptime_sec: int
     lora_sensors_active: int
     auto_schedule_enabled: bool
+    tiempo_bomba: int = 60  # Tiempo de salida en segundos (default 60)
+    tiempo_pre: int = 60    # Tiempo de pre-alarma en segundos (default 60)
     location: str = ""
     name: str = ""
 
@@ -132,12 +135,15 @@ class MqttTelemetry:
             timestamp=d.get("timestamp", 0),
             armed=d.get("armed", False),
             alarm_active=d.get("alarm_active", False),
-            bengala_enabled=d.get("bengala_enabled", False),
+            bengala_enabled=d.get("bengala_enabled", True),  # Default True - bengala habilitada por defecto
+            bengala_mode=d.get("bengala_mode", 1),  # Default 1 = modo pregunta
             wifi_rssi=d.get("wifi_rssi", 0),
             heap_free=d.get("heap_free", 0),
             uptime_sec=d.get("uptime_sec", 0),
             lora_sensors_active=d.get("lora_sensors_active", 0),
             auto_schedule_enabled=d.get("auto_schedule_enabled", False),
+            tiempo_bomba=d.get("tiempo_bomba", 60),  # Tiempo de salida desde ESP32
+            tiempo_pre=d.get("tiempo_pre", 60),      # Tiempo de pre-alarma desde ESP32
             location=d.get("location", ""),
             name=d.get("name", "")
         )
