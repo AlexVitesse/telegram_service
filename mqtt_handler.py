@@ -238,6 +238,10 @@ class MqttHandler:
                 telemetry.bengala_mode
             )
 
+            # ✅ NUEVO: Guardar telemetría en Firebase para que la App pueda leerla
+            if self.firebase_manager.is_available():
+                self._save_telemetry_to_firebase(telemetry)
+
             logger.debug(f"Telemetria de {telemetry.device_id}: armed={telemetry.armed}")
 
             if self._on_telemetry_callback:
@@ -555,6 +559,36 @@ class MqttHandler:
     def get_device_location(self) -> str:
         """Obtiene la ubicacion del dispositivo"""
         return self.device_location
+
+    def _save_telemetry_to_firebase(self, telemetry: MqttTelemetry):
+        """
+        Guarda la telemetría del dispositivo en Firebase para que la App pueda leerla.
+        Ruta: ESP32/{device_id}/Telemetry/
+        """
+        try:
+            # Usar ID truncado para consistencia con la App
+            device_id = self.truncate_device_id(telemetry.device_id)
+
+            telemetry_data = {
+                "wifi_rssi": telemetry.wifi_rssi,
+                "heap_free": telemetry.heap_free,
+                "lora_sensors_active": telemetry.lora_sensors_active,
+                "uptime_sec": telemetry.uptime_sec,
+                "armed": telemetry.armed,
+                "bengala_enabled": telemetry.bengala_enabled,
+                "bengala_mode": telemetry.bengala_mode,
+                "auto_schedule_enabled": telemetry.auto_schedule_enabled,
+                "tiempo_bomba": telemetry.tiempo_bomba,
+                "tiempo_pre": telemetry.tiempo_pre,
+                "timestamp": int(time.time()),
+            }
+
+            path = f"ESP32/{device_id}/Telemetry"
+            self.firebase_manager.update_data(path, telemetry_data)
+            logger.debug(f"Telemetría guardada en Firebase para {device_id}")
+
+        except Exception as e:
+            logger.error(f"Error guardando telemetría en Firebase: {e}")
 
     def format_event_message(self, event: MqttEvent) -> str:
         """Formatea un evento para enviar por Telegram"""

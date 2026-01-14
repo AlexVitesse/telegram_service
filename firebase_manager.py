@@ -102,7 +102,31 @@ class FirebaseManager:
     def is_available(self) -> bool:
         """Verifica si Firebase esta disponible y conectado"""
         return self.initialized and self.db is not None
-    
+
+    def update_data(self, path: str, data: Dict[str, Any]) -> bool:
+        """
+        Actualiza datos en Firebase en la ruta especificada.
+        Usa update() para no sobrescribir otros campos existentes.
+
+        Args:
+            path: Ruta en Firebase (ej: "ESP32/device_id/Telemetry")
+            data: Diccionario con los datos a actualizar
+
+        Returns:
+            True si se actualizó correctamente, False en caso contrario
+        """
+        if not self.is_available():
+            logger.warning("Firebase no disponible para update_data")
+            return False
+
+        try:
+            ref = self.db.reference(path)
+            ref.update(data)
+            return True
+        except Exception as e:
+            logger.error(f"Error en update_data({path}): {e}")
+            return False
+
     def start_app_command_listener(self, mqtt_handler_instance: 'MqttHandler') -> None:
         """
         Inicia un listener en el nodo /ESP32 para capturar comandos
