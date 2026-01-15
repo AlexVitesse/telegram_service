@@ -203,16 +203,84 @@ class FirebaseManager:
             logger.error(f"Error reconectando listeners de Firebase: {e}")
             return False
 
+    def _update_cache_from_event(self, event) -> None:
+        """
+        Actualiza el cache local desde un evento del listener de Firebase.
+        Esto evita consultas .get() innecesarias ya que el listener mantiene
+        el cache actualizado en tiempo real.
+        """
+        try:
+            if event.path == "/" and isinstance(event.data, dict):
+                # Evento inicial o reset completo - reemplazar todo el cache
+                self._all_devices_cache = event.data
+                self._cache_timestamp = time.time()
+                logger.debug(f"Cache actualizado desde listener (snapshot completo): {len(event.data)} dispositivos")
+
+            elif event.path == "/" and event.data is None:
+                # Todos los datos fueron eliminados
+                self._all_devices_cache = {}
+                self._cache_timestamp = time.time()
+                logger.debug("Cache vaciado desde listener (datos eliminados)")
+
+            elif self._all_devices_cache is not None:
+                # Actualización parcial - modificar el cache existente
+                parts = event.path.split('/')
+                if len(parts) >= 2 and parts[1]:
+                    device_id = parts[1]
+
+                    if event.data is None:
+                        # Dispositivo o campo eliminado
+                        if len(parts) == 2:
+                            # Dispositivo completo eliminado
+                            if device_id in self._all_devices_cache:
+                                del self._all_devices_cache[device_id]
+                                logger.debug(f"Cache: dispositivo {device_id} eliminado")
+                        elif len(parts) >= 3:
+                            # Campo específico eliminado
+                            field = parts[2]
+                            if device_id in self._all_devices_cache and isinstance(self._all_devices_cache[device_id], dict):
+                                if field in self._all_devices_cache[device_id]:
+                                    del self._all_devices_cache[device_id][field]
+                                    logger.debug(f"Cache: campo {field} eliminado de {device_id}")
+
+                    elif len(parts) == 2:
+                        # Actualización de dispositivo completo
+                        if isinstance(event.data, dict):
+                            self._all_devices_cache[device_id] = event.data
+                            logger.debug(f"Cache: dispositivo {device_id} actualizado")
+
+                    elif len(parts) >= 3:
+                        # Actualización de campo específico
+                        field = parts[2]
+                        if device_id not in self._all_devices_cache:
+                            self._all_devices_cache[device_id] = {}
+                        if isinstance(self._all_devices_cache[device_id], dict):
+                            self._all_devices_cache[device_id][field] = event.data
+                            logger.debug(f"Cache: {device_id}.{field} = {event.data}")
+
+                    self._cache_timestamp = time.time()
+
+            else:
+                # No hay cache, se cargará en la próxima consulta
+                logger.debug("Cache no inicializado, se cargará en próxima consulta")
+
+        except Exception as e:
+            logger.error(f"Error actualizando cache desde evento: {e}")
+            # En caso de error, invalidar cache para forzar recarga
+            self._all_devices_cache = None
+            self._cache_timestamp = 0
+
     def _app_command_listener(self, event) -> None:
         """
         Callback para procesar eventos de Firebase (comandos desde la app).
         Maneja tanto eventos 'put' con path específico como eventos 'patch' con diccionario.
+        Actualiza el cache local en lugar de invalidarlo para evitar consultas innecesarias.
         """
         # Actualizar timestamp del último evento recibido
         self._last_listener_event_time = time.time()
 
-        # Invalidar el caché de dispositivos en cualquier cambio para recargar los permisos.
-        self.invalidate_cache()
+        # Actualizar cache desde el listener en lugar de invalidar
+        self._update_cache_from_event(event)
 
         if not self.mqtt_handler:
             logger.warning("MQTT Handler no está disponible para procesar comandos de la App.")
@@ -276,6 +344,26 @@ class FirebaseManager:
                         seconds = int(tiempo_bomba)
                         logger.info(f"Comando de App (patch): TIEMPO DE SALIDA {seconds}s para {device_id}")
                         self.mqtt_handler.send_set_exit_time(seconds=seconds, device_id=device_id)
+
+                # Procesar ModoBengala si viene en el diccionario
+                if 'ModoBengala' in event.data:
+                    modo = event.data['ModoBengala']
+                    if modo == 0:
+                        logger.info(f"Comando de App (patch): MODO BENGALA AUTOMATICO para {device_id}")
+                        self.mqtt_handler.send_command(cmd=Command.SET_BENGALA_MODE.value, args={"mode": 0}, device_id=device_id)
+                    elif modo == 1:
+                        logger.info(f"Comando de App (patch): MODO BENGALA PREGUNTA para {device_id}")
+                        self.mqtt_handler.send_command(cmd=Command.SET_BENGALA_MODE.value, args={"mode": 1}, device_id=device_id)
+
+                # Procesar BengalaHab si viene en el diccionario
+                if 'BengalaHab' in event.data:
+                    habilitada = event.data['BengalaHab']
+                    if habilitada is True:
+                        logger.info(f"Comando de App (patch): HABILITAR BENGALA para {device_id}")
+                        self.mqtt_handler.send_command(cmd=Command.ACTIVATE_BENGALA.value, device_id=device_id)
+                    elif habilitada is False:
+                        logger.info(f"Comando de App (patch): DESHABILITAR BENGALA para {device_id}")
+                        self.mqtt_handler.send_command(cmd=Command.DEACTIVATE_BENGALA.value, device_id=device_id)
 
     def _schedule_listener(self, event) -> None:
         """
@@ -475,9 +563,17 @@ class FirebaseManager:
             logger.error(f"Error al actualizar el estado de {device_id} en Firebase: {e}")
 
     def _is_cache_valid(self) -> bool:
-        """Verifica si el caché sigue siendo válido (no expiró)"""
+        """
+        Verifica si el caché sigue siendo válido.
+        Si el listener está activo, el cache siempre es válido (se actualiza por push).
+        Si el listener no está activo, usa TTL como fallback.
+        """
         if not self._all_devices_cache:
             return False
+        # Si el listener está activo, el cache siempre es válido
+        if self._listener_active:
+            return True
+        # Fallback a TTL si el listener no está activo
         elapsed = time.time() - self._cache_timestamp
         return elapsed < self.CACHE_TTL_SECONDS
 
@@ -488,19 +584,25 @@ class FirebaseManager:
         logger.debug("Caché de dispositivos invalidado manualmente")
 
     def _get_all_devices(self) -> Optional[Dict[str, Any]]:
-        """Obtiene todos los dispositivos del nodo /ESP32 con caché TTL"""
-        # Verificar si el caché es válido
+        """
+        Obtiene todos los dispositivos del nodo /ESP32.
+        Usa cache actualizado por el listener si está activo.
+        Solo hace .get() a Firebase si el cache no está inicializado o el listener no está activo.
+        """
+        # Verificar si el caché es válido (listener activo o dentro de TTL)
         if self._is_cache_valid():
+            logger.debug(f"Usando cache (listener={'activo' if self._listener_active else 'inactivo'})")
             return self._all_devices_cache
 
         if not self.is_available():
             return None
 
         try:
+            # Solo llega aquí si: no hay cache Y (listener inactivo O cache expirado)
+            logger.info("Consultando Firebase .get() - cache no disponible o listener inactivo")
             ref = self.db.reference('ESP32')
             self._all_devices_cache = ref.get()
             self._cache_timestamp = time.time()
-            logger.debug(f"Caché de dispositivos actualizado (TTL: {self.CACHE_TTL_SECONDS}s)")
             return self._all_devices_cache
         except Exception as e:
             logger.error(f"Error obteniendo todos los dispositivos de RTDB: {e}")
@@ -684,8 +786,26 @@ class FirebaseManager:
         return "📋 Lista de usuarios no disponible en esta versión."
 
     def add_pending_request(self, chat_id: str, name: str, device_id: str):
-        """Agrega solicitud pendiente (stub - no hace nada)"""
-        logger.info(f"Solicitud pendiente stub: {name} ({chat_id})")
+        """
+        Agrega una solicitud de acceso pendiente en Firebase.
+        Se guarda en /PendingRequests/{chat_id} con timestamp para expiración.
+        Las solicitudes expiran después de 5 minutos.
+        """
+        if not self.is_available():
+            logger.warning("Firebase no disponible para agregar solicitud pendiente")
+            return
+
+        try:
+            pending_ref = self.db.reference(f'PendingRequests/{chat_id}')
+            pending_ref.set({
+                'name': name,
+                'device_id': device_id,
+                'timestamp': int(time.time()),
+                'expires_at': int(time.time()) + 300  # 5 minutos
+            })
+            logger.info(f"Solicitud pendiente guardada: {name} ({chat_id}) -> {device_id}")
+        except Exception as e:
+            logger.error(f"Error guardando solicitud pendiente: {e}")
 
     def get_all_admin_chat_ids(self) -> List[str]:
         """Obtiene todos los chat_ids de admins (stub - retorna todos los Telegram_IDs)"""
@@ -707,8 +827,34 @@ class FirebaseManager:
             return []
 
     def get_pending_request(self, chat_id: str) -> Optional[Dict[str, Any]]:
-        """Obtiene solicitud pendiente (stub - retorna None)"""
-        return None
+        """
+        Obtiene una solicitud de acceso pendiente de Firebase.
+        Retorna None si no existe o si ha expirado (> 5 minutos).
+        Si está expirada, la elimina automáticamente.
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            pending_ref = self.db.reference(f'PendingRequests/{chat_id}')
+            pending_data = pending_ref.get()
+
+            if not pending_data:
+                return None
+
+            # Verificar si ha expirado
+            expires_at = pending_data.get('expires_at', 0)
+            if time.time() > expires_at:
+                # Solicitud expirada, eliminarla
+                pending_ref.delete()
+                logger.info(f"Solicitud pendiente expirada y eliminada: {chat_id}")
+                return None
+
+            return pending_data
+
+        except Exception as e:
+            logger.error(f"Error obteniendo solicitud pendiente: {e}")
+            return None
 
     def register_user(self, chat_id: str, name: str):
         """Registra un usuario (stub - no hace nada)"""
@@ -718,31 +864,58 @@ class FirebaseManager:
         """Agrega dispositivo autorizado a usuario (stub - no hace nada)"""
         logger.info(f"Autorización stub: {chat_id} -> {device_id}")
 
-    def add_authorized_chat(self, device_id: str, chat_id: str):
-        """Agrega un chat autorizado a un dispositivo"""
+    def add_authorized_chat(self, device_id: str, chat_id: str) -> bool:
+        """
+        Agrega un chat autorizado a un dispositivo.
+        Busca coincidencias parciales del device_id (truncado/completo).
+        Retorna True si se agregó correctamente.
+        """
         if not self.is_available():
             logger.warning("Firebase no disponible para agregar chat autorizado")
-            return
-        try:
-            device_ref = self.db.reference(f'ESP32/{device_id}')
-            device_data = device_ref.get()
+            return False
 
-            if device_data:
+        try:
+            all_devices = self._get_all_devices()
+            if not all_devices:
+                logger.warning(f"No hay dispositivos en Firebase para agregar chat")
+                return False
+
+            # Buscar dispositivos que coincidan con el ID (parcial o completo)
+            matching_devices = []
+            for existing_id, dev_data in all_devices.items():
+                if not isinstance(dev_data, dict):
+                    continue
+                if existing_id.startswith(device_id) or device_id.startswith(existing_id):
+                    matching_devices.append((existing_id, dev_data))
+
+            if not matching_devices:
+                logger.warning(f"Dispositivo {device_id} no encontrado en Firebase")
+                return False
+
+            added = False
+            for existing_id, device_data in matching_devices:
+                device_ref = self.db.reference(f'ESP32/{existing_id}')
+
                 # Si no tiene Telegram_ID, agregarlo ahí
                 if not device_data.get('Telegram_ID'):
                     device_ref.child('Telegram_ID').set(chat_id)
-                    logger.info(f"Chat {chat_id} agregado a {device_id} como Telegram_ID")
+                    logger.info(f"Chat {chat_id} agregado a {existing_id} como Telegram_ID")
+                    added = True
                 # Si ya tiene Telegram_ID pero no Group_ID, agregarlo como Group_ID
                 elif not device_data.get('Group_ID'):
                     device_ref.child('Group_ID').set(chat_id)
-                    logger.info(f"Chat {chat_id} agregado a {device_id} como Group_ID")
+                    logger.info(f"Chat {chat_id} agregado a {existing_id} como Group_ID")
+                    added = True
                 else:
-                    logger.warning(f"El dispositivo {device_id} ya tiene Telegram_ID y Group_ID asignados")
+                    logger.warning(f"El dispositivo {existing_id} ya tiene Telegram_ID y Group_ID asignados")
 
-            # Invalidar caché
+            # Invalidar caché para recargar
             self.invalidate_cache()
+            return added
+
         except Exception as e:
             logger.error(f"Error agregando chat autorizado: {e}")
+            return False
 
     def unlink_device_from_user(self, chat_id: str, device_id: str) -> bool:
         """
@@ -793,8 +966,16 @@ class FirebaseManager:
             return False
 
     def remove_pending_request(self, chat_id: str):
-        """Elimina solicitud pendiente (stub - no hace nada)"""
-        pass
+        """Elimina una solicitud de acceso pendiente de Firebase."""
+        if not self.is_available():
+            return
+
+        try:
+            pending_ref = self.db.reference(f'PendingRequests/{chat_id}')
+            pending_ref.delete()
+            logger.info(f"Solicitud pendiente eliminada: {chat_id}")
+        except Exception as e:
+            logger.error(f"Error eliminando solicitud pendiente: {e}")
 
     def get_all_chat_ids(self) -> List[str]:
         """Obtiene todos los chat_ids registrados"""
@@ -827,23 +1008,94 @@ class FirebaseManager:
             logger.error(f"Error obteniendo modo bengala de {device_id}: {e}")
             return None
 
-    def set_bengala_mode_in_firebase(self, device_id: str, mode: int):
+    def set_bengala_mode_in_firebase(self, device_id: str, mode: int, enable_bengala: bool = True):
         """
         Guarda el modo de bengala en Firebase para persistencia.
         mode: 0=automático, 1=con pregunta
+        enable_bengala: Si es True, también habilita la bengala (BengalaHab=True)
+
+        Busca y actualiza todos los dispositivos que coincidan con el ID
+        (tanto truncado como completo) para mantener consistencia con la App.
         """
         if not self.is_available():
             logger.warning("Firebase no disponible para guardar modo bengala")
             return
 
         try:
-            device_ref = self.db.reference(f'ESP32/{device_id}')
-            device_ref.child('ModoBengala').set(mode)
-            logger.info(f"[{device_id}] Modo bengala guardado en Firebase: {mode}")
+            # Obtener todos los dispositivos de ESP32
+            esp32_ref = self.db.reference('ESP32')
+            all_devices = esp32_ref.get()
+
+            if not all_devices:
+                # Si no hay dispositivos, crear con el ID proporcionado
+                device_ref = self.db.reference(f'ESP32/{device_id}')
+                device_ref.child('ModoBengala').set(mode)
+                if enable_bengala:
+                    device_ref.child('BengalaHab').set(True)
+                logger.info(f"[{device_id}] Modo bengala guardado en Firebase: {mode}, habilitada: {enable_bengala}")
+            else:
+                # Buscar todos los dispositivos que empiecen con el device_id
+                updated_count = 0
+                for existing_id in all_devices.keys():
+                    # Coincidir si el ID existente empieza con el device_id proporcionado
+                    # o si el device_id proporcionado empieza con el ID existente
+                    if existing_id.startswith(device_id) or device_id.startswith(existing_id):
+                        device_ref = self.db.reference(f'ESP32/{existing_id}')
+                        device_ref.child('ModoBengala').set(mode)
+                        if enable_bengala:
+                            device_ref.child('BengalaHab').set(True)
+                        logger.info(f"[{existing_id}] Modo bengala guardado en Firebase: {mode}, habilitada: {enable_bengala}")
+                        updated_count += 1
+
+                if updated_count == 0:
+                    # Si no se encontró coincidencia, crear con el ID proporcionado
+                    device_ref = self.db.reference(f'ESP32/{device_id}')
+                    device_ref.child('ModoBengala').set(mode)
+                    if enable_bengala:
+                        device_ref.child('BengalaHab').set(True)
+                    logger.info(f"[{device_id}] Modo bengala guardado en Firebase: {mode}, habilitada: {enable_bengala}")
+
             # Invalidar caché para que la próxima lectura traiga el valor actualizado
             self.invalidate_cache()
         except Exception as e:
             logger.error(f"Error guardando modo bengala de {device_id} en Firebase: {e}")
+
+    def set_bengala_enabled_in_firebase(self, device_id: str, enabled: bool):
+        """
+        Guarda el estado de habilitación de bengala en Firebase.
+        enabled: True=habilitada, False=deshabilitada
+
+        Busca y actualiza todos los dispositivos que coincidan con el ID.
+        """
+        if not self.is_available():
+            logger.warning("Firebase no disponible para guardar estado bengala")
+            return
+
+        try:
+            esp32_ref = self.db.reference('ESP32')
+            all_devices = esp32_ref.get()
+
+            if not all_devices:
+                device_ref = self.db.reference(f'ESP32/{device_id}')
+                device_ref.child('BengalaHab').set(enabled)
+                logger.info(f"[{device_id}] Bengala {'habilitada' if enabled else 'deshabilitada'} en Firebase")
+            else:
+                updated_count = 0
+                for existing_id in all_devices.keys():
+                    if existing_id.startswith(device_id) or device_id.startswith(existing_id):
+                        device_ref = self.db.reference(f'ESP32/{existing_id}')
+                        device_ref.child('BengalaHab').set(enabled)
+                        logger.info(f"[{existing_id}] Bengala {'habilitada' if enabled else 'deshabilitada'} en Firebase")
+                        updated_count += 1
+
+                if updated_count == 0:
+                    device_ref = self.db.reference(f'ESP32/{device_id}')
+                    device_ref.child('BengalaHab').set(enabled)
+                    logger.info(f"[{device_id}] Bengala {'habilitada' if enabled else 'deshabilitada'} en Firebase")
+
+            self.invalidate_cache()
+        except Exception as e:
+            logger.error(f"Error guardando estado bengala de {device_id} en Firebase: {e}")
 
 
 # Instancia singleton para uso global

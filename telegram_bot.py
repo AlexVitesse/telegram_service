@@ -222,10 +222,17 @@ class TelegramBot:
         # Estado de confirmaciones de bengala pendientes (por device_id)
         self._bengala_confirmations: Dict[str, BengalaConfirmation] = {}
 
-        # Intervalo de recordatorios de bengala (segundos)
-        self.BENGALA_REMINDER_INTERVAL = 30
+        # Estado de notificaciones de alarma activa (por device_id) - para modo auto/deshabilitado
+        self._alarm_notifications: Dict[str, dict] = {}
+
+        # Intervalo de recordatorios (segundos)
+        self.REMINDER_INTERVAL_PRIVATE = 60   # 1 minuto para chat privado
+        self.REMINDER_INTERVAL_GROUP = 300    # 5 minutos para grupos
         # Timeout de confirmación de bengala (segundos)
         self.BENGALA_CONFIRMATION_TIMEOUT = 120
+
+        # Dispositivo seleccionado para horarios (por chat_id)
+        self._horarios_selected_device: Dict[str, str] = {}  # chat_id -> device_id o "all"
 
     def _is_user_authorized(self, chat_id: str) -> bool:
         """
@@ -276,14 +283,11 @@ class TelegramBot:
         app.add_handler(CommandHandler("off", self._cmd_off))
         app.add_handler(CommandHandler("disparo", self._cmd_disparo))
 
-        # Confirmaciones
-        app.add_handler(CommandHandler("si", self._cmd_si))
-        app.add_handler(CommandHandler("no", self._cmd_no))
-
         # Bengala
         app.add_handler(CommandHandler("bengala", self._cmd_bengala))
         app.add_handler(CommandHandler("auto", self._cmd_auto))
         app.add_handler(CommandHandler("preguntar", self._cmd_preguntar))
+        app.add_handler(CommandHandler("deshabilitar", self._cmd_deshabilitar))
 
         # Admin
         app.add_handler(CommandHandler("permisos", self._cmd_permisos))
@@ -438,15 +442,15 @@ class TelegramBot:
         help_text += "`/bengala` - Menú de configuración\n"
         help_text += "`/auto` - Modo automático (sin pregunta)\n"
         help_text += "`/preguntar` - Modo con pregunta\n"
-        help_text += "`/si` - Confirmar disparo de bengala\n"
-        help_text += "`/no` - Cancelar disparo de bengala\n\n"
+        help_text += "`/deshabilitar` - Desactivar bengala\n\n"
         help_text += "🔗 *Dispositivos:*\n"
         help_text += "`/desvincular` - Desvincular un dispositivo\n\n"
         help_text += "⏰ *Horarios:*\n"
-        help_text += "`/horarios` - Ver programacion\n"
-        help_text += "`/horarios on HH:MM` - Hora de armado\n"
-        help_text += "`/horarios off HH:MM` - Hora de desarmado\n"
-        help_text += "`/horarios dias [L,M,X,J,V|todos|semana|finde]`\n\n"
+        help_text += "`/horarios` - Ver/configurar programación por dispositivo\n"
+        help_text += "`/horarios activar HH:MM` - Hora de armado\n"
+        help_text += "`/horarios desactivar HH:MM` - Hora de desarmado\n"
+        help_text += "`/horarios dias [L,M,X,J,V|todos|semana|finde]`\n"
+        help_text += "`/horarios cambiar` - Cambiar dispositivo seleccionado\n\n"
 
         if self._is_user_admin(chat_id):
             help_text += "⚙️ *Admin:*\n"
@@ -776,93 +780,6 @@ class TelegramBot:
         )
 
     @require_auth
-    async def _cmd_si(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler para /si - Confirmar disparo de bengala"""
-        user = update.effective_user
-        chat_id = str(update.effective_chat.id)
-        logger.info(f"/si de {user.first_name}")
-
-        # Buscar confirmación pendiente para este chat
-        confirmation = self._get_pending_confirmation_for_chat(chat_id)
-
-        if confirmation:
-            device_id = confirmation.device_id
-            device_location = self.firebase_manager.get_device_location(device_id) or device_id
-
-            # Disparar bengala en ese dispositivo específico
-            if self.mqtt_handler:
-                self.mqtt_handler.send_trigger_bengala(device_id=device_id)
-
-            # Limpiar estado de confirmación
-            self._clear_bengala_confirmation(device_id)
-
-            await update.message.reply_text(
-                f"🔥 *BENGALA ACTIVADA*\n\n"
-                f"📍 {device_location}\n"
-                f"La bengala ha sido disparada.",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=self._get_keyboard()
-            )
-            logger.info(f"Bengala confirmada por {user.first_name} para {device_id}")
-        else:
-            # Si no hay confirmación pendiente, buscar dispositivos en alarma
-            devices = self.firebase_manager.get_authorized_devices(chat_id)
-            alarming_devices = [d for d in devices if self.device_manager.is_alarming(d)]
-
-            if alarming_devices and self.mqtt_handler:
-                # Disparar bengala en todos los dispositivos en alarma
-                for device_id in alarming_devices:
-                    device_location = self.firebase_manager.get_device_location(device_id) or device_id
-                    self.mqtt_handler.send_trigger_bengala(device_id=device_id)
-                    self._clear_bengala_confirmation(device_id)
-
-                    await update.message.reply_text(
-                        f"🔥 *BENGALA ACTIVADA*\n\n"
-                        f"📍 {device_location}\n"
-                        f"La bengala ha sido disparada.",
-                        parse_mode=ParseMode.MARKDOWN,
-                        reply_markup=self._get_keyboard()
-                    )
-                    logger.info(f"Bengala disparada por {user.first_name} para {device_id}")
-            else:
-                await update.message.reply_text(
-                    "ℹ️ No hay dispositivos en alarma activa.",
-                    reply_markup=self._get_keyboard()
-                )
-
-    @require_auth
-    async def _cmd_no(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler para /no - Cancelar disparo de bengala"""
-        user = update.effective_user
-        chat_id = str(update.effective_chat.id)
-        logger.info(f"/no de {user.first_name}")
-
-        # Buscar confirmación pendiente para este chat
-        confirmation = self._get_pending_confirmation_for_chat(chat_id)
-
-        if confirmation:
-            device_id = confirmation.device_id
-            device_location = self.firebase_manager.get_device_location(device_id) or device_id
-
-            # Limpiar estado de confirmación
-            self._clear_bengala_confirmation(device_id)
-
-            await update.message.reply_text(
-                f"🔒 *SISTEMA ARMADO*\n\n"
-                f"📍 {device_location}\n"
-                f"Bengala cancelada. El sistema continúa armado.\n"
-                f"Usa /off para desactivar el sistema.",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=self._get_keyboard()
-            )
-            logger.info(f"Bengala cancelada por {user.first_name} para {device_id}")
-        else:
-            await update.message.reply_text(
-                "❌ Acción cancelada",
-                reply_markup=self._get_keyboard()
-            )
-
-    @require_auth
     async def _cmd_bengala(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler para /bengala - Menú de configuración de bengala"""
         user = update.effective_user
@@ -968,7 +885,9 @@ class TelegramBot:
             # Un solo dispositivo: aplicar directamente
             device_id = devices[0]
             self.mqtt_handler.send_set_bengala_mode(mode=0, device_id=device_id)
+            self.mqtt_handler.send_activate_bengala(device_id=device_id)  # Habilitar bengala
             self.device_manager.set_bengala_mode(device_id, 0)
+            self.device_manager.set_bengala_enabled(device_id, True)  # Marcar como habilitada
             location = self.firebase_manager.get_device_location(device_id) or device_id
 
             await update.message.reply_text(
@@ -1016,16 +935,65 @@ class TelegramBot:
             # Un solo dispositivo: aplicar directamente
             device_id = devices[0]
             self.mqtt_handler.send_set_bengala_mode(mode=1, device_id=device_id)
+            self.mqtt_handler.send_activate_bengala(device_id=device_id)  # Habilitar bengala
             self.device_manager.set_bengala_mode(device_id, 1)
+            self.device_manager.set_bengala_enabled(device_id, True)  # Marcar como habilitada
             location = self.firebase_manager.get_device_location(device_id) or device_id
 
             await update.message.reply_text(
                 f"❓ *MODO CON PREGUNTA ACTIVADO*\n"
                 f"📍 {location}\n\n"
                 "Cuando se active la alarma, recibirás un mensaje\n"
-                "preguntando si deseas disparar la bengala.\n\n"
-                "Responde `/si` para confirmar o `/no` para cancelar.\n"
+                "con botones para confirmar o cancelar el disparo.\n\n"
                 "Usa `/auto` para cambiar a modo automático.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=self._get_keyboard()
+            )
+
+    @require_auth
+    async def _cmd_deshabilitar(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handler para /deshabilitar - Deshabilitar bengala completamente"""
+        user = update.effective_user
+        chat_id = str(update.effective_chat.id)
+        logger.info(f"/deshabilitar de {user.first_name}")
+
+        if not self.mqtt_handler:
+            await update.message.reply_text("❌ Error: Sistema no conectado")
+            return
+
+        devices = self.firebase_manager.get_authorized_devices(chat_id)
+        if not devices:
+            await update.message.reply_text("No tienes dispositivos autorizados.")
+            return
+
+        # Si hay múltiples dispositivos, mostrar selector
+        if len(devices) > 1:
+            buttons = []
+            for device_id in devices:
+                location = self.firebase_manager.get_device_location(device_id) or device_id
+                buttons.append([InlineKeyboardButton(f"❌ {location}", callback_data=f"bengala_off_{device_id}")])
+            buttons.append([InlineKeyboardButton("❌ TODOS deshabilitados", callback_data="bengala_off_all")])
+
+            keyboard = InlineKeyboardMarkup(buttons)
+            await update.message.reply_text(
+                "❌ *Deshabilitar Bengala*\n\n"
+                "Selecciona el dispositivo:",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=keyboard
+            )
+        else:
+            # Un solo dispositivo: aplicar directamente
+            device_id = devices[0]
+            self.mqtt_handler.send_deactivate_bengala(device_id=device_id)
+            self.device_manager.set_bengala_enabled(device_id, False)
+            self.firebase_manager.set_bengala_enabled_in_firebase(device_id, False)  # Sync Firebase
+            location = self.firebase_manager.get_device_location(device_id) or device_id
+
+            await update.message.reply_text(
+                f"❌ *BENGALA DESHABILITADA*\n"
+                f"📍 {location}\n\n"
+                "La bengala NO se disparará cuando se active la alarma.\n\n"
+                "Usa `/auto` o `/preguntar` para habilitarla nuevamente.",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=self._get_keyboard()
             )
@@ -1102,49 +1070,115 @@ class TelegramBot:
         """Handler para /horarios - Muestra y configura programacion"""
         user = update.effective_user
         args = context.args
+        chat_id = str(update.effective_chat.id)
 
         logger.info(f"/horarios de {user.first_name} args={args}")
 
-        # Sin argumentos: mostrar estado actual
-        if not args:
-            status = scheduler.format_status()
-            status += "\n\n📝 *Comandos:*\n"
-            status += "`/horarios on` - Habilitar\n"
-            status += "`/horarios off` - Deshabilitar\n"
-            status += "`/horarios activar HH:MM` - Hora activacion\n"
-            status += "`/horarios desactivar HH:MM` - Hora desactivacion\n"
-            status += "`/horarios dias L,M,X,J,V` - Configurar dias\n"
-            status += "`/horarios dias todos` - Todos los dias\n"
-            status += "`/horarios dias semana` - Lunes a Viernes\n"
-            status += "`/horarios dias finde` - Fin de semana"
+        # Obtener dispositivos del usuario
+        devices = self.firebase_manager.get_authorized_devices(chat_id)
+        if not devices:
+            await update.message.reply_text("No tienes dispositivos autorizados.")
+            return
 
-            await update.message.reply_text(
-                status,
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=self._get_keyboard()
-            )
+        # Sin argumentos: mostrar selector de dispositivo o estado
+        if not args:
+            # Si hay múltiples dispositivos, mostrar selector
+            if len(devices) > 1:
+                buttons = []
+                for device_id in devices:
+                    location = self.firebase_manager.get_device_location(device_id) or device_id
+                    buttons.append([InlineKeyboardButton(f"⏰ {location}", callback_data=f"horarios_select_{device_id}")])
+                buttons.append([InlineKeyboardButton("⏰ TODOS los dispositivos", callback_data="horarios_select_all")])
+
+                keyboard = InlineKeyboardMarkup(buttons)
+                await update.message.reply_text(
+                    "⏰ *PROGRAMACIÓN AUTOMÁTICA*\n\n"
+                    "Selecciona el dispositivo a configurar:",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=keyboard
+                )
+                return
+            else:
+                # Un solo dispositivo: seleccionar automáticamente
+                self._horarios_selected_device[chat_id] = devices[0]
+
+        # Mostrar menú de comandos si no hay subcomando
+        if not args:
+            selected = self._horarios_selected_device.get(chat_id)
+            if selected:
+                location = self.firebase_manager.get_device_location(selected) or selected if selected != "all" else "TODOS"
+                status = f"📍 *Dispositivo:* {location}\n\n"
+                status += scheduler.format_status()
+                status += "\n\n📝 *Comandos:*\n"
+                status += "`/horarios on` - Habilitar\n"
+                status += "`/horarios off` - Deshabilitar\n"
+                status += "`/horarios activar HH:MM` - Hora activacion\n"
+                status += "`/horarios desactivar HH:MM` - Hora desactivacion\n"
+                status += "`/horarios dias L,M,X,J,V` - Configurar dias\n"
+                status += "`/horarios cambiar` - Cambiar dispositivo"
+
+                await update.message.reply_text(
+                    status,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=self._get_keyboard()
+                )
             return
 
         subcommand = args[0].lower()
-        chat_id = str(update.effective_chat.id)
+
+        # Comando para cambiar dispositivo seleccionado
+        if subcommand == "cambiar":
+            if len(devices) > 1:
+                buttons = []
+                for device_id in devices:
+                    location = self.firebase_manager.get_device_location(device_id) or device_id
+                    buttons.append([InlineKeyboardButton(f"⏰ {location}", callback_data=f"horarios_select_{device_id}")])
+                buttons.append([InlineKeyboardButton("⏰ TODOS los dispositivos", callback_data="horarios_select_all")])
+
+                keyboard = InlineKeyboardMarkup(buttons)
+                await update.message.reply_text(
+                    "⏰ *Selecciona el dispositivo:*",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=keyboard
+                )
+            else:
+                await update.message.reply_text("Solo tienes un dispositivo.")
+            return
+
+        # Verificar que hay dispositivo seleccionado para los demás comandos
+        selected = self._horarios_selected_device.get(chat_id)
+        if not selected and len(devices) > 1:
+            await update.message.reply_text(
+                "⚠️ Primero selecciona un dispositivo.\n"
+                "Usa `/horarios` para ver el selector.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        elif not selected:
+            selected = devices[0]
+            self._horarios_selected_device[chat_id] = selected
+
+        # Determinar dispositivos objetivo
+        target_devices = devices if selected == "all" else [selected]
+        location_text = "TODOS los dispositivos" if selected == "all" else (self.firebase_manager.get_device_location(selected) or selected)
 
         # Habilitar/Deshabilitar
         if subcommand == "on":
             scheduler.set_enabled(True)
-            # Sincronizar con ESP32 y Firebase
-            await self._sync_schedule_to_devices(chat_id)
+            await self._sync_schedule_to_devices(chat_id, target_devices)
             await update.message.reply_text(
-                "✅ *Programacion habilitada*\n\n" + scheduler.format_status(),
+                f"✅ *Programacion habilitada*\n"
+                f"📍 {location_text}\n\n" + scheduler.format_status(),
                 parse_mode=ParseMode.MARKDOWN
             )
             return
 
         if subcommand == "off":
             scheduler.set_enabled(False)
-            # Sincronizar con ESP32 y Firebase
-            await self._sync_schedule_to_devices(chat_id)
+            await self._sync_schedule_to_devices(chat_id, target_devices)
             await update.message.reply_text(
-                "🔴 *Programacion deshabilitada*",
+                f"🔴 *Programacion deshabilitada*\n"
+                f"📍 {location_text}",
                 parse_mode=ParseMode.MARKDOWN
             )
             return
@@ -1155,10 +1189,10 @@ class TelegramBot:
             if time_result:
                 hour, minute = time_result
                 scheduler.set_on_time(hour, minute)
-                # Sincronizar con ESP32 y Firebase
-                await self._sync_schedule_to_devices(chat_id)
+                await self._sync_schedule_to_devices(chat_id, target_devices)
                 await update.message.reply_text(
-                    f"✅ *Hora de activacion configurada*\n\n"
+                    f"✅ *Hora de activacion configurada*\n"
+                    f"📍 {location_text}\n\n"
                     f"🔒 {scheduler.config.format_on_time()} ({scheduler.config.format_on_time_12h()})",
                     parse_mode=ParseMode.MARKDOWN
                 )
@@ -1175,10 +1209,10 @@ class TelegramBot:
             if time_result:
                 hour, minute = time_result
                 scheduler.set_off_time(hour, minute)
-                # Sincronizar con ESP32 y Firebase
-                await self._sync_schedule_to_devices(chat_id)
+                await self._sync_schedule_to_devices(chat_id, target_devices)
                 await update.message.reply_text(
-                    f"✅ *Hora de desactivacion configurada*\n\n"
+                    f"✅ *Hora de desactivacion configurada*\n"
+                    f"📍 {location_text}\n\n"
                     f"🔓 {scheduler.config.format_off_time()} ({scheduler.config.format_off_time_12h()})",
                     parse_mode=ParseMode.MARKDOWN
                 )
@@ -1205,10 +1239,10 @@ class TelegramBot:
                 days = [d.strip() for d in args[1].split(',')]
 
             if scheduler.set_days(days):
-                # Sincronizar con ESP32 y Firebase
-                await self._sync_schedule_to_devices(chat_id)
+                await self._sync_schedule_to_devices(chat_id, target_devices)
                 await update.message.reply_text(
-                    f"✅ *Días configurados*\n\n"
+                    f"✅ *Días configurados*\n"
+                    f"📍 {location_text}\n\n"
                     f"📅 {scheduler.format_days()}",
                     parse_mode=ParseMode.MARKDOWN
                 )
@@ -1229,7 +1263,7 @@ class TelegramBot:
 
     @require_auth
     async def _cmd_sensors(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler para /sensors - Muestra info detallada de dispositivos y sensores"""
+        """Handler para /sensors - Muestra info técnica detallada y sensores LoRa"""
         user = update.effective_user
         chat_id = str(update.effective_chat.id)
         logger.info(f"/sensors de {user.first_name}")
@@ -1243,111 +1277,159 @@ class TelegramBot:
             )
             return
 
-        response = "📡 *INFORMACIÓN DE DISPOSITIVOS*\n"
-        response += "━" * 25 + "\n\n"
+        # Solicitar lista de sensores a todos los dispositivos
+        await update.message.reply_text(
+            f"📡 Solicitando información de {len(devices)} dispositivo(s)...",
+            parse_mode=ParseMode.MARKDOWN
+        )
 
         for device_id in devices:
-            # Obtener telemetria del MQTT handler
+            if self.mqtt_handler:
+                self.mqtt_handler.send_get_sensors(device_id=device_id)
+
+        # Esperar respuesta
+        await asyncio.sleep(3)
+
+        # Construir respuesta para cada dispositivo
+        for device_id in devices:
+            # Obtener nombre de Firebase (como hace /status)
+            name = self.firebase_manager.get_device_location(device_id) or device_id
+
+            # Obtener telemetría y estado
             telemetry = self.mqtt_handler.get_device_telemetry(device_id) if self.mqtt_handler else None
             device_info = self.device_manager.get_device_info(device_id) if self.device_manager else None
+            sensors_list = self.mqtt_handler.get_sensors_list(device_id) if self.mqtt_handler else None
 
-            # Nombre y ubicacion
-            name = "Sin nombre"
-            location = ""
-            if device_info:
-                name = device_info.get("name") or device_info.get("location") or device_id
-                location = device_info.get("location", "")
-            if telemetry:
-                if telemetry.name:
-                    name = telemetry.name
-                if telemetry.location:
-                    location = telemetry.location
+            # También buscar con ID truncado
+            if not telemetry and self.mqtt_handler:
+                truncated_id = self.mqtt_handler.truncate_device_id(device_id)
+                telemetry = self.mqtt_handler.get_device_telemetry(truncated_id)
+                if not sensors_list:
+                    sensors_list = self.mqtt_handler.get_sensors_list(truncated_id)
 
-            response += f"🏠 *{name}*\n"
-            if location and location != name:
-                response += f"📍 {location}\n"
-            response += f"🆔 `{device_id}`\n\n"
+            response = f"📡 *SENSORES - {name}*\n"
+            response += "━" * 25 + "\n\n"
 
             # Estado online/offline
             is_online = device_info.get("is_online", False) if device_info else False
-            online_icon = "🟢" if is_online else "🔴"
-            online_text = "En línea" if is_online else "Desconectado"
-            response += f"{online_icon} Estado: *{online_text}*\n"
 
-            if is_online and telemetry:
-                # Señal WiFi
-                rssi = telemetry.wifi_rssi
-                if rssi >= -50:
-                    wifi_icon = "📶"
-                    wifi_text = "Excelente"
-                elif rssi >= -60:
-                    wifi_icon = "📶"
-                    wifi_text = "Buena"
-                elif rssi >= -70:
-                    wifi_icon = "📶"
-                    wifi_text = "Regular"
-                else:
-                    wifi_icon = "📶"
-                    wifi_text = "Débil"
-                response += f"{wifi_icon} WiFi: {wifi_text} ({rssi} dBm)\n"
+            if not is_online or not telemetry:
+                response += "🔴 *Dispositivo desconectado*\n"
+                response += f"🆔 `{device_id}`\n"
+                await self.send_message(chat_id, response, "Markdown")
+                continue
 
-                # Memoria
-                heap_kb = telemetry.heap_free / 1024
-                heap_icon = "✅" if heap_kb > 50 else "⚠️"
-                response += f"{heap_icon} Memoria: {heap_kb:.1f} KB libres\n"
+            # === SENSORES LORA ===
+            lora_count = telemetry.lora_sensors_active if telemetry else 0
 
-                # Uptime
-                uptime_sec = telemetry.uptime_sec
-                if uptime_sec >= 86400:
-                    uptime_text = f"{uptime_sec // 86400}d {(uptime_sec % 86400) // 3600}h"
-                elif uptime_sec >= 3600:
-                    uptime_text = f"{uptime_sec // 3600}h {(uptime_sec % 3600) // 60}m"
-                else:
-                    uptime_text = f"{uptime_sec // 60}m"
-                response += f"⏱ Uptime: {uptime_text}\n"
+            if sensors_list and sensors_list.sensors:
+                response += f"📻 *SENSORES LORA* ({sensors_list.active_sensors}/{sensors_list.total_sensors})\n"
 
-                # Sensores LoRa
-                lora_count = telemetry.lora_sensors_active
-                lora_icon = "📻" if lora_count > 0 else "📻"
-                response += f"{lora_icon} Sensores LoRa: *{lora_count}* activos\n"
+                for i, sensor in enumerate(sensors_list.sensors):
+                    is_last = (i == len(sensors_list.sensors) - 1)
+                    prefix = "└─" if is_last else "├─"
+                    status_icon = "🟢" if sensor.active else "🔴"
 
-            # Estado de seguridad
+                    # Formatear tiempo desde última vez visto
+                    if sensor.last_seen_sec < 60:
+                        last_seen = f"{sensor.last_seen_sec}s"
+                    elif sensor.last_seen_sec < 3600:
+                        last_seen = f"{sensor.last_seen_sec // 60}m"
+                    else:
+                        last_seen = f"{sensor.last_seen_sec // 3600}h"
+
+                    type_icon = sensor.get_type_icon()
+                    response += f"{prefix} {status_icon} {type_icon} *{sensor.name}*\n"
+
+                    detail_prefix = "    " if is_last else "│   "
+                    response += f"{detail_prefix}RSSI: {sensor.rssi} dBm | Visto: hace {last_seen}\n"
+            elif lora_count > 0:
+                response += f"📻 *SENSORES LORA:* {lora_count} activos\n"
+                response += "    _(usa /sensors de nuevo para ver detalles)_\n"
+            else:
+                response += "📻 *SENSORES LORA:* Sin sensores\n"
+
+            response += "\n"
+
+            # === DISPOSITIVO CENTRAL ===
+            response += "📊 *DISPOSITIVO CENTRAL*\n"
+
+            # WiFi
+            rssi = telemetry.wifi_rssi
+            if rssi >= -50:
+                wifi_text = "Excelente"
+            elif rssi >= -60:
+                wifi_text = "Buena"
+            elif rssi >= -70:
+                wifi_text = "Regular"
+            else:
+                wifi_text = "Débil"
+            response += f"├─ 📶 WiFi: {wifi_text} ({rssi} dBm)\n"
+
+            # Memoria
+            heap_kb = telemetry.heap_free / 1024
+            heap_icon = "✅" if heap_kb > 50 else "⚠️"
+            response += f"├─ {heap_icon} Memoria: {heap_kb:.1f} KB\n"
+
+            # Uptime
+            uptime_sec = telemetry.uptime_sec
+            if uptime_sec >= 86400:
+                uptime_text = f"{uptime_sec // 86400}d {(uptime_sec % 86400) // 3600}h"
+            elif uptime_sec >= 3600:
+                uptime_text = f"{uptime_sec // 3600}h {(uptime_sec % 3600) // 60}m"
+            else:
+                uptime_text = f"{uptime_sec // 60}m"
+            response += f"└─ ⏱ Uptime: {uptime_text}\n"
+
+            response += "\n"
+
+            # === CONFIGURACIÓN ===
+            response += "🔒 *CONFIGURACIÓN*\n"
+
+            # Estado del sistema
             if device_info:
                 is_armed = device_info.get("is_armed", False)
-                is_alarming = device_info.get("is_alarming", False)
-
-                if is_alarming:
-                    response += f"🚨 Alarma: *DISPARADA*\n"
-                elif is_armed:
-                    response += f"🔒 Sistema: *ARMADO*\n"
-                else:
-                    response += f"🔓 Sistema: *DESARMADO*\n"
+                response += f"├─ Sistema: {'ARMADO' if is_armed else 'DESARMADO'}\n"
 
                 # Bengala
                 bengala_mode = device_info.get("bengala_mode", 1)
                 bengala_enabled = device_info.get("bengala_enabled", True)
                 if bengala_enabled:
-                    mode_text = "Automático" if bengala_mode == 0 else "Con pregunta"
-                    response += f"🔥 Bengala: {mode_text}\n"
+                    mode_text = "Auto" if bengala_mode == 0 else "Pregunta"
                 else:
-                    response += f"🔥 Bengala: Deshabilitada\n"
+                    mode_text = "Deshabilitada"
+                response += f"├─ 🔥 Bengala: {mode_text}\n"
 
-            # Horario programado
+            # Tiempos
+            tiempo_bomba = telemetry.tiempo_bomba if telemetry else 60
+            tiempo_pre = telemetry.tiempo_pre if telemetry else 60
+            response += f"├─ ⏰ Tiempo salida: {tiempo_bomba}s\n"
+            response += f"├─ ⏰ Tiempo pre-alarma: {tiempo_pre}s\n"
+
+            # Horario
             if telemetry and telemetry.auto_schedule_enabled:
-                response += f"⏰ Horario: Activo\n"
+                schedule_info = scheduler.format_status() if scheduler.config.enabled else "Activo"
+                response += f"└─ 📅 Horario: {schedule_info}\n"
+            else:
+                response += f"└─ 📅 Horario: Desactivado\n"
 
-            response += "\n"
+            response += f"\n🆔 `{device_id}`"
 
-        await update.message.reply_text(
-            response,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=self._get_keyboard()
-        )
+            await self.send_message(chat_id, response, "Markdown")
 
-    async def _sync_schedule_to_devices(self, chat_id: str):
-        """Sincroniza los horarios del scheduler con ESP32 y Firebase"""
-        # Obtener dispositivos autorizados para este chat
-        devices = self.firebase_manager.get_authorized_devices(chat_id)
+    async def _sync_schedule_to_devices(self, chat_id: str, target_devices: list = None):
+        """Sincroniza los horarios del scheduler con ESP32 y Firebase
+
+        Args:
+            chat_id: ID del chat de Telegram
+            target_devices: Lista de dispositivos específicos a sincronizar.
+                           Si es None, sincroniza todos los dispositivos autorizados.
+        """
+        # Si no se especifican dispositivos, usar todos los autorizados
+        if target_devices is None:
+            devices = self.firebase_manager.get_authorized_devices(chat_id)
+        else:
+            devices = target_devices
 
         # Obtener índices de días para enviar al ESP32
         days_indices = scheduler.get_days_indices()
@@ -1450,7 +1532,7 @@ class TelegramBot:
         )
 
     async def _cmd_join(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler para /join_XXXX - Solicitar acceso"""
+        """Handler para /join_XXXX - Solicitar acceso a un dispositivo específico"""
         user = update.effective_user
         chat_id = str(update.effective_chat.id)
         text = update.message.text
@@ -1460,20 +1542,36 @@ class TelegramBot:
         # Extraer device_id del comando
         device_id = text.replace("/join_", "")
 
-        # Verificar si ya esta autorizado
-        if self._is_user_authorized(chat_id):
+        if not device_id:
             await update.message.reply_text(
-                "ℹ️ *Ya tienes acceso* a este dispositivo.",
+                "❌ Formato incorrecto. Usa: `/join_ID_DEL_DISPOSITIVO`",
                 parse_mode=ParseMode.MARKDOWN
             )
             return
 
+        # Verificar si ya tiene acceso a ESTE dispositivo específico
+        authorized_devices = self.firebase_manager.get_authorized_devices(chat_id)
+        for auth_dev in authorized_devices:
+            # Comparar considerando IDs truncados
+            if auth_dev.startswith(device_id) or device_id.startswith(auth_dev):
+                device_name = self.firebase_manager.get_device_location(auth_dev) or auth_dev
+                await update.message.reply_text(
+                    f"ℹ️ *Ya tienes acceso* a este dispositivo ({device_name}).",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+
         # Agregar solicitud pendiente en Firebase
         self.firebase_manager.add_pending_request(chat_id, user.first_name, device_id)
 
+        # Obtener nombre del dispositivo si existe
+        device_name = self.firebase_manager.get_device_location(device_id) or device_id
+
         await update.message.reply_text(
-            "⏳ *Solicitud enviada* al administrador.\n"
-            "Recibiras una notificacion cuando seas autorizado.",
+            f"⏳ *Solicitud enviada* al administrador.\n"
+            f"📱 Dispositivo: *{device_name}*\n\n"
+            f"⏰ La solicitud expira en *5 minutos*.\n"
+            f"Recibirás una notificación cuando seas autorizado.",
             parse_mode=ParseMode.MARKDOWN
         )
 
@@ -1484,14 +1582,15 @@ class TelegramBot:
                 "🔔 *NUEVA SOLICITUD DE ACCESO*\n\n"
                 f"👤 Usuario: *{user.first_name}*\n"
                 f"🆔 Chat ID: `{chat_id}`\n"
-                f"📱 Dispositivo: `{device_id}`\n\n"
-                f"✅ Para aprobar, envia:\n`/approve_{chat_id}`"
+                f"📱 Dispositivo: *{device_name}* (`{device_id}`)\n\n"
+                f"⏰ Expira en 5 minutos\n\n"
+                f"✅ Para aprobar, envía:\n`/approve_{chat_id}`"
             )
             await self.send_message(admin_id, admin_msg, "Markdown")
 
     @require_admin
     async def _cmd_approve(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler para /approve_XXXX - Aprobar solicitud"""
+        """Handler para /approve_XXXX - Aprobar solicitud de acceso"""
         user = update.effective_user
         text = update.message.text
 
@@ -1500,40 +1599,65 @@ class TelegramBot:
         # Extraer chat_id del comando
         target_chat_id = text.replace("/approve_", "")
 
+        if not target_chat_id:
+            await update.message.reply_text(
+                "❌ Formato incorrecto. Usa: `/approve_CHAT_ID`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
         # Buscar solicitud pendiente en Firebase
         pending = self.firebase_manager.get_pending_request(target_chat_id)
 
         if pending:
             approved_name = pending.get('name', 'Usuario')
-            device_id = pending.get('device_id') or (self.mqtt_handler.device_id if self.mqtt_handler else "ALARMA")
+            device_id = pending.get('device_id')
 
-            # Registrar usuario en Firebase
-            self.firebase_manager.register_user(target_chat_id, approved_name)
-            self.firebase_manager.add_authorized_device(target_chat_id, device_id)
-            self.firebase_manager.add_authorized_chat(device_id, target_chat_id)
+            if not device_id:
+                await update.message.reply_text(
+                    "❌ *Error:* La solicitud no tiene dispositivo asociado.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+
+            # Agregar autorización en Firebase
+            success = self.firebase_manager.add_authorized_chat(device_id, target_chat_id)
 
             # Eliminar solicitud pendiente
             self.firebase_manager.remove_pending_request(target_chat_id)
 
-            await update.message.reply_text(
-                f"✅ *Usuario aprobado*\n\n"
-                f"👤 {approved_name} ahora tiene acceso al sistema.",
-                parse_mode=ParseMode.MARKDOWN
-            )
+            if success:
+                device_name = self.firebase_manager.get_device_location(device_id) or device_id
 
-            # Notificar al usuario aprobado
-            await self.send_message(
-                target_chat_id,
-                "🎉 *¡Acceso aprobado!*\n\n"
-                "Ya puedes usar el sistema de alarma.\n"
-                "Usa /help para ver los comandos.",
-                "Markdown",
-                has_keyboard=True
-            )
+                await update.message.reply_text(
+                    f"✅ *Usuario aprobado*\n\n"
+                    f"👤 {approved_name} ahora tiene acceso a *{device_name}*.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+
+                # Notificar al usuario aprobado
+                await self.send_message(
+                    target_chat_id,
+                    f"🎉 *¡Acceso aprobado!*\n\n"
+                    f"Ya tienes acceso a *{device_name}*.\n"
+                    f"Usa /help para ver los comandos.",
+                    "Markdown",
+                    has_keyboard=True
+                )
+            else:
+                await update.message.reply_text(
+                    f"⚠️ *No se pudo agregar* el acceso.\n"
+                    f"El dispositivo `{device_id}` puede que ya tenga usuarios asignados.\n"
+                    f"Verifica en Firebase.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
         else:
             await update.message.reply_text(
-                "❌ *No se encontro* la solicitud.\n"
-                "Puede que haya expirado o ya fue procesada.",
+                "❌ *No se encontró* la solicitud.\n\n"
+                "Posibles causas:\n"
+                "• La solicitud expiró (tiempo límite: 5 minutos)\n"
+                "• Ya fue procesada anteriormente\n"
+                "• El usuario no envió `/join_`",
                 parse_mode=ParseMode.MARKDOWN
             )
 
@@ -1588,7 +1712,16 @@ class TelegramBot:
                     self.mqtt_handler.send_trigger_bengala(device_id=device_id)
                     device_location = self.firebase_manager.get_device_location(device_id) or device_id
                     self._clear_bengala_confirmation(device_id)
-                    await self.send_message(chat_id, f"🔥 *Bengala disparada*\n📍 {device_location}", "Markdown")
+                    self._clear_alarm_notification(device_id)
+
+                    # Notificar a TODOS los chats autorizados (privados y grupos)
+                    all_chats = self.firebase_manager.get_authorized_chats(device_id)
+                    bengala_msg = f"🔥 *BENGALA ACTIVADA*\n📍 {device_location}"
+                    for notify_chat_id in all_chats:
+                        try:
+                            await self.send_message(notify_chat_id, bengala_msg, "Markdown", has_keyboard=True)
+                        except Exception as e:
+                            logger.error(f"Error notificando bengala a {notify_chat_id}: {e}")
             else:
                 await query.edit_message_text("ℹ️ No hay dispositivos en alarma activa.")
 
@@ -1671,9 +1804,11 @@ class TelegramBot:
 
             for device_id in target_devices:
                 self.mqtt_handler.send_set_bengala_mode(mode=0, device_id=device_id)
+                self.mqtt_handler.send_activate_bengala(device_id=device_id)  # Habilitar bengala
                 # Usar ID truncado para device_manager (coincide con telemetría del ESP32)
                 truncated_id = self.mqtt_handler.truncate_device_id(device_id)
                 self.device_manager.set_bengala_mode(truncated_id, 0)
+                self.device_manager.set_bengala_enabled(truncated_id, True)  # Marcar como habilitada
 
             location = "TODOS los dispositivos" if target == "all" else (self.firebase_manager.get_device_location(target) or target)
             await query.edit_message_text(
@@ -1695,9 +1830,11 @@ class TelegramBot:
 
             for device_id in target_devices:
                 self.mqtt_handler.send_set_bengala_mode(mode=1, device_id=device_id)
+                self.mqtt_handler.send_activate_bengala(device_id=device_id)  # Habilitar bengala
                 # Usar ID truncado para device_manager (coincide con telemetría del ESP32)
                 truncated_id = self.mqtt_handler.truncate_device_id(device_id)
                 self.device_manager.set_bengala_mode(truncated_id, 1)
+                self.device_manager.set_bengala_enabled(truncated_id, True)  # Marcar como habilitada
 
             location = "TODOS los dispositivos" if target == "all" else (self.firebase_manager.get_device_location(target) or target)
             await query.edit_message_text(
@@ -1726,6 +1863,7 @@ class TelegramBot:
                 # Marcar bengala deshabilitada en device_manager con ID truncado
                 truncated_id = self.mqtt_handler.truncate_device_id(device_id)
                 self.device_manager.set_bengala_enabled(truncated_id, False)
+                self.firebase_manager.set_bengala_enabled_in_firebase(device_id, False)  # Sync Firebase
 
             await query.edit_message_text(
                 f"✅ *BENGALA DESHABILITADA*\n"
@@ -1831,6 +1969,53 @@ class TelegramBot:
         elif data == "unlink_cancel":
             await query.edit_message_text("❌ Desvinculación cancelada.")
 
+        # === Callbacks para selección de dispositivo en horarios ===
+
+        # Seleccionar dispositivo específico para horarios
+        elif data.startswith("horarios_select_") and data != "horarios_select_all":
+            target_device = data.replace("horarios_select_", "")
+            if target_device in devices:
+                self._horarios_selected_device[chat_id] = target_device
+                location = self.firebase_manager.get_device_location(target_device) or target_device
+
+                status = f"⏰ *PROGRAMACIÓN AUTOMÁTICA*\n\n"
+                status += f"📍 *Dispositivo:* {location}\n\n"
+                status += scheduler.format_status()
+                status += "\n\n📝 *Comandos:*\n"
+                status += "`/horarios on` - Habilitar\n"
+                status += "`/horarios off` - Deshabilitar\n"
+                status += "`/horarios activar HH:MM` - Hora activación\n"
+                status += "`/horarios desactivar HH:MM` - Hora desactivación\n"
+                status += "`/horarios dias L,M,X,J,V` - Configurar días\n"
+                status += "`/horarios cambiar` - Cambiar dispositivo"
+
+                await query.edit_message_text(
+                    status,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await query.edit_message_text("❌ No tienes acceso a este dispositivo.")
+
+        # Seleccionar TODOS los dispositivos para horarios
+        elif data == "horarios_select_all":
+            self._horarios_selected_device[chat_id] = "all"
+
+            status = f"⏰ *PROGRAMACIÓN AUTOMÁTICA*\n\n"
+            status += f"📍 *Dispositivo:* TODOS los dispositivos\n\n"
+            status += scheduler.format_status()
+            status += "\n\n📝 *Comandos:*\n"
+            status += "`/horarios on` - Habilitar\n"
+            status += "`/horarios off` - Deshabilitar\n"
+            status += "`/horarios activar HH:MM` - Hora activación\n"
+            status += "`/horarios desactivar HH:MM` - Hora desactivación\n"
+            status += "`/horarios dias L,M,X,J,V` - Configurar días\n"
+            status += "`/horarios cambiar` - Cambiar dispositivo"
+
+            await query.edit_message_text(
+                status,
+                parse_mode=ParseMode.MARKDOWN
+            )
+
         else:
             logger.warning(f"Callback no reconocido: {data}")
 
@@ -1859,11 +2044,12 @@ class TelegramBot:
         # Manejar evento de alarma disparada con flujo de bengala
         if event.event_type == EventType.ALARM_TRIGGERED:
             bengala_mode = self.device_manager.get_bengala_mode(device_id)
+            bengala_enabled = self.device_manager.is_bengala_enabled(device_id)
             sensor_name = event.data.get("sensorName", "Sensor desconocido")
             sensor_location = event.data.get("location", device_location)
 
-            if bengala_mode == 1:  # Modo pregunta
-                # Iniciar flujo de confirmación de bengala
+            if bengala_mode == 1 and bengala_enabled:  # Modo pregunta con bengala habilitada
+                # Iniciar flujo de confirmación de bengala (con botón de disparar bengala)
                 await self._start_bengala_confirmation(
                     device_id=device_id,
                     chat_ids=chat_ids,
@@ -1871,13 +2057,24 @@ class TelegramBot:
                     sensor_location=sensor_location
                 )
                 return  # El mensaje de confirmación ya se envía en _start_bengala_confirmation
-            # Si modo automático (0), el ESP32 ya maneja todo, solo notificar normalmente
+            else:
+                # Modo automático o bengala deshabilitada: solo botón de desactivar
+                await self._start_alarm_notification(
+                    device_id=device_id,
+                    chat_ids=chat_ids,
+                    sensor_name=sensor_name,
+                    sensor_location=sensor_location
+                )
+                return
 
-        # Si el sistema se desarma o la alarma se detiene, limpiar confirmaciones pendientes
+        # Si el sistema se desarma o la alarma se detiene, limpiar notificaciones pendientes
         if event.event_type in [EventType.SYSTEM_DISARMED, EventType.ALARM_STOPPED]:
             if device_id in self._bengala_confirmations:
                 self._clear_bengala_confirmation(device_id)
                 logger.info(f"Confirmación de bengala cancelada para {device_id} (sistema desarmado/alarma detenida)")
+            if device_id in self._alarm_notifications:
+                self._clear_alarm_notification(device_id)
+                logger.info(f"Notificación de alarma cancelada para {device_id} (sistema desarmado/alarma detenida)")
 
         # Formatear mensaje
         message = self.mqtt_handler.format_event_message(event) if self.mqtt_handler else str(event)
@@ -1961,12 +2158,155 @@ class TelegramBot:
 
         logger.info(f"Flujo de confirmación de bengala iniciado para {device_id}")
 
-    async def _bengala_reminder_task(self, device_id: str):
-        """Tarea asíncrona que envía recordatorios de bengala cada 30 segundos."""
-        try:
-            while device_id in self._bengala_confirmations:
-                await asyncio.sleep(self.BENGALA_REMINDER_INTERVAL)
+    async def _start_alarm_notification(
+        self,
+        device_id: str,
+        chat_ids: List[str],
+        sensor_name: str,
+        sensor_location: str
+    ):
+        """
+        Inicia notificación de alarma para modo automático o bengala deshabilitada.
+        Solo muestra botón de Desactivar sistema (sin opción de bengala).
+        """
+        device_location = self.firebase_manager.get_device_location(device_id) or device_id
 
+        # Guardar estado para recordatorios
+        self._alarm_notifications[device_id] = {
+            "chat_ids": list(chat_ids),
+            "sensor_name": sensor_name,
+            "sensor_location": sensor_location,
+            "timestamp": time.time(),
+            "reminder_task": None,
+            "last_reminder_time": {chat_id: 0 for chat_id in chat_ids}
+        }
+
+        # Mensaje de alerta
+        alert_msg = (
+            f"🚨 *¡ALARMA ACTIVADA!*\n\n"
+            f"📍 *{device_location}*\n"
+            f"🔔 Sensor: {sensor_name}"
+        )
+
+        # Teclado solo con botón de desactivar
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔓 Desactivar sistema", callback_data="disarm_all")]
+        ])
+
+        # Enviar a todos los chats autorizados
+        for chat_id in chat_ids:
+            try:
+                is_group = str(chat_id).startswith('-')
+                if is_group:
+                    # Grupo: mensaje sin botones inline (usará teclado principal)
+                    await self.send_message(chat_id, alert_msg, "Markdown", has_keyboard=True)
+                else:
+                    # Chat privado: mensaje con botón de desactivar
+                    await self.application.bot.send_message(
+                        chat_id=chat_id,
+                        text=alert_msg,
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=keyboard
+                    )
+            except Exception as e:
+                logger.error(f"Error enviando notificación de alarma a {chat_id}: {e}")
+
+        # Iniciar tarea de recordatorios
+        reminder_task = asyncio.create_task(self._alarm_reminder_task(device_id))
+        self._alarm_notifications[device_id]["reminder_task"] = reminder_task
+
+        logger.info(f"Notificación de alarma iniciada para {device_id} (modo auto/deshabilitado)")
+
+    async def _alarm_reminder_task(self, device_id: str):
+        """
+        Tarea de recordatorios para alarma activa (modo auto/deshabilitado).
+        Privado: cada 1 minuto, Grupos: cada 5 minutos.
+        Solo envía si el dispositivo está online.
+        """
+        try:
+            # Esperar un poco antes del primer recordatorio
+            await asyncio.sleep(self.REMINDER_INTERVAL_PRIVATE)
+
+            while device_id in self._alarm_notifications:
+                notification = self._alarm_notifications.get(device_id)
+                if not notification:
+                    break
+
+                # Verificar si el dispositivo sigue en alarma
+                if not self.device_manager.is_alarming(device_id):
+                    break
+
+                # Solo enviar recordatorios si el dispositivo está online
+                if not self.mqtt_handler or not self.mqtt_handler.is_device_online(device_id):
+                    await asyncio.sleep(self.REMINDER_INTERVAL_PRIVATE)
+                    continue
+
+                device_location = self.firebase_manager.get_device_location(device_id) or device_id
+                current_time = time.time()
+
+                reminder_msg = (
+                    f"⚠️ *RECORDATORIO - ALARMA ACTIVA*\n\n"
+                    f"📍 *{device_location}*\n"
+                    f"🔔 Sensor: {notification['sensor_name']}\n\n"
+                    f"Usa /off para desactivar el sistema."
+                )
+
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔓 Desactivar sistema", callback_data="disarm_all")]
+                ])
+
+                for chat_id in notification["chat_ids"]:
+                    try:
+                        is_group = str(chat_id).startswith('-')
+
+                        # Recordatorios solo para chats privados, no grupos
+                        if is_group:
+                            continue
+
+                        last_reminder = notification["last_reminder_time"].get(chat_id, 0)
+
+                        # Solo enviar si pasó el intervalo (1 minuto para privados)
+                        if current_time - last_reminder >= self.REMINDER_INTERVAL_PRIVATE:
+                            await self.application.bot.send_message(
+                                chat_id=chat_id,
+                                text=reminder_msg,
+                                parse_mode=ParseMode.MARKDOWN,
+                                reply_markup=keyboard
+                            )
+                            notification["last_reminder_time"][chat_id] = current_time
+                            logger.debug(f"Recordatorio de alarma enviado a {chat_id}")
+                    except Exception as e:
+                        logger.error(f"Error enviando recordatorio a {chat_id}: {e}")
+
+                # Esperar el intervalo mínimo antes de verificar de nuevo
+                await asyncio.sleep(self.REMINDER_INTERVAL_PRIVATE)
+
+        except asyncio.CancelledError:
+            logger.debug(f"Tarea de recordatorio de alarma cancelada para {device_id}")
+        except Exception as e:
+            logger.error(f"Error en tarea de recordatorio de alarma para {device_id}: {e}")
+
+    def _clear_alarm_notification(self, device_id: str):
+        """Limpia el estado de notificación de alarma para un dispositivo."""
+        notification = self._alarm_notifications.pop(device_id, None)
+        if notification and notification.get("reminder_task"):
+            notification["reminder_task"].cancel()
+            logger.debug(f"Notificación de alarma limpiada para {device_id}")
+
+    async def _bengala_reminder_task(self, device_id: str):
+        """
+        Tarea de recordatorios para confirmación de bengala.
+        Privado: cada 1 minuto, Grupos: cada 5 minutos.
+        Solo envía si el dispositivo está online.
+        """
+        try:
+            # Inicializar tiempos de último recordatorio por chat
+            last_reminder_time: Dict[str, float] = {}
+
+            # Esperar antes del primer recordatorio
+            await asyncio.sleep(self.REMINDER_INTERVAL_PRIVATE)
+
+            while device_id in self._bengala_confirmations:
                 confirmation = self._bengala_confirmations.get(device_id)
                 if not confirmation:
                     break
@@ -1977,9 +2317,13 @@ class TelegramBot:
                     await self._handle_bengala_timeout(device_id)
                     break
 
-                # Enviar recordatorio
-                confirmation.reminder_count += 1
-                time_remaining = self.BENGALA_CONFIRMATION_TIMEOUT - (time.time() - confirmation.timestamp)
+                # Solo enviar recordatorios si el dispositivo está online
+                if not self.mqtt_handler or not self.mqtt_handler.is_device_online(device_id):
+                    await asyncio.sleep(self.REMINDER_INTERVAL_PRIVATE)
+                    continue
+
+                current_time = time.time()
+                time_remaining = self.BENGALA_CONFIRMATION_TIMEOUT - (current_time - confirmation.timestamp)
                 device_location = self.firebase_manager.get_device_location(device_id) or device_id
 
                 reminder_msg = (
@@ -1987,18 +2331,31 @@ class TelegramBot:
                     f"📍 *{device_location}*\n"
                     f"🔔 Sensor: {confirmation.sensor_name}\n\n"
                     f"🔥 *¿Disparar bengala?*\n"
-                    f"• `/si` - Disparar\n"
-                    f"• `/no` - Cancelar\n\n"
+                    f"Usa los botones del mensaje anterior para responder.\n\n"
                     f"⏱️ _Tiempo restante: {int(time_remaining)}s_"
                 )
 
                 for chat_id in confirmation.chat_ids:
                     try:
-                        await self.send_message(chat_id, reminder_msg, "Markdown", has_keyboard=True)
+                        is_group = str(chat_id).startswith('-')
+
+                        # Recordatorios solo para chats privados, no grupos
+                        if is_group:
+                            continue
+
+                        last_sent = last_reminder_time.get(chat_id, 0)
+
+                        # Solo enviar si pasó el intervalo (1 minuto para privados)
+                        if current_time - last_sent >= self.REMINDER_INTERVAL_PRIVATE:
+                            await self.send_message(chat_id, reminder_msg, "Markdown", has_keyboard=True)
+                            last_reminder_time[chat_id] = current_time
+                            confirmation.reminder_count += 1
+                            logger.debug(f"Recordatorio bengala enviado a {chat_id}")
                     except Exception as e:
                         logger.error(f"Error enviando recordatorio a {chat_id}: {e}")
 
-                logger.debug(f"Recordatorio #{confirmation.reminder_count} enviado para {device_id}")
+                # Esperar el intervalo mínimo antes de verificar de nuevo
+                await asyncio.sleep(self.REMINDER_INTERVAL_PRIVATE)
 
         except asyncio.CancelledError:
             logger.debug(f"Tarea de recordatorio cancelada para {device_id}")
@@ -2029,14 +2386,6 @@ class TelegramBot:
 
         # Limpiar estado
         self._clear_bengala_confirmation(device_id)
-
-    def _get_pending_confirmation_for_chat(self, chat_id: str) -> Optional[BengalaConfirmation]:
-        """Busca una confirmación de bengala pendiente para un chat específico."""
-        for device_id, confirmation in self._bengala_confirmations.items():
-            if chat_id in confirmation.chat_ids:
-                if not confirmation.is_expired(self.BENGALA_CONFIRMATION_TIMEOUT):
-                    return confirmation
-        return None
 
     def _clear_bengala_confirmation(self, device_id: str):
         """Limpia el estado de confirmación de bengala para un dispositivo."""

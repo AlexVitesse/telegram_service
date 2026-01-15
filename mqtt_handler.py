@@ -14,7 +14,7 @@ import paho.mqtt.client as mqtt
 from config import config
 from mqtt_protocol import (
     Topics, MqttEvent, MqttTelemetry, MqttCommand, TelegramFormatter,
-    EventType, Command, get_timestamp
+    EventType, Command, get_timestamp, SensorsList
 )
 # from firebase_manager import firebase_manager  <- Se elimina esta importación directa
 from device_manager import DeviceManager
@@ -54,6 +54,11 @@ class MqttHandler:
         self._on_event_callback: Optional[Callable] = None
         self._on_telemetry_callback: Optional[Callable] = None
         self._on_reconnect_callback: Optional[Callable] = None
+        self._on_sensors_list_callback: Optional[Callable] = None
+
+        # Almacén de lista de sensores por dispositivo
+        self.sensors_list: Dict[str, SensorsList] = {}
+        self.sensors_list_time: Dict[str, float] = {}
 
         # Cola de comandos pendientes para dispositivos offline
         # Estructura: {device_id: [(command, args, timestamp), ...]}
@@ -131,6 +136,15 @@ class MqttHandler:
     def _handle_event(self, payload: str):
         """Procesa mensaje de evento del ESP32"""
         try:
+            # Verificar si es una lista de sensores (tiene estructura diferente)
+            try:
+                d = json.loads(payload)
+                if d.get("eventType") == EventType.SENSORS_LIST:
+                    self._handle_sensors_list(payload)
+                    return
+            except:
+                pass
+
             event = MqttEvent.from_json(payload)
 
             # Actualizar device_id si no estaba configurado
@@ -249,6 +263,27 @@ class MqttHandler:
 
         except Exception as e:
             logger.error(f"Error procesando telemetria: {e}")
+
+    def _handle_sensors_list(self, payload: str):
+        """Procesa respuesta de lista de sensores LoRa del ESP32"""
+        try:
+            sensors_list = SensorsList.from_json(payload)
+
+            # Almacenar la lista de sensores
+            self.sensors_list[sensors_list.device_id] = sensors_list
+            self.sensors_list_time[sensors_list.device_id] = time.time()
+
+            logger.info(
+                f"Lista de sensores de {sensors_list.device_id}: "
+                f"{sensors_list.active_sensors}/{sensors_list.total_sensors} activos"
+            )
+
+            # Notificar via callback si está registrado
+            if self._on_sensors_list_callback:
+                self._on_sensors_list_callback(sensors_list)
+
+        except Exception as e:
+            logger.error(f"Error procesando lista de sensores: {e}")
 
     # ========================================
     # Metodos para buscar chats autorizados
@@ -417,6 +452,10 @@ class MqttHandler:
         """Solicita estado del sistema"""
         return self.send_command(Command.GET_STATUS.value, device_id=device_id)
 
+    def send_get_sensors(self, device_id: str = None) -> bool:
+        """Solicita lista de sensores LoRa del dispositivo"""
+        return self.send_command(Command.GET_SENSORS.value, device_id=device_id)
+
     def send_beep(self, count: int = 1, device_id: str = None) -> bool:
         """Envia comando para beep"""
         return self.send_command(Command.BEEP.value, {"count": count}, device_id=device_id)
@@ -514,6 +553,15 @@ class MqttHandler:
         """Registra callback para reconexión de dispositivos"""
         self._on_reconnect_callback = callback
 
+    def on_sensors_list(self, callback: Callable[[SensorsList], None]):
+        """Registra callback para lista de sensores"""
+        self._on_sensors_list_callback = callback
+
+    def get_sensors_list(self, device_id: str = None) -> Optional[SensorsList]:
+        """Obtiene la última lista de sensores conocida del dispositivo"""
+        target = device_id or self.device_id
+        return self.sensors_list.get(target)
+
     # ========================================
     # Utilidades
     # ========================================
@@ -566,8 +614,8 @@ class MqttHandler:
         Ruta: ESP32/{device_id}/Telemetry/
         """
         try:
-            # Usar ID truncado para consistencia con la App
-            device_id = self.truncate_device_id(telemetry.device_id)
+            # El ESP32 ya envía el ID truncado, usar directamente sin truncar de nuevo
+            device_id = telemetry.device_id
 
             telemetry_data = {
                 "wifi_rssi": telemetry.wifi_rssi,

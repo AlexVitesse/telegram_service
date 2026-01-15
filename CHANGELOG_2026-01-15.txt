@@ -1,0 +1,857 @@
+================================================================================
+CHANGELOG - TELEGRAM SERVICE
+Fecha: 2026-01-15
+================================================================================
+
+--------------------------------------------------------------------------------
+PROBLEMA 1: Comando /auto no habilitaba la bengala
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- Al ejecutar /auto, solo cambiaba el modo de bengala a automatico (ModoBengala=0)
+- NO habilitaba la bengala si estaba deshabilitada (BengalaHab=false)
+- Resultado: Usuario ejecutaba /auto pero la bengala seguia deshabilitada
+
+CAUSA RAIZ:
+- Existian DOS propiedades independientes para bengala:
+  * bengala_mode / ModoBengala (0=auto, 1=pregunta) - COMO dispara
+  * bengala_enabled / BengalaHab (true/false) - SI puede disparar
+- El comando /auto solo modificaba el MODO, no el estado de habilitacion
+
+ARCHIVOS MODIFICADOS:
+
+1. telegram_service/telegram_bot.py
+
+   Linea 970-973 (un solo dispositivo):
+   ANTES:
+   ```python
+   self.mqtt_handler.send_set_bengala_mode(mode=0, device_id=device_id)
+   self.device_manager.set_bengala_mode(device_id, 0)
+   ```
+
+   DESPUES:
+   ```python
+   self.mqtt_handler.send_set_bengala_mode(mode=0, device_id=device_id)
+   self.mqtt_handler.send_activate_bengala(device_id=device_id)  # AGREGADO
+   self.device_manager.set_bengala_mode(device_id, 0)
+   self.device_manager.set_bengala_enabled(device_id, True)  # AGREGADO
+   ```
+
+   Lineas 1676-1680 (callback multiples dispositivos):
+   ANTES:
+   ```python
+   self.mqtt_handler.send_set_bengala_mode(mode=0, device_id=device_id)
+   truncated_id = self.mqtt_handler.truncate_device_id(device_id)
+   self.device_manager.set_bengala_mode(truncated_id, 0)
+   ```
+
+   DESPUES:
+   ```python
+   self.mqtt_handler.send_set_bengala_mode(mode=0, device_id=device_id)
+   self.mqtt_handler.send_activate_bengala(device_id=device_id)  # AGREGADO
+   truncated_id = self.mqtt_handler.truncate_device_id(device_id)
+   self.device_manager.set_bengala_mode(truncated_id, 0)
+   self.device_manager.set_bengala_enabled(truncated_id, True)  # AGREGADO
+   ```
+
+2. telegram_service/firebase_manager.py
+
+   Metodo set_bengala_mode_in_firebase() - Linea 850:
+   ANTES:
+   ```python
+   def set_bengala_mode_in_firebase(self, device_id: str, mode: int):
+   ```
+
+   DESPUES:
+   ```python
+   def set_bengala_mode_in_firebase(self, device_id: str, mode: int, enable_bengala: bool = True):
+       # Ahora tambien establece BengalaHab=True cuando se cambia el modo
+       device_ref.child('ModoBengala').set(mode)
+       if enable_bengala:
+           device_ref.child('BengalaHab').set(True)
+   ```
+
+RESULTADO:
+- /auto ahora envia SET_BENGALA_MODE + ACTIVATE_BENGALA al ESP32
+- Actualiza DeviceManager con mode=0 y enabled=True
+- Actualiza Firebase con ModoBengala=0 y BengalaHab=True
+
+
+--------------------------------------------------------------------------------
+PROBLEMA 2: Comando /preguntar tampoco habilitaba la bengala
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- Mismo problema que /auto - solo cambiaba modo, no habilitaba
+
+SOLUCION APLICADA:
+- Misma correccion que /auto pero con mode=1
+
+ARCHIVOS MODIFICADOS:
+
+1. telegram_service/telegram_bot.py
+
+   Lineas 1021-1023 (un solo dispositivo):
+   ```python
+   self.mqtt_handler.send_activate_bengala(device_id=device_id)  # AGREGADO
+   self.device_manager.set_bengala_enabled(device_id, True)  # AGREGADO
+   ```
+
+   Lineas 1704-1708 (callback multiples dispositivos):
+   ```python
+   self.mqtt_handler.send_activate_bengala(device_id=device_id)  # AGREGADO
+   self.device_manager.set_bengala_enabled(truncated_id, True)  # AGREGADO
+   ```
+
+
+--------------------------------------------------------------------------------
+PROBLEMA 3: Comandos /si y /no obsoletos
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- Los comandos /si y /no eran redundantes
+- La funcionalidad ya existia en botones (bengala_confirm, bengala_cancel)
+- Usuario solicitó eliminarlos
+
+ARCHIVOS MODIFICADOS:
+
+1. telegram_service/telegram_bot.py
+
+   ELIMINADO - Handler registration (lineas 280-281):
+   ```python
+   app.add_handler(CommandHandler("si", self._cmd_si))
+   app.add_handler(CommandHandler("no", self._cmd_no))
+   ```
+
+   ELIMINADO - Help text (lineas 441-442):
+   ```python
+   help_text += "`/si` - Confirmar disparo de bengala\n"
+   help_text += "`/no` - Cancelar disparo de bengala\n\n"
+   ```
+
+   ELIMINADO - Metodos _cmd_si y _cmd_no (~85 lineas):
+   - Lineas 779-863 removidas completamente
+
+   ELIMINADO - Metodo _get_pending_confirmation_for_chat (sin uso):
+   - Lineas 1946-1952 removidas
+
+   ACTUALIZADO - Mensaje de /preguntar:
+   ANTES: "Responde `/si` para confirmar o `/no` para cancelar"
+   DESPUES: "con botones para confirmar o cancelar el disparo"
+
+   ACTUALIZADO - Mensaje de recordatorio:
+   ANTES: "• `/si` - Disparar\n• `/no` - Cancelar"
+   DESPUES: "Usa los botones del mensaje anterior para responder."
+
+RESULTADO:
+- ~95 lineas de codigo eliminadas
+- Interfaz mas limpia usando solo botones
+
+
+--------------------------------------------------------------------------------
+PROBLEMA 4: Falta comando /deshabilitar
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- Existian /auto y /preguntar como comandos directos
+- "Deshabilitar" solo estaba disponible como boton en menu /bengala
+- Usuario solicito agregar comando directo
+
+SOLUCION APLICADA:
+
+1. telegram_service/telegram_bot.py
+
+   AGREGADO - Handler registration (linea 283):
+   ```python
+   app.add_handler(CommandHandler("deshabilitar", self._cmd_deshabilitar))
+   ```
+
+   AGREGADO - Help text (linea 438):
+   ```python
+   help_text += "`/deshabilitar` - Desactivar bengala\n\n"
+   ```
+
+   AGREGADO - Metodo _cmd_deshabilitar (lineas 944-991):
+   ```python
+   @require_auth
+   async def _cmd_deshabilitar(self, update, context):
+       # Si multiples dispositivos: mostrar selector con botones
+       # Si un dispositivo: aplicar directamente
+       self.mqtt_handler.send_deactivate_bengala(device_id=device_id)
+       self.device_manager.set_bengala_enabled(device_id, False)
+       self.firebase_manager.set_bengala_enabled_in_firebase(device_id, False)
+   ```
+
+   ACTUALIZADO - Callback bengala_off_ (linea 1693):
+   ```python
+   self.firebase_manager.set_bengala_enabled_in_firebase(device_id, False)  # AGREGADO
+   ```
+
+2. telegram_service/firebase_manager.py
+
+   AGREGADO - Metodo set_bengala_enabled_in_firebase (lineas 902-937):
+   ```python
+   def set_bengala_enabled_in_firebase(self, device_id: str, enabled: bool):
+       # Busca todos los dispositivos que coincidan con el ID
+       # Actualiza BengalaHab en Firebase
+       device_ref.child('BengalaHab').set(enabled)
+   ```
+
+RESULTADO:
+- Nuevo comando /deshabilitar disponible
+- Sincroniza ESP32, DeviceManager y Firebase
+
+
+--------------------------------------------------------------------------------
+MEJORA 5: Seleccion de dispositivo en /horarios
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- El comando /horarios aplicaba la configuracion a TODOS los dispositivos
+- Usuarios con multiples alarmas no podian configurar horarios individuales
+- No habia forma de elegir un dispositivo especifico
+
+SOLUCION APLICADA:
+
+1. telegram_service/telegram_bot.py
+
+   AGREGADO - Variable de estado para rastrear dispositivo seleccionado:
+   ```python
+   self._horarios_selected_device: Dict[str, str] = {}  # chat_id -> device_id o "all"
+   ```
+
+   MODIFICADO - Metodo _cmd_horarios (lineas 1064-1257):
+   - Si el usuario tiene multiples dispositivos, muestra selector con botones
+   - Permite seleccionar un dispositivo individual o "TODOS"
+   - Agrega subcomando `/horarios cambiar` para cambiar dispositivo
+
+   ```python
+   if len(devices) > 1:
+       buttons = []
+       for device_id in devices:
+           location = self.firebase_manager.get_device_location(device_id) or device_id
+           buttons.append([InlineKeyboardButton(f"⏰ {location}", callback_data=f"horarios_select_{device_id}")])
+       buttons.append([InlineKeyboardButton("⏰ TODOS los dispositivos", callback_data="horarios_select_all")])
+   ```
+
+   MODIFICADO - Metodo _sync_schedule_to_devices (linea 1376):
+   ANTES:
+   ```python
+   async def _sync_schedule_to_devices(self, chat_id: str):
+       devices = self.firebase_manager.get_authorized_devices(chat_id)
+   ```
+
+   DESPUES:
+   ```python
+   async def _sync_schedule_to_devices(self, chat_id: str, target_devices: list = None):
+       if target_devices is None:
+           devices = self.firebase_manager.get_authorized_devices(chat_id)
+       else:
+           devices = target_devices
+   ```
+
+   AGREGADO - Callbacks para seleccion de dispositivo (lineas 1877-1922):
+   ```python
+   elif data.startswith("horarios_select_") and data != "horarios_select_all":
+       target_device = data.replace("horarios_select_", "")
+       self._horarios_selected_device[chat_id] = target_device
+       # Muestra estado del horario para ese dispositivo
+
+   elif data == "horarios_select_all":
+       self._horarios_selected_device[chat_id] = "all"
+       # Muestra estado del horario para todos los dispositivos
+   ```
+
+   ACTUALIZADO - Help text (lineas 444-449):
+   ANTES:
+   ```python
+   help_text += "`/horarios` - Ver programacion\n"
+   help_text += "`/horarios on HH:MM` - Hora de armado\n"
+   help_text += "`/horarios off HH:MM` - Hora de desarmado\n"
+   ```
+
+   DESPUES:
+   ```python
+   help_text += "`/horarios` - Ver/configurar programacion por dispositivo\n"
+   help_text += "`/horarios activar HH:MM` - Hora de armado\n"
+   help_text += "`/horarios desactivar HH:MM` - Hora de desarmado\n"
+   help_text += "`/horarios cambiar` - Cambiar dispositivo seleccionado\n"
+   ```
+
+RESULTADO:
+- Usuarios con multiples dispositivos pueden configurar horarios individualmente
+- Opcion de aplicar horario a "TODOS" los dispositivos
+- Subcomando `/horarios cambiar` para cambiar la seleccion en cualquier momento
+- Sincroniza correctamente solo los dispositivos seleccionados
+
+
+================================================================================
+RESUMEN DE COMANDOS DE BENGALA ACTUALIZADOS
+================================================================================
+
+| Comando        | ESP32                              | DeviceManager      | Firebase              |
+|----------------|------------------------------------|--------------------|----------------------|
+| /auto          | SET_BENGALA_MODE(0) + ACTIVATE     | mode=0, enabled=T  | ModoBengala=0, Hab=T |
+| /preguntar     | SET_BENGALA_MODE(1) + ACTIVATE     | mode=1, enabled=T  | ModoBengala=1, Hab=T |
+| /deshabilitar  | DEACTIVATE_BENGALA                 | enabled=F          | BengalaHab=F         |
+| /bengala       | Menu con botones para las 3 opciones anteriores                              |
+
+
+================================================================================
+ARCHIVOS MODIFICADOS HOY
+================================================================================
+
+1. telegram_service/telegram_bot.py
+   - Correccion /auto y /preguntar (habilitar bengala)
+   - Eliminacion /si y /no
+   - Nuevo comando /deshabilitar
+   - Seleccion de dispositivo en /horarios
+   - Nuevo subcomando /horarios cambiar
+   - Callbacks para horarios_select_*
+   - Actualizacion mensajes y help text
+
+2. telegram_service/firebase_manager.py
+   - Modificacion set_bengala_mode_in_firebase (parametro enable_bengala)
+   - Nuevo metodo set_bengala_enabled_in_firebase
+
+3. telegram_service/mqtt_protocol.py
+   - Nuevo EventType: SENSORS_LIST
+   - Nuevo Command: GET_SENSORS
+   - Nueva estructura SensorInfo (info de sensor individual)
+   - Nueva estructura SensorsList (lista de sensores)
+
+4. telegram_service/mqtt_handler.py
+   - Nuevo metodo send_get_sensors()
+   - Nuevo metodo get_sensors_list()
+   - Nuevo callback on_sensors_list()
+   - Handler _handle_sensors_list()
+
+5. alarma_modulos/mqtt_protocol.h (ESP32)
+   - Nuevo comando CMD_GET_SENSORS
+   - Nuevo evento EVENT_SENSORS_LIST
+
+6. alarma_modulos/mqtt_client.cpp (ESP32)
+   - Nueva funcion publishSensorsList()
+
+7. alarma_modulos/mqtt_client.h (ESP32)
+   - Declaracion de publishSensorsList()
+
+8. alarma_modulos/alarma_modulos.ino (ESP32)
+   - Handler para comando GET_SENSORS
+
+
+--------------------------------------------------------------------------------
+MEJORA 6: Comando /sensors mejorado con lista de sensores LoRa
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- /sensors no mostraba el nombre del dispositivo (solo MAC)
+- No mostraba informacion detallada de sensores LoRa individuales
+- Era muy similar a /status sin diferenciacion clara
+
+SOLUCION APLICADA:
+
+1. Fix del nombre: Ahora usa firebase_manager.get_device_location() igual que /status
+
+2. Nuevo comando MQTT GET_SENSORS:
+   - ESP32 responde con lista completa de sensores LoRa
+   - Incluye: id, nombre, tipo, estado, RSSI, ubicacion, ultimo visto
+
+3. Nuevo formato visual con arbol:
+   ```
+   📡 SENSORES - Esp32
+   ━━━━━━━━━━━━━━━━━━━━━━━━━
+
+   📻 SENSORES LORA (3/4)
+   ├─ 🟢 🚶 Sensor Movimiento 1
+   │   RSSI: -65 dBm | Visto: hace 2s
+   ├─ 🟢 🚪 Puerta Principal
+   │   RSSI: -58 dBm | Visto: hace 1m
+   └─ 🔴 ⌨️ Teclado (inactivo)
+       RSSI: -80 dBm | Visto: hace 15m
+
+   📊 DISPOSITIVO CENTRAL
+   ├─ 📶 WiFi: Regular (-68 dBm)
+   ├─ ✅ Memoria: 63.1 KB
+   └─ ⏱ Uptime: 2d 5h
+
+   🔒 CONFIGURACION
+   ├─ Sistema: ARMADO
+   ├─ 🔥 Bengala: Pregunta
+   ├─ ⏰ Tiempo salida: 60s
+   ├─ ⏰ Tiempo pre-alarma: 60s
+   └─ 📅 Horario: Desactivado
+
+   🆔 08_D1_F9_29_E4
+   ```
+
+4. Diferencias entre /status y /sensors:
+   | /status              | /sensors                    |
+   |---------------------|-----------------------------|
+   | Vista rapida        | Vista tecnica detallada     |
+   | Solo conteo LoRa    | Lista completa de sensores  |
+   | Sin tiempos         | Tiempo salida/pre-alarma    |
+   | Sin memoria/uptime  | Memoria y uptime incluidos  |
+
+RESULTADO:
+- /sensors ahora muestra nombre correcto del dispositivo
+- Lista detallada de cada sensor LoRa con estado y señal
+- Formato visual mejorado tipo arbol
+- Informacion tecnica completa para diagnostico
+
+
+================================================================================
+NOTAS ADICIONALES
+================================================================================
+
+- MEJORA 6 SI requiere cambios en ESP32 (nuevo comando GET_SENSORS)
+- Los cambios anteriores (1-5) NO requieren modificaciones en ESP32
+- El problema del nombre en /sensors era que no usaba Firebase
+
+
+================================================================================
+MEJORA 7: Optimizacion de consultas a Firebase (IMPLEMENTADO)
+================================================================================
+
+PROBLEMA IDENTIFICADO:
+El VPS consultaba Firebase Realtime Database frecuentemente con polling (.get())
+aunque ya existia un sistema de listeners (suscripciones).
+
+ESTADO ANTERIOR:
+
+1. YA EXISTIAN LISTENERS (suscripciones en tiempo real):
+   - _devices_listener: Escucha cambios en /ESP32
+   - _schedules_listener: Escucha cambios en /Horarios
+   - Firebase notifica al VPS cuando hay cambios (push, no polling)
+
+2. PROBLEMA: Cache no se actualizaba desde el listener
+   - El listener recibia los cambios pero NO actualizaba el cache interno
+   - Las funciones usaban _get_all_devices() que tiene cache TTL de 60 segundos
+   - Cada 60 segundos hacia .get() aunque el listener ya tenia la data
+
+3. FLUJO ANTERIOR (INEFICIENTE):
+   ```
+   [Firebase] --cambio--> [Listener] --invalida cache-->
+
+   [Funcion necesita datos] --> [Cache invalidado?]
+                                    |
+                                    v
+                            SI: .get() a Firebase (consulta innecesaria)
+                            NO: Usa cache
+   ```
+
+SOLUCION IMPLEMENTADA:
+
+1. NUEVO FLUJO (OPTIMO):
+   ```
+   [Firebase] --cambio--> [Listener] --actualiza--> [Cache interno]
+
+   [Funcion necesita datos] --> [Lee cache] (siempre actualizado, sin consulta)
+   ```
+
+2. CAMBIOS EN firebase_manager.py:
+
+   NUEVO METODO - _update_cache_from_event() (lineas 206-271):
+   ```python
+   def _update_cache_from_event(self, event) -> None:
+       """
+       Actualiza el cache local desde un evento del listener de Firebase.
+       Esto evita consultas .get() innecesarias ya que el listener mantiene
+       el cache actualizado en tiempo real.
+       """
+       if event.path == "/" and isinstance(event.data, dict):
+           # Evento inicial o reset completo - reemplazar todo el cache
+           self._all_devices_cache = event.data
+           self._cache_timestamp = time.time()
+
+       elif self._all_devices_cache is not None:
+           # Actualizacion parcial - modificar el cache existente
+           parts = event.path.split('/')
+           device_id = parts[1]
+           field = parts[2] if len(parts) >= 3 else None
+
+           # Manejar eliminaciones y actualizaciones incrementales
+           # ... (logica completa para cada caso)
+   ```
+
+   MODIFICADO - _app_command_listener() (linea 273):
+   ANTES:
+   ```python
+   self.invalidate_cache()  # Forzaba .get() en proxima consulta
+   ```
+   DESPUES:
+   ```python
+   self._update_cache_from_event(event)  # Actualiza cache en memoria
+   ```
+
+   MODIFICADO - _is_cache_valid() (lineas 564-578):
+   ANTES:
+   ```python
+   def _is_cache_valid(self) -> bool:
+       if not self._all_devices_cache:
+           return False
+       elapsed = time.time() - self._cache_timestamp
+       return elapsed < self.CACHE_TTL_SECONDS  # Expiraba cada 60s
+   ```
+   DESPUES:
+   ```python
+   def _is_cache_valid(self) -> bool:
+       if not self._all_devices_cache:
+           return False
+       # Si el listener esta activo, el cache siempre es valido
+       if self._listener_active:
+           return True
+       # Fallback a TTL si el listener no esta activo
+       elapsed = time.time() - self._cache_timestamp
+       return elapsed < self.CACHE_TTL_SECONDS
+   ```
+
+   MEJORADO - _get_all_devices() (lineas 586-609):
+   - Mejor logging para diagnostico
+   - Solo hace .get() cuando el listener no esta activo o cache no inicializado
+
+BENEFICIOS:
+- Reduccion de consultas a Firebase (de cada 60s a solo al inicio)
+- Menor latencia (datos siempre en memoria)
+- Menor costo de Firebase (menos operaciones de lectura)
+- Datos siempre en tiempo real (actualizados por push)
+
+MITIGACION DE RIESGOS:
+- Si el listener se desconecta, check_listener_health() reconecta automaticamente
+- En caso de error en actualizacion de cache, se invalida para forzar .get()
+- TTL sigue funcionando como fallback si listener no esta activo
+
+
+================================================================================
+FIX 8: Comando /join_ y /approve - Sistema de solicitudes de acceso
+================================================================================
+
+PROBLEMAS REPORTADOS:
+1. /join_ decia "Ya tienes acceso a este dispositivo" aunque no era cierto
+2. La solicitud expiraba muy rapido (< 1 minuto, querian 5 minutos)
+3. /approve no recibia la notificacion (nunca funcionaba)
+
+CAUSAS RAIZ:
+
+1. BUG "Ya tienes acceso":
+   - _cmd_join verificaba si el usuario tenia acceso a CUALQUIER dispositivo
+   - Debia verificar si tenia acceso al dispositivo ESPECIFICO solicitado
+
+2. SOLICITUDES PENDIENTES ERAN STUBS:
+   - add_pending_request() -> solo hacia log, NO guardaba nada
+   - get_pending_request() -> siempre retornaba None
+   - remove_pending_request() -> no hacia nada
+   - Por eso "expiraba" inmediatamente - nunca se guardaba!
+
+3. add_authorized_chat NO ENCONTRABA EL DISPOSITIVO:
+   - Buscaba el device_id exacto en Firebase
+   - Si el ID era parcial (6C_C8_40) no encontraba el completo (6C_C8_40_4F_C7_B2)
+
+SOLUCION IMPLEMENTADA:
+
+1. telegram_service/telegram_bot.py - _cmd_join():
+   ANTES:
+   ```python
+   if self._is_user_authorized(chat_id):  # Verifica CUALQUIER dispositivo
+       await update.message.reply_text("Ya tienes acceso a este dispositivo")
+   ```
+   DESPUES:
+   ```python
+   authorized_devices = self.firebase_manager.get_authorized_devices(chat_id)
+   for auth_dev in authorized_devices:
+       # Comparar considerando IDs truncados
+       if auth_dev.startswith(device_id) or device_id.startswith(auth_dev):
+           await update.message.reply_text(f"Ya tienes acceso a ({device_name})")
+           return
+   ```
+
+2. telegram_service/firebase_manager.py - add_pending_request():
+   ANTES: stub que solo hacia log
+   DESPUES: Guarda en Firebase /PendingRequests/{chat_id} con:
+   - name: nombre del usuario
+   - device_id: dispositivo solicitado
+   - timestamp: cuando se creo
+   - expires_at: timestamp + 300 segundos (5 minutos)
+
+3. telegram_service/firebase_manager.py - get_pending_request():
+   ANTES: return None (siempre)
+   DESPUES:
+   - Busca en Firebase /PendingRequests/{chat_id}
+   - Verifica si ha expirado (> expires_at)
+   - Si expiro, elimina automaticamente y retorna None
+   - Si no expiro, retorna los datos
+
+4. telegram_service/firebase_manager.py - remove_pending_request():
+   ANTES: pass (no hacia nada)
+   DESPUES: Elimina /PendingRequests/{chat_id} de Firebase
+
+5. telegram_service/firebase_manager.py - add_authorized_chat():
+   ANTES: Buscaba device_id exacto
+   DESPUES: Busca coincidencias parciales (startswith en ambas direcciones)
+
+6. Mensajes mejorados:
+   - /join_ ahora indica que expira en 5 minutos
+   - /approve muestra causas posibles si no encuentra solicitud
+   - Notificacion al admin incluye tiempo de expiracion
+
+FLUJO CORREGIDO:
+
+1. Usuario envia /join_6C_C8_40
+2. Sistema verifica si ya tiene acceso a ESE dispositivo especifico
+3. Si no tiene acceso:
+   - Guarda solicitud en Firebase /PendingRequests/{chat_id}
+   - Notifica a todos los admins con tiempo de expiracion
+   - Usuario ve mensaje con tiempo limite de 5 minutos
+
+4. Admin recibe notificacion y envia /approve_{chat_id}
+5. Sistema busca solicitud pendiente:
+   - Si existe y no expiro: agrega autorizacion
+   - Si expiro: mensaje de error con causas posibles
+
+6. Usuario recibe notificacion de acceso aprobado
+
+
+================================================================================
+FIX 9: Notificacion cuando alarma se detiene al desarmar
+================================================================================
+
+PROBLEMA REPORTADO:
+- Cuando la alarma se detiene, no hay "alerta" para los usuarios
+- Solo recibian "Sistema DESARMADO" pero no sabian que la alarma fue detenida
+
+CAUSA RAIZ:
+- El evento `alarm_stopped` solo se publicaba con el comando `stop_alarm`
+- Cuando se usaba `disarm` (desarmar), solo se publicaba `system_disarmed`
+- Si la alarma estaba sonando, los usuarios no recibian notificacion explicita
+
+ESCENARIOS AFECTADOS:
+1. Desarmar sistema via Telegram (/off)
+2. Desarmar sistema via App Ionic
+3. Desarmar sistema via Alexa
+4. Desarmar sistema via teclado LoRa
+5. Desactivacion automatica por horario
+
+SOLUCION IMPLEMENTADA:
+
+1. alarma_modulos.ino - securityOff() (linea 1709):
+   ```cpp
+   void securityOff() {
+     // Guardar estado de alarma ANTES de resetear flags
+     bool alarmWasActive = medialarma || comandoDisparoActivo;
+
+     // ... apagar sirenas y buzzer ...
+
+     // Si la alarma estaba activa, notificar que se detuvo
+     if (alarmWasActive && shouldNotify) {
+       publishAlarmStoppedEvent();
+       Serial.println("🔔 Notificación: Alarma detenida");
+     }
+
+     // ... resetear flags ...
+     publishDisarmedEvent(source);
+   }
+   ```
+
+2. alarma_modulos.ino - Desactivacion automatica (linea 1480):
+   - Mismo cambio aplicado para desactivacion por horario
+
+RESULTADO:
+- Cuando se desarma el sistema con alarma activa, usuarios reciben:
+  1. "✅ Alarma detenida" (alarm_stopped)
+  2. "🔓 Sistema DESARMADO" (system_disarmed)
+- Ambos mensajes llegan en secuencia para mayor claridad
+
+NOTA: Requiere recompilar y subir el codigo al ESP32
+
+
+================================================================================
+FIX 10: Botones de alarma y recordatorios diferenciados
+================================================================================
+
+PROBLEMAS REPORTADOS:
+1. En modo bengala deshabilitada/auto, el boton "Dejar armado" no respondia
+2. No habia forma de desactivar el sistema con botones en esos modos
+3. Los recordatorios de alarma activa eran muy frecuentes (spam)
+
+CAUSAS RAIZ:
+1. Cuando bengala no estaba en modo "pregunta", solo se enviaba texto sin botones
+2. Los usuarios no tenian forma de interactuar excepto con comandos de texto
+3. El intervalo de recordatorios era de 30 segundos para todos
+
+SOLUCION IMPLEMENTADA:
+
+1. NUEVO FLUJO DE ALARMA POR MODO:
+
+   | Modo Bengala     | Botones mostrados                              |
+   |------------------|------------------------------------------------|
+   | Pregunta (1)     | "Disparar bengala", "Dejar armado", "Desactivar"|
+   | Auto (0)         | Solo "Desactivar sistema"                       |
+   | Deshabilitada    | Solo "Desactivar sistema"                       |
+
+2. telegram_service/telegram_bot.py - handle_mqtt_event():
+   ```python
+   if bengala_mode == 1 and bengala_enabled:
+       # Flujo completo con opcion de bengala
+       await self._start_bengala_confirmation(...)
+   else:
+       # Solo boton de desactivar
+       await self._start_alarm_notification(...)
+   ```
+
+3. NUEVA FUNCION _start_alarm_notification():
+   - Muestra solo boton "Desactivar sistema"
+   - Inicia recordatorios con intervalos diferenciados
+   - Limpia estado cuando se desactiva
+
+4. INTERVALOS DE RECORDATORIOS DIFERENCIADOS:
+   - Chat privado: cada 1 minuto (60 segundos)
+   - Grupos: cada 5 minutos (300 segundos)
+
+   ```python
+   self.REMINDER_INTERVAL_PRIVATE = 60   # 1 minuto
+   self.REMINDER_INTERVAL_GROUP = 300    # 5 minutos
+   ```
+
+5. telegram_service/telegram_bot.py - _bengala_reminder_task():
+   - Actualizado para usar intervalos diferenciados
+   - Cada chat recibe recordatorios segun su tipo
+
+6. NUEVA FUNCION _alarm_reminder_task():
+   - Similar a bengala pero para modo auto/deshabilitado
+   - Mismos intervalos diferenciados
+
+7. NUEVA FUNCION _clear_alarm_notification():
+   - Limpia estado y cancela tarea de recordatorios
+
+8. VERIFICACION DE DISPOSITIVO ONLINE:
+   - Los recordatorios SOLO se envian si el dispositivo esta online
+   - Si el dispositivo esta offline, se espera sin enviar spam
+   ```python
+   if not self.mqtt_handler.is_device_online(device_id):
+       await asyncio.sleep(self.REMINDER_INTERVAL_PRIVATE)
+       continue  # No enviar, esperar
+   ```
+
+9. NOTIFICACION DE BENGALA A GRUPOS:
+   - Cuando se activa bengala, ahora se notifica a TODOS los chats (privados y grupos)
+   - Antes solo notificaba al usuario que presiono el boton
+   ```python
+   # Notificar a TODOS los chats autorizados (privados y grupos)
+   all_chats = self.firebase_manager.get_authorized_chats(device_id)
+   for notify_chat_id in all_chats:
+       await self.send_message(notify_chat_id, bengala_msg, "Markdown")
+   ```
+
+RESULTADO:
+- Usuarios siempre tienen boton para desactivar el sistema
+- Grupos reciben menos spam (cada 5 min vs cada 1 min en privado)
+- Recordatorios solo cuando el dispositivo esta online
+- Flujo claro segun el modo de bengala configurado
+- Grupos reciben notificacion de "Bengala Activada"
+
+
+================================================================================
+FIX 11: Botones de alarma no funcionaban (desajuste de IDs)
+================================================================================
+
+PROBLEMA REPORTADO:
+- En modo pregunta, los botones "Disparar bengala" y "Dejar armado" no funcionaban
+- Solo "Desactivar sistema" funcionaba correctamente
+
+CAUSA RAIZ:
+- Desajuste entre IDs de dispositivos:
+  * ESP32 envia ID completo: "6C_C8_40_4F_C7_B2"
+  * Firebase almacena ID truncado: "6C_C8_40_4F_C7"
+- Funciones de DeviceManager usaban coincidencia EXACTA
+- `is_alarming("6C_C8_40_4F_C7")` buscaba exacto y no encontraba "6C_C8_40_4F_C7_B2"
+
+SOLUCION:
+Actualizar funciones en device_manager.py para usar coincidencia PARCIAL de IDs:
+
+```python
+# ANTES (coincidencia exacta - fallaba):
+def is_alarming(self, device_id: str) -> bool:
+    device_data = self.devices_state.get(device_id)  # Exacto
+    if device_data:
+        return device_data.get("is_alarming", False)
+    return False
+
+# DESPUES (coincidencia parcial - funciona):
+def is_alarming(self, device_id: str) -> bool:
+    for stored_id, device_data in self.devices_state.items():
+        if stored_id.startswith(device_id) or device_id.startswith(stored_id):
+            if device_data.get("is_alarming", False):
+                return True
+    return False
+```
+
+FUNCIONES CORREGIDAS:
+- get_device_info()
+- is_armed()
+- is_alarming()
+- is_online()
+- get_bengala_mode()
+- is_bengala_enabled()
+
+LOGICA DE MATCHING:
+- Si uno es prefijo del otro, se considera match
+- "6C_C8_40_4F_C7_B2".startswith("6C_C8_40_4F_C7") -> True
+- "6C_C8_40_4F_C7".startswith("6C_C8_40_4F_C7_B2") -> False
+- Verificacion bidireccional cubre ambos casos
+
+
+================================================================================
+FIX 12: Recordatorios de horarios solo para chats privados
+================================================================================
+
+PROBLEMA REPORTADO:
+- Los recordatorios de horarios programados (ej: "El sistema se activara en 15 min")
+  se enviaban tambien a grupos
+- Usuario queria que estos recordatorios solo lleguen a chats privados
+
+CAUSA RAIZ:
+- _scheduled_reminder() usaba _schedule_telegram_broadcast_for_device()
+- Este metodo envia a TODOS los chats autorizados, incluyendo grupos
+
+SOLUCION IMPLEMENTADA:
+
+1. telegram_service/main.py - _scheduled_reminder() (linea 111):
+   ANTES:
+   ```python
+   self._schedule_telegram_broadcast_for_device(self.mqtt.device_id, msg)
+   ```
+   DESPUES:
+   ```python
+   # Solo enviar a chats privados (no a grupos)
+   self._schedule_telegram_broadcast_private_only(self.mqtt.device_id, msg)
+   ```
+
+2. NUEVO METODO - _schedule_telegram_broadcast_private_only() (linea 361):
+   ```python
+   def _schedule_telegram_broadcast_private_only(self, device_id: str, message: str):
+       """Envia un mensaje de texto solo a chats privados (no a grupos)"""
+       chat_ids = self._get_authorized_chats(device_id)
+
+       for chat_id in chat_ids:
+           # Solo enviar a chats privados (ID positivo)
+           is_group = int(chat_id) < 0
+           if not is_group:
+               # Enviar mensaje...
+   ```
+
+NOTIFICACIONES Y DONDE SE ENVIAN:
+| Tipo de notificacion             | Privados | Grupos |
+|----------------------------------|----------|--------|
+| Activacion automatica            | Si       | Si     |
+| Desactivacion automatica         | Si       | Si     |
+| Recordatorio de horario (15 min) | Si       | NO     |
+| Alarma activada                  | Si       | Si     |
+| Recordatorios alarma activa      | Si       | NO     |
+| Dispositivo offline/online       | Si       | Si     |
+| Bengala activada                 | Si       | Si     |
+
+RESULTADO:
+- Recordatorios de horarios programados solo llegan a chats privados
+- Grupos no reciben spam de recordatorios preventivos
+- Notificaciones importantes (alarma, offline) siguen llegando a todos
+

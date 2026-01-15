@@ -1,14 +1,17 @@
 {
-  "enabled": false,
-  "on_hour": 16,
+  "enabled": true,
+  "on_hour": 7,
   "on_minute": 0,
-  "off_hour": 22,
+  "off_hour": 18,
   "off_minute": 0,
   "days": [
-    "S\u00e1bado",
-    "Domingo"
+    "Lunes",
+    "Martes",
+    "Mi\u00e9rcoles",
+    "Jueves",
+    "Viernes"
   ],
   "notify_before_minutes": 5,
-  "last_on_executed": "",
-  "last_off_executed": ""
+  "last_on_executed": "2026-01-15",
+  "last_off_executed": "2026-01-15"
 }

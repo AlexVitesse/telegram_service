@@ -64,6 +64,7 @@ class EventType(str, Enum):
     KEYPAD_ARM = "keypad_arm"
     KEYPAD_DISARM = "keypad_disarm"
     STATUS_RESPONSE = "status_response"
+    SENSORS_LIST = "sensors_list"
 
 # ============================================
 # COMANDOS
@@ -78,6 +79,7 @@ class Command(str, Enum):
     DEACTIVATE_BENGALA = "deactivate_bengala"
     SET_BENGALA_MODE = "set_bengala_mode"
     GET_STATUS = "get_status"
+    GET_SENSORS = "get_sensors"
     SET_SCHEDULE = "set_schedule"
     SET_EXIT_TIME = "set_exit_time"
     BEEP = "beep"
@@ -146,6 +148,72 @@ class MqttTelemetry:
             tiempo_pre=d.get("tiempo_pre", 60),      # Tiempo de pre-alarma desde ESP32
             location=d.get("location", ""),
             name=d.get("name", "")
+        )
+
+@dataclass
+class SensorInfo:
+    """Información de un sensor LoRa individual"""
+    sensor_id: str
+    name: str
+    sensor_type: str  # SM=movimiento, DW=puerta/ventana, TEC=teclado
+    active: bool
+    rssi: int
+    location: str
+    last_seen_sec: int  # Segundos desde última comunicación
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'SensorInfo':
+        return cls(
+            sensor_id=d.get("id", ""),
+            name=d.get("name", ""),
+            sensor_type=d.get("type", ""),
+            active=d.get("active", False),
+            rssi=d.get("rssi", 0),
+            location=d.get("location", ""),
+            last_seen_sec=d.get("lastSeenSec", 0)
+        )
+
+    def get_type_icon(self) -> str:
+        """Retorna icono según tipo de sensor"""
+        icons = {
+            "SM": "🚶",   # Sensor movimiento
+            "DW": "🚪",   # Puerta/ventana
+            "TEC": "⌨️",  # Teclado
+            "SIR": "🔊",  # Sirena
+            "BEN": "🔥",  # Bengala
+        }
+        return icons.get(self.sensor_type, "📡")
+
+    def get_type_name(self) -> str:
+        """Retorna nombre legible del tipo"""
+        names = {
+            "SM": "Movimiento",
+            "DW": "Puerta/Ventana",
+            "TEC": "Teclado",
+            "SIR": "Sirena",
+            "BEN": "Bengala",
+        }
+        return names.get(self.sensor_type, "Sensor")
+
+@dataclass
+class SensorsList:
+    """Lista de sensores LoRa de un dispositivo"""
+    device_id: str
+    timestamp: int
+    sensors: List[SensorInfo]
+    total_sensors: int
+    active_sensors: int
+
+    @classmethod
+    def from_json(cls, payload: str) -> 'SensorsList':
+        d = json.loads(payload)
+        sensors = [SensorInfo.from_dict(s) for s in d.get("sensors", [])]
+        return cls(
+            device_id=d.get("deviceId", ""),
+            timestamp=d.get("timestamp", 0),
+            sensors=sensors,
+            total_sensors=d.get("totalSensors", len(sensors)),
+            active_sensors=d.get("activeSensors", sum(1 for s in sensors if s.active))
         )
 
 # ============================================

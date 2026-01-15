@@ -123,21 +123,36 @@ class DeviceManager:
         return reminders_needed
 
     def get_device_info(self, device_id: str) -> Optional[Dict[str, Any]]:
-        """Retorna la información completa de un dispositivo."""
-        return self.devices_state.get(device_id)
+        """
+        Retorna la información completa de un dispositivo.
+        Usa coincidencia parcial de IDs.
+        """
+        for stored_id, device_data in self.devices_state.items():
+            if stored_id.startswith(device_id) or device_id.startswith(stored_id):
+                return device_data
+        return None
 
     def is_armed(self, device_id: str) -> bool:
-        """Verifica si un dispositivo está armado."""
-        device_data = self.devices_state.get(device_id)
-        if device_data:
-            return device_data.get("is_armed", False)
+        """
+        Verifica si un dispositivo está armado.
+        Usa coincidencia parcial de IDs (uno es prefijo del otro).
+        """
+        for stored_id, device_data in self.devices_state.items():
+            if stored_id.startswith(device_id) or device_id.startswith(stored_id):
+                if device_data.get("is_armed", False):
+                    return True
         return False
 
     def is_alarming(self, device_id: str) -> bool:
-        """Verifica si un dispositivo está en estado de alarma."""
-        device_data = self.devices_state.get(device_id)
-        if device_data:
-            return device_data.get("is_alarming", False)
+        """
+        Verifica si un dispositivo está en estado de alarma.
+        Usa coincidencia parcial de IDs (uno es prefijo del otro).
+        """
+        # Buscar coincidencia parcial en todos los dispositivos
+        for stored_id, device_data in self.devices_state.items():
+            if stored_id.startswith(device_id) or device_id.startswith(stored_id):
+                if device_data.get("is_alarming", False):
+                    return True
         return False
 
     def get_all_device_ids(self) -> List[str]:
@@ -166,10 +181,14 @@ class DeviceManager:
         return False  # No hubo cambio de estado
 
     def is_online(self, device_id: str) -> bool:
-        """Verifica si un dispositivo está online."""
-        device_data = self.devices_state.get(device_id)
-        if device_data:
-            return device_data.get("is_online", False)
+        """
+        Verifica si un dispositivo está online.
+        Usa coincidencia parcial de IDs.
+        """
+        for stored_id, device_data in self.devices_state.items():
+            if stored_id.startswith(device_id) or device_id.startswith(stored_id):
+                if device_data.get("is_online", False):
+                    return True
         return False
 
     def check_offline_devices(self, timeout_seconds: int = 90) -> List[Dict[str, Any]]:
@@ -203,10 +222,11 @@ class DeviceManager:
         """
         Obtiene el modo de bengala de un dispositivo.
         Returns: 0=automático (dispara sin preguntar), 1=con pregunta (default)
+        Usa coincidencia parcial de IDs.
         """
-        device_data = self.devices_state.get(device_id)
-        if device_data:
-            return device_data.get("bengala_mode", 1)
+        for stored_id, device_data in self.devices_state.items():
+            if stored_id.startswith(device_id) or device_id.startswith(stored_id):
+                return device_data.get("bengala_mode", 1)
         return 1  # Default: modo pregunta
 
     def set_bengala_mode(self, device_id: str, mode: int, save_to_firebase: bool = True):
@@ -249,11 +269,14 @@ class DeviceManager:
             device_data["bengala_mode"] = telemetry_mode
 
     def is_bengala_enabled(self, device_id: str) -> bool:
-        """Verifica si la bengala está habilitada para un dispositivo."""
-        device_data = self.devices_state.get(device_id)
-        if device_data:
-            return device_data.get("bengala_enabled", True)
-        return True
+        """
+        Verifica si la bengala está habilitada para un dispositivo.
+        Usa coincidencia parcial de IDs.
+        """
+        for stored_id, device_data in self.devices_state.items():
+            if stored_id.startswith(device_id) or device_id.startswith(stored_id):
+                return device_data.get("bengala_enabled", True)
+        return True  # Default: habilitada
 
     def set_bengala_enabled(self, device_id: str, enabled: bool):
         """Establece si la bengala está habilitada para un dispositivo."""

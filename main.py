@@ -26,6 +26,7 @@ from device_manager import DeviceManager
 from mqtt_handler import MqttHandler
 from telegram_bot import TelegramBot
 from scheduler import scheduler
+from fcm_handler import FCMHandler
 
 from firebase_manager import firebase_manager
 from mqtt_protocol import MqttEvent, MqttTelemetry, EventType
@@ -50,6 +51,7 @@ class AlarmBridgeService:
         self.device_manager = DeviceManager(firebase_manager)
         self.mqtt = MqttHandler(self.device_manager, firebase_manager)
         self.telegram = TelegramBot(self.device_manager, firebase_manager)
+        self.fcm = FCMHandler(firebase_manager)  # Push notifications
         self.running = False
         self._loop = None
         self.firebase_available = False
@@ -107,7 +109,10 @@ class AlarmBridgeService:
         self._schedule_telegram_broadcast_for_device(self.mqtt.device_id, msg)
 
     async def _scheduled_reminder(self, action: str, minutes: int):
-        """Callback para recordatorio de accion programada"""
+        """
+        Callback para recordatorio de accion programada.
+        Solo envía a chats privados, no a grupos.
+        """
         if action == "on":
             msg = (
                 f"⏰ *RECORDATORIO*\n\n"
@@ -121,12 +126,14 @@ class AlarmBridgeService:
                 f"Hora: {scheduler.config.format_off_time()}"
             )
 
-        self._schedule_telegram_broadcast_for_device(self.mqtt.device_id, msg)
+        # Solo enviar a chats privados (no a grupos)
+        self._schedule_telegram_broadcast_private_only(self.mqtt.device_id, msg)
 
     def _handle_event(self, event: MqttEvent):
         """
         Maneja eventos recibidos del ESP32.
         Delega al TelegramBot para manejar lógica de bengala y notificaciones.
+        También envía push notifications a la App.
         """
         logger.info(f"[{event.device_id}] Evento: {event.event_type}")
 
@@ -136,6 +143,9 @@ class AlarmBridgeService:
                 self.telegram.handle_mqtt_event(event),
                 self._loop
             )
+
+        # Enviar push notification a la App
+        self._send_push_for_event(event)
 
     def _handle_telemetry(self, telemetry: MqttTelemetry):
         """Maneja telemetria recibida del ESP32"""
@@ -185,6 +195,9 @@ class AlarmBridgeService:
                         "Verifique la conexión a internet o alimentación."
                     )
                     self._schedule_telegram_broadcast_for_device(device_id, message)
+
+                    # También enviar push notification
+                    self._send_push_device_offline(device_id, location)
 
             except Exception as e:
                 logger.error(f"Error monitoreando conexiones: {e}")
@@ -345,6 +358,27 @@ class AlarmBridgeService:
                     self._loop
                 )
 
+    def _schedule_telegram_broadcast_private_only(self, device_id: str, message: str):
+        """Envia un mensaje de texto solo a chats privados (no a grupos)"""
+        if not self._loop or not self.telegram.is_running():
+            return
+
+        chat_ids = self._get_authorized_chats(device_id)
+
+        for chat_id in chat_ids:
+            # Solo enviar a chats privados (ID positivo)
+            is_group = int(chat_id) < 0
+            if not is_group:
+                asyncio.run_coroutine_threadsafe(
+                    self.telegram.send_message(
+                        chat_id,
+                        message,
+                        "Markdown",
+                        has_keyboard=True
+                    ),
+                    self._loop
+                )
+
     def _schedule_telegram_message(
         self,
         chat_id: str,
@@ -363,6 +397,86 @@ class AlarmBridgeService:
                 ),
                 self._loop
             )
+
+    # ========================================
+    # Push Notifications (FCM)
+    # ========================================
+
+    def _send_push_for_event(self, event: MqttEvent):
+        """
+        Envía push notification a la App basado en el tipo de evento.
+        Se ejecuta en paralelo con las notificaciones de Telegram.
+        """
+        if not self.fcm.is_available():
+            return
+
+        try:
+            device_id = event.device_id
+            location = firebase_manager.get_device_location(device_id) or "Dispositivo"
+
+            notification = None
+
+            # Crear notificación según tipo de evento
+            if event.event_type == EventType.ALARM_TRIGGERED:
+                sensor_name = event.data.get("sensorName", "Sensor")
+                notification = self.fcm.create_alarm_notification(
+                    device_location=location,
+                    sensor_name=sensor_name,
+                    device_id=device_id
+                )
+
+            elif event.event_type == EventType.SYSTEM_ARMED:
+                source = event.data.get("source", "Sistema")
+                notification = self.fcm.create_armed_notification(
+                    device_location=location,
+                    source=source,
+                    device_id=device_id
+                )
+
+            elif event.event_type == EventType.SYSTEM_DISARMED:
+                source = event.data.get("source", "Sistema")
+                notification = self.fcm.create_disarmed_notification(
+                    device_location=location,
+                    source=source,
+                    device_id=device_id
+                )
+
+            elif event.event_type == EventType.BENGALA_ACTIVATED:
+                notification = self.fcm.create_bengala_notification(
+                    device_location=location,
+                    device_id=device_id
+                )
+
+            elif event.event_type == EventType.SENSOR_OFFLINE:
+                sensor_name = event.data.get("sensorName", "Sensor")
+                notification = self.fcm.create_sensor_offline_notification(
+                    sensor_name=sensor_name,
+                    device_location=location,
+                    device_id=device_id
+                )
+
+            # Enviar notificación si se creó una
+            if notification:
+                sent = self.fcm.send_to_device_users(device_id, notification)
+                if sent > 0:
+                    logger.info(f"Push enviado a {sent} usuarios para evento {event.event_type}")
+
+        except Exception as e:
+            logger.error(f"Error enviando push notification: {e}")
+
+    def _send_push_device_offline(self, device_id: str, location: str):
+        """Envía push notification cuando un dispositivo se desconecta"""
+        if not self.fcm.is_available():
+            return
+
+        try:
+            notification = self.fcm.create_device_offline_notification(
+                device_location=location,
+                device_id=device_id
+            )
+            self.fcm.send_to_device_users(device_id, notification)
+        except Exception as e:
+            logger.error(f"Error enviando push de dispositivo offline: {e}")
 
     async def start_async(self):
         """Inicia el servicio de forma asincrona"""
