@@ -25,6 +25,7 @@ class NotificationType(Enum):
     DEVICE_OFFLINE = "device_offline"
     DEVICE_ONLINE = "device_online"
     MOVEMENT_DETECTED = "movement_detected"
+    DOOR_OPEN = "door_open"
 
 
 @dataclass
@@ -378,6 +379,27 @@ class FCMHandler:
             },
             notification_type=NotificationType.MOVEMENT_DETECTED,
             priority="normal"
+        )
+
+    def create_door_notification(
+        self,
+        sensor_name: str,
+        sensor_location: str,
+        device_location: str,
+        device_id: str
+    ) -> PushNotification:
+        """Crea notificación de puerta/ventana abierta"""
+        return PushNotification(
+            title="🚪 Puerta/Ventana Abierta",
+            body=f"{sensor_name} en {sensor_location or device_location}",
+            data={
+                "device_id": device_id,
+                "sensor": sensor_name,
+                "location": device_location,
+                "action": "view_activity",
+            },
+            notification_type=NotificationType.DOOR_OPEN,
+            priority="high"
         )
 
     # ========================================

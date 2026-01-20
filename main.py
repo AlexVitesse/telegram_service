@@ -455,6 +455,26 @@ class AlarmBridgeService:
                     device_id=device_id
                 )
 
+            elif event.event_type == EventType.MOVEMENT_DETECTED:
+                sensor_name = event.data.get("sensorName", "Sensor")
+                sensor_location = event.data.get("location", "")
+                notification = self.fcm.create_movement_notification(
+                    sensor_name=sensor_name,
+                    sensor_location=sensor_location,
+                    device_location=location,
+                    device_id=device_id
+                )
+
+            elif event.event_type == EventType.DOOR_OPEN:
+                sensor_name = event.data.get("sensorName", "Sensor")
+                sensor_location = event.data.get("location", "")
+                notification = self.fcm.create_door_notification(
+                    sensor_name=sensor_name,
+                    sensor_location=sensor_location,
+                    device_location=location,
+                    device_id=device_id
+                )
+
             # Enviar notificación si se creó una
             if notification:
                 sent = self.fcm.send_to_device_users(device_id, notification)
