@@ -1402,9 +1402,7 @@ class TelegramBot:
 
             # Tiempos
             tiempo_bomba = telemetry.tiempo_bomba if telemetry else 60
-            tiempo_pre = telemetry.tiempo_pre if telemetry else 60
             response += f"├─ ⏰ Tiempo salida: {tiempo_bomba}s\n"
-            response += f"├─ ⏰ Tiempo pre-alarma: {tiempo_pre}s\n"
 
             # Horario
             if telemetry and telemetry.auto_schedule_enabled:
@@ -1575,9 +1573,9 @@ class TelegramBot:
             parse_mode=ParseMode.MARKDOWN
         )
 
-        # Notificar a todos los admins
-        admin_ids = self.firebase_manager.get_all_admin_chat_ids()
-        for admin_id in admin_ids:
+        # Notificar solo al dueño del dispositivo
+        owner_id = self.firebase_manager.get_device_owner(device_id)
+        if owner_id:
             admin_msg = (
                 "🔔 *NUEVA SOLICITUD DE ACCESO*\n\n"
                 f"👤 Usuario: *{user.first_name}*\n"
@@ -1586,7 +1584,9 @@ class TelegramBot:
                 f"⏰ Expira en 5 minutos\n\n"
                 f"✅ Para aprobar, envía:\n`/approve_{chat_id}`"
             )
-            await self.send_message(admin_id, admin_msg, "Markdown")
+            await self.send_message(owner_id, admin_msg, "Markdown")
+        else:
+            logger.warning(f"No se encontró dueño para el dispositivo {device_id}")
 
     @require_admin
     async def _cmd_approve(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

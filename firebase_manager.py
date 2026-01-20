@@ -722,6 +722,34 @@ class FirebaseManager:
             logger.error(f"Error obteniendo ubicación de {device_id}: {e}")
             return None
 
+    def get_device_owner(self, device_id: str) -> Optional[str]:
+        """
+        Obtiene el Telegram_ID del dueño/administrador de un dispositivo específico.
+        Busca en todas las variantes del device_id.
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            all_devices = self._get_all_devices()
+            if not all_devices:
+                return None
+
+            # Buscar en todas las variantes del device_id
+            for dev_id, dev_data in all_devices.items():
+                if not isinstance(dev_data, dict):
+                    continue
+                if dev_id.startswith(device_id) or device_id.startswith(dev_id):
+                    telegram_id = dev_data.get('Telegram_ID')
+                    if telegram_id:
+                        return str(telegram_id)
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error obteniendo dueño de {device_id}: {e}")
+            return None
+
     # ========================================
     # Métodos stub para compatibilidad con TelegramBot
     # (Funcionalidades de gestión de usuarios legacy)
