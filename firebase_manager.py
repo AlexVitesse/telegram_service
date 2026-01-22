@@ -519,7 +519,7 @@ class FirebaseManager:
         Busca el dispositivo tanto por ID exacto como por variantes (truncado/completo).
         Actualiza TODAS las variantes encontradas para mantener sincronización con la App.
         Solo actualiza si al menos una variante tiene Telegram_ID configurado.
-        Si no encuentra en cache, hace consulta directa a Firebase.
+        Usa solo el cache (el listener lo mantiene actualizado).
         """
         if not self.is_available():
             logger.error("Firebase no está disponible para actualizar el estado del dispositivo.")
@@ -539,26 +539,13 @@ class FirebaseManager:
                             has_tid = True
                 return device_ids, has_tid
 
-            # Primero intentar con el cache
+            # Usar solo el cache (el listener lo mantiene actualizado)
             all_devices = self._get_all_devices()
             device_ids_to_update = []
             has_telegram_id = False
 
             if all_devices:
                 device_ids_to_update, has_telegram_id = find_device_variants(all_devices)
-
-            # Si no encontró o no tiene Telegram_ID, consulta directa a Firebase
-            if not device_ids_to_update or not has_telegram_id:
-                logger.debug(f"[{device_id}] Buscando en Firebase directamente...")
-                ref = self.db.reference('ESP32')
-                fresh_devices = ref.get()
-
-                if fresh_devices:
-                    # Actualizar cache
-                    self._all_devices_cache = fresh_devices
-                    self._cache_timestamp = time.time()
-
-                    device_ids_to_update, has_telegram_id = find_device_variants(fresh_devices)
 
             if not device_ids_to_update:
                 logger.warning(f"[{device_id}] Dispositivo no encontrado en Firebase")
@@ -689,7 +676,7 @@ class FirebaseManager:
         Obtiene la lista de chat_ids autorizados para un dispositivo.
         Busca en todas las variantes del device_id (truncado/completo).
         Retorna Telegram_ID y Group_ID si existen.
-        Si no encuentra en cache, hace consulta directa a Firebase.
+        Usa solo el cache (el listener lo mantiene actualizado).
         """
         if not self.is_available():
             return []
@@ -727,26 +714,16 @@ class FirebaseManager:
                                 chats.add(group_str)
                 return chats
 
-            # Primero intentar con el cache
+            # Usar solo el cache (el listener lo mantiene actualizado)
             all_devices = self._get_all_devices()
             if all_devices:
                 chats = find_chats_in_devices(all_devices)
                 if chats:
                     return list(chats)
 
-            # Si no encontró en cache, consulta directa a Firebase
-            logger.debug(f"Chats no encontrados en cache para {device_id}, consultando Firebase directamente")
-            ref = self.db.reference('ESP32')
-            fresh_devices = ref.get()
-
-            if fresh_devices:
-                # Actualizar cache con los datos frescos
-                self._all_devices_cache = fresh_devices
-                self._cache_timestamp = time.time()
-
-                chats = find_chats_in_devices(fresh_devices)
-                return list(chats)
-
+            # Si no hay datos en cache, retornar vacío
+            # El listener de Firebase debería mantener el cache actualizado
+            logger.debug(f"No hay chats en cache para {device_id}")
             return []
 
         except Exception as e:
@@ -756,13 +733,13 @@ class FirebaseManager:
     def get_device_location(self, device_id: str) -> Optional[str]:
         """
         Obtiene la ubicación/nombre de un dispositivo. Busca en todas las variantes.
-        Si no encuentra en cache, hace consulta directa a Firebase.
+        Usa solo el cache (el listener lo mantiene actualizado).
         """
         if not self.is_available():
             return None
 
         try:
-            # Primero intentar con el cache
+            # Usar solo el cache (el listener lo mantiene actualizado)
             all_devices = self._get_all_devices()
             if all_devices:
                 for dev_id, dev_data in all_devices.items():
@@ -773,24 +750,7 @@ class FirebaseManager:
                         if nombre:
                             return nombre
 
-            # Si no encontró en cache, consulta directa a Firebase
-            logger.debug(f"Nombre no encontrado en cache para {device_id}, consultando Firebase directamente")
-            ref = self.db.reference('ESP32')
-            fresh_devices = ref.get()
-
-            if fresh_devices:
-                # Actualizar cache con los datos frescos
-                self._all_devices_cache = fresh_devices
-                self._cache_timestamp = time.time()
-
-                for dev_id, dev_data in fresh_devices.items():
-                    if not isinstance(dev_data, dict):
-                        continue
-                    if dev_id.startswith(device_id) or device_id.startswith(dev_id):
-                        nombre = dev_data.get('Nombre')
-                        if nombre:
-                            return nombre
-
+            # Si no hay datos en cache, retornar valor por defecto
             return 'Desconocido'
 
         except Exception as e:
