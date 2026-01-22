@@ -274,11 +274,27 @@ class TelegramFormatter:
 
         elif event_type == EventType.SYSTEM_ARMED:
             source = data.get("source", "remoto")
-            return f"🔒 *Sistema ARMADO*\n📍 {location or event.device_id}\n⚙️ Via: {source}"
+            # Traducir sources del ESP32 a español
+            source_traducido = {
+                "schedule": "Horario",
+                "remote": "Remoto",
+                "local": "Local",
+                "keypad": "Teclado",
+                "alexa": "Alexa"
+            }.get(source, source)
+            return f"🔒 *Sistema ARMADO*\n📍 {location or event.device_id}\n⚙️ Via: {source_traducido}"
 
         elif event_type == EventType.SYSTEM_DISARMED:
             source = data.get("source", "remoto")
-            return f"🔓 *Sistema DESARMADO*\n📍 {location or event.device_id}\n⚙️ Via: {source}"
+            # Traducir sources del ESP32 a español
+            source_traducido = {
+                "schedule": "Horario",
+                "remote": "Remoto",
+                "local": "Local",
+                "keypad": "Teclado",
+                "alexa": "Alexa"
+            }.get(source, source)
+            return f"🔓 *Sistema DESARMADO*\n📍 {location or event.device_id}\n⚙️ Via: {source_traducido}"
 
         elif event_type == EventType.ALARM_TRIGGERED:
             sensor_name = data.get("sensorName", "Manual")

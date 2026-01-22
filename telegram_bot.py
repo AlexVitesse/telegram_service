@@ -796,8 +796,13 @@ class TelegramBot:
             buttons = []
             for device_id in devices:
                 location = self.firebase_manager.get_device_location(device_id) or device_id
-                current_mode = self.device_manager.get_bengala_mode(device_id) if self.device_manager else 1
-                mode_icon = "🤖" if current_mode == 0 else "❓"
+                # Verificar primero si está habilitada, luego el modo
+                is_enabled = self.device_manager.is_bengala_enabled(device_id) if self.device_manager else True
+                if not is_enabled:
+                    mode_icon = "❌"
+                else:
+                    current_mode = self.device_manager.get_bengala_mode(device_id) if self.device_manager else 1
+                    mode_icon = "🤖" if current_mode == 0 else "❓"
                 buttons.append([InlineKeyboardButton(f"🔥 {location} ({mode_icon})", callback_data=f"bengala_select_{device_id}")])
 
             # Opción para aplicar a todos
@@ -807,7 +812,7 @@ class TelegramBot:
             await update.message.reply_text(
                 "🔥 *Configurar Bengala*\n\n"
                 "Selecciona el dispositivo a configurar:\n"
-                "(🤖 = Auto, ❓ = Pregunta)",
+                "(🤖 = Auto, ❓ = Pregunta, ❌ = Deshabilitado)",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=keyboard
             )
@@ -817,8 +822,13 @@ class TelegramBot:
 
     async def _show_bengala_options(self, message_or_query, device_id: str, is_all: bool = False):
         """Muestra las opciones de modo bengala para un dispositivo o todos"""
-        current_mode = self.device_manager.get_bengala_mode(device_id) if self.device_manager else 1
-        mode_text = "🤖 Automático" if current_mode == 0 else "❓ Con pregunta"
+        # Verificar primero si está habilitada
+        is_enabled = self.device_manager.is_bengala_enabled(device_id) if self.device_manager else True
+        if not is_enabled:
+            mode_text = "❌ Deshabilitado"
+        else:
+            current_mode = self.device_manager.get_bengala_mode(device_id) if self.device_manager else 1
+            mode_text = "🤖 Automático" if current_mode == 0 else "❓ Con pregunta"
 
         # Sufijo para el callback: device_id específico o "all"
         suffix = "all" if is_all else device_id

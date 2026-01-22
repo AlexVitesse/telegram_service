@@ -244,10 +244,16 @@ class FirebaseManager:
                                     logger.debug(f"Cache: campo {field} eliminado de {device_id}")
 
                     elif len(parts) == 2:
-                        # Actualización de dispositivo completo
+                        # Actualización de dispositivo (puede ser completa o parcial/patch)
                         if isinstance(event.data, dict):
-                            self._all_devices_cache[device_id] = event.data
-                            logger.debug(f"Cache: dispositivo {device_id} actualizado")
+                            if device_id in self._all_devices_cache and isinstance(self._all_devices_cache[device_id], dict):
+                                # MERGE: Mezclar datos existentes con los nuevos (para patches parciales)
+                                self._all_devices_cache[device_id].update(event.data)
+                                logger.debug(f"Cache: dispositivo {device_id} actualizado (merge)")
+                            else:
+                                # Dispositivo nuevo, guardar completo
+                                self._all_devices_cache[device_id] = event.data
+                                logger.debug(f"Cache: dispositivo {device_id} creado")
 
                     elif len(parts) >= 3:
                         # Actualización de campo específico
@@ -513,29 +519,46 @@ class FirebaseManager:
         Busca el dispositivo tanto por ID exacto como por variantes (truncado/completo).
         Actualiza TODAS las variantes encontradas para mantener sincronización con la App.
         Solo actualiza si al menos una variante tiene Telegram_ID configurado.
+        Si no encuentra en cache, hace consulta directa a Firebase.
         """
         if not self.is_available():
             logger.error("Firebase no está disponible para actualizar el estado del dispositivo.")
             return
 
         try:
-            all_devices = self._get_all_devices()
-            if not all_devices:
-                logger.warning(f"[{device_id}] No hay dispositivos en Firebase")
-                return
+            # Función auxiliar para buscar variantes y verificar Telegram_ID
+            def find_device_variants(devices: dict) -> tuple:
+                device_ids = []
+                has_tid = False
+                for dev_id, dev_data in devices.items():
+                    if not isinstance(dev_data, dict):
+                        continue
+                    if dev_id.startswith(device_id) or device_id.startswith(dev_id):
+                        device_ids.append(dev_id)
+                        if dev_data.get('Telegram_ID'):
+                            has_tid = True
+                return device_ids, has_tid
 
-            # Buscar todas las variantes del device_id (truncado y completo)
+            # Primero intentar con el cache
+            all_devices = self._get_all_devices()
             device_ids_to_update = []
             has_telegram_id = False
 
-            for dev_id, dev_data in all_devices.items():
-                if not isinstance(dev_data, dict):
-                    continue
-                # Verificar si es el mismo dispositivo (uno es prefijo del otro)
-                if dev_id.startswith(device_id) or device_id.startswith(dev_id):
-                    device_ids_to_update.append(dev_id)
-                    if dev_data.get('Telegram_ID'):
-                        has_telegram_id = True
+            if all_devices:
+                device_ids_to_update, has_telegram_id = find_device_variants(all_devices)
+
+            # Si no encontró o no tiene Telegram_ID, consulta directa a Firebase
+            if not device_ids_to_update or not has_telegram_id:
+                logger.debug(f"[{device_id}] Buscando en Firebase directamente...")
+                ref = self.db.reference('ESP32')
+                fresh_devices = ref.get()
+
+                if fresh_devices:
+                    # Actualizar cache
+                    self._all_devices_cache = fresh_devices
+                    self._cache_timestamp = time.time()
+
+                    device_ids_to_update, has_telegram_id = find_device_variants(fresh_devices)
 
             if not device_ids_to_update:
                 logger.warning(f"[{device_id}] Dispositivo no encontrado en Firebase")
@@ -666,55 +689,107 @@ class FirebaseManager:
         Obtiene la lista de chat_ids autorizados para un dispositivo.
         Busca en todas las variantes del device_id (truncado/completo).
         Retorna Telegram_ID y Group_ID si existen.
+        Si no encuentra en cache, hace consulta directa a Firebase.
         """
         if not self.is_available():
             return []
 
         try:
+            # Función auxiliar para buscar chats en un diccionario de dispositivos
+            def find_chats_in_devices(devices: dict) -> set:
+                chats = set()
+                for dev_id, dev_data in devices.items():
+                    if not isinstance(dev_data, dict):
+                        continue
+                    # Verificar si es el mismo dispositivo (uno es prefijo del otro)
+                    if dev_id.startswith(device_id) or device_id.startswith(dev_id):
+                        telegram_id = dev_data.get('Telegram_ID')
+                        group_id = dev_data.get('Group_ID')
+                        if telegram_id:
+                            # Manejar IDs concatenados con ||| (bug de la app)
+                            telegram_str = str(telegram_id)
+                            if '|||' in telegram_str:
+                                logger.warning(f"Telegram_ID concatenado detectado para {dev_id}: {telegram_str}")
+                                for tid in telegram_str.split('|||'):
+                                    if tid.strip():
+                                        chats.add(tid.strip())
+                            else:
+                                chats.add(telegram_str)
+                        if group_id:
+                            # También manejar por si acaso en Group_ID
+                            group_str = str(group_id)
+                            if '|||' in group_str:
+                                logger.warning(f"Group_ID concatenado detectado para {dev_id}: {group_str}")
+                                for gid in group_str.split('|||'):
+                                    if gid.strip():
+                                        chats.add(gid.strip())
+                            else:
+                                chats.add(group_str)
+                return chats
+
+            # Primero intentar con el cache
             all_devices = self._get_all_devices()
-            if not all_devices:
-                return []
+            if all_devices:
+                chats = find_chats_in_devices(all_devices)
+                if chats:
+                    return list(chats)
 
-            # Buscar en todas las variantes del device_id
-            chats = set()  # Usar set para evitar duplicados
+            # Si no encontró en cache, consulta directa a Firebase
+            logger.debug(f"Chats no encontrados en cache para {device_id}, consultando Firebase directamente")
+            ref = self.db.reference('ESP32')
+            fresh_devices = ref.get()
 
-            for dev_id, dev_data in all_devices.items():
-                if not isinstance(dev_data, dict):
-                    continue
-                # Verificar si es el mismo dispositivo (uno es prefijo del otro)
-                if dev_id.startswith(device_id) or device_id.startswith(dev_id):
-                    telegram_id = dev_data.get('Telegram_ID')
-                    group_id = dev_data.get('Group_ID')
+            if fresh_devices:
+                # Actualizar cache con los datos frescos
+                self._all_devices_cache = fresh_devices
+                self._cache_timestamp = time.time()
 
-                    if telegram_id:
-                        chats.add(str(telegram_id))
-                    if group_id:
-                        chats.add(str(group_id))
+                chats = find_chats_in_devices(fresh_devices)
+                return list(chats)
 
-            return list(chats)
+            return []
 
         except Exception as e:
             logger.error(f"Error obteniendo chats autorizados para {device_id}: {e}")
             return []
 
     def get_device_location(self, device_id: str) -> Optional[str]:
-        """Obtiene la ubicación/nombre de un dispositivo. Busca en todas las variantes."""
+        """
+        Obtiene la ubicación/nombre de un dispositivo. Busca en todas las variantes.
+        Si no encuentra en cache, hace consulta directa a Firebase.
+        """
         if not self.is_available():
             return None
 
         try:
+            # Primero intentar con el cache
             all_devices = self._get_all_devices()
-            if not all_devices:
-                return None
+            if all_devices:
+                for dev_id, dev_data in all_devices.items():
+                    if not isinstance(dev_data, dict):
+                        continue
+                    if dev_id.startswith(device_id) or device_id.startswith(dev_id):
+                        nombre = dev_data.get('Nombre')
+                        if nombre:
+                            return nombre
 
-            # Buscar en todas las variantes del device_id
-            for dev_id, dev_data in all_devices.items():
-                if not isinstance(dev_data, dict):
-                    continue
-                if dev_id.startswith(device_id) or device_id.startswith(dev_id):
-                    nombre = dev_data.get('Nombre')
-                    if nombre:
-                        return nombre
+            # Si no encontró en cache, consulta directa a Firebase
+            logger.debug(f"Nombre no encontrado en cache para {device_id}, consultando Firebase directamente")
+            ref = self.db.reference('ESP32')
+            fresh_devices = ref.get()
+
+            if fresh_devices:
+                # Actualizar cache con los datos frescos
+                self._all_devices_cache = fresh_devices
+                self._cache_timestamp = time.time()
+
+                for dev_id, dev_data in fresh_devices.items():
+                    if not isinstance(dev_data, dict):
+                        continue
+                    if dev_id.startswith(device_id) or device_id.startswith(dev_id):
+                        nombre = dev_data.get('Nombre')
+                        if nombre:
+                            return nombre
 
             return 'Desconocido'
 
@@ -788,13 +863,37 @@ class FirebaseManager:
                 telegram_id = str(device_data.get('Telegram_ID', ''))
                 group_id = str(device_data.get('Group_ID', ''))
 
-                if telegram_id == chat_id_str:
+                # Manejar IDs concatenados con ||| (legacy de la app)
+                if '|||' in telegram_id:
+                    telegram_ids = [tid.strip() for tid in telegram_id.split('|||') if tid.strip()]
+                    if chat_id_str in telegram_ids:
+                        is_telegram_id = True
+                elif telegram_id == chat_id_str:
                     is_telegram_id = True
-                if group_id == chat_id_str:
+
+                if '|||' in group_id:
+                    group_ids = [gid.strip() for gid in group_id.split('|||') if gid.strip()]
+                    if chat_id_str in group_ids:
+                        is_group_id = True
+                elif group_id == chat_id_str:
                     is_group_id = True
 
-            # Es grupo si aparece como Group_ID pero NO como Telegram_ID
-            return is_group_id and not is_telegram_id
+            # Verificar si es un ID de grupo real de Telegram (números negativos)
+            # Los grupos de Telegram siempre tienen IDs negativos
+            # Los usuarios individuales siempre tienen IDs positivos
+            try:
+                chat_id_int = int(chat_id_str)
+                is_telegram_group_id = chat_id_int < 0
+            except ValueError:
+                is_telegram_group_id = False
+
+            # Es grupo si:
+            # 1. El ID es negativo (grupo real de Telegram), O
+            # 2. Aparece SOLO como Group_ID y NO como Telegram_ID Y es un grupo real
+            # PERO: Si es un ID positivo (usuario individual), NO es grupo aunque esté en Group_ID
+            result = is_telegram_group_id and is_group_id and not is_telegram_id
+            logger.debug(f"is_group_chat({chat_id_str}): telegram_id={is_telegram_id}, group_id={is_group_id}, is_negative={is_telegram_group_id}, result={result}")
+            return result
 
         except Exception as e:
             logger.error(f"Error verificando si es grupo: {e}")

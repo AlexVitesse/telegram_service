@@ -395,11 +395,19 @@ class Scheduler:
     async def _check_schedule(self):
         """Verifica y ejecuta las acciones programadas"""
         # Recordatorios
-        if self._should_send_on_reminder() and self._on_reminder_callback:
-            await self._on_reminder_callback("on", self.config.notify_before_minutes)
+        if self._should_send_on_reminder():
+            if self._on_reminder_callback:
+                logger.info(f"⏰ Enviando recordatorio de ACTIVACIÓN ({self.config.notify_before_minutes} min antes)")
+                await self._on_reminder_callback("on", self.config.notify_before_minutes)
+            else:
+                logger.warning("⏰ Recordatorio de activación pendiente pero no hay callback registrado")
 
-        if self._should_send_off_reminder() and self._on_reminder_callback:
-            await self._on_reminder_callback("off", self.config.notify_before_minutes)
+        if self._should_send_off_reminder():
+            if self._on_reminder_callback:
+                logger.info(f"⏰ Enviando recordatorio de DESACTIVACIÓN ({self.config.notify_before_minutes} min antes)")
+                await self._on_reminder_callback("off", self.config.notify_before_minutes)
+            else:
+                logger.warning("⏰ Recordatorio de desactivación pendiente pero no hay callback registrado")
 
         # Activación
         if self._should_execute_on():

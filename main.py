@@ -87,13 +87,16 @@ class AlarmBridgeService:
         # Enviar comando al ESP32
         self.mqtt.send_arm()
 
-        # Notificar a todos los usuarios
+        # Notificar a todos los usuarios via Telegram
         msg = (
             "🔒 *ACTIVACION AUTOMATICA*\n\n"
             f"⏰ Hora programada: {scheduler.config.format_on_time()}\n"
-            "El sistema se esta armando automaticamente."
+            "El sistema se está armando automáticamente."
         )
         self._schedule_telegram_broadcast_for_device(self.mqtt.device_id, msg)
+
+        # Enviar push notification a la App
+        self._send_push_scheduled_arm()
 
     async def _scheduled_disarm(self):
         """Callback para desactivacion automatica programada"""
@@ -101,33 +104,64 @@ class AlarmBridgeService:
 
         self.mqtt.send_disarm()
 
+        # Notificar via Telegram
         msg = (
             "🔓 *DESACTIVACION AUTOMATICA*\n\n"
             f"⏰ Hora programada: {scheduler.config.format_off_time()}\n"
-            "El sistema se ha desarmado automaticamente."
+            "El sistema se ha desarmado automáticamente."
         )
         self._schedule_telegram_broadcast_for_device(self.mqtt.device_id, msg)
+
+        # Enviar push notification a la App
+        self._send_push_scheduled_disarm()
 
     async def _scheduled_reminder(self, action: str, minutes: int):
         """
         Callback para recordatorio de accion programada.
-        Solo envía a chats privados, no a grupos.
+        Envía a TODOS los dispositivos conocidos (a sus chats privados).
         """
+        logger.info(f"⏰ Callback de recordatorio recibido: action={action}, minutes={minutes}")
+
         if action == "on":
             msg = (
                 f"⏰ *RECORDATORIO*\n\n"
-                f"🔒 El sistema se *activara* en {minutes} minutos\n"
+                f"🔒 El sistema se *activará* en {minutes} minutos\n"
                 f"Hora: {scheduler.config.format_on_time()}"
             )
         else:
             msg = (
                 f"⏰ *RECORDATORIO*\n\n"
-                f"🔓 El sistema se *desactivara* en {minutes} minutos\n"
+                f"🔓 El sistema se *desactivará* en {minutes} minutos\n"
                 f"Hora: {scheduler.config.format_off_time()}"
             )
 
-        # Solo enviar a chats privados (no a grupos)
-        self._schedule_telegram_broadcast_private_only(self.mqtt.device_id, msg)
+        # Obtener todos los dispositivos conocidos
+        all_device_ids = self.device_manager.get_all_device_ids() if self.device_manager else []
+        logger.info(f"⏰ Dispositivos conocidos: {all_device_ids}")
+
+        if not all_device_ids:
+            # Fallback al device_id del mqtt si no hay dispositivos en el manager
+            device_id = self.mqtt.device_id if self.mqtt else None
+            if device_id:
+                all_device_ids = [device_id]
+                logger.info(f"⏰ Usando fallback a mqtt.device_id: {device_id}")
+
+        # Enviar recordatorio a todos los dispositivos (chats privados)
+        chats_notificados = set()  # Evitar duplicados
+        for device_id in all_device_ids:
+            chat_ids = self._get_authorized_chats(device_id)
+            for chat_id in chat_ids:
+                # Solo chats privados (ID positivo) y evitar duplicados
+                is_group = int(chat_id) < 0
+                if not is_group and chat_id not in chats_notificados:
+                    chats_notificados.add(chat_id)
+                    if self._loop and self.telegram.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            self.telegram.send_message(chat_id, msg, "Markdown", has_keyboard=True),
+                            self._loop
+                        )
+
+        logger.info(f"⏰ Recordatorio enviado a {len(chats_notificados)} chat(s) privado(s)")
 
     def _handle_event(self, event: MqttEvent):
         """
@@ -361,14 +395,26 @@ class AlarmBridgeService:
     def _schedule_telegram_broadcast_private_only(self, device_id: str, message: str):
         """Envia un mensaje de texto solo a chats privados (no a grupos)"""
         if not self._loop or not self.telegram.is_running():
+            logger.warning("⏰ No se puede enviar recordatorio: loop o telegram no disponible")
+            return
+
+        if not device_id:
+            logger.warning("⏰ No se puede enviar recordatorio: device_id es None")
             return
 
         chat_ids = self._get_authorized_chats(device_id)
+        logger.debug(f"⏰ Chats autorizados para {device_id}: {chat_ids}")
 
+        if not chat_ids:
+            logger.warning(f"⏰ No hay chats autorizados para dispositivo {device_id}")
+            return
+
+        private_count = 0
         for chat_id in chat_ids:
             # Solo enviar a chats privados (ID positivo)
             is_group = int(chat_id) < 0
             if not is_group:
+                private_count += 1
                 asyncio.run_coroutine_threadsafe(
                     self.telegram.send_message(
                         chat_id,
@@ -378,6 +424,8 @@ class AlarmBridgeService:
                     ),
                     self._loop
                 )
+
+        logger.info(f"⏰ Recordatorio enviado a {private_count} chat(s) privado(s)")
 
     def _schedule_telegram_message(
         self,
@@ -427,17 +475,33 @@ class AlarmBridgeService:
 
             elif event.event_type == EventType.SYSTEM_ARMED:
                 source = event.data.get("source", "Sistema")
+                # Traducir sources del ESP32 a español
+                source_traducido = {
+                    "schedule": "Horario",
+                    "remote": "Remoto",
+                    "local": "Local",
+                    "keypad": "Teclado",
+                    "alexa": "Alexa"
+                }.get(source, source)
                 notification = self.fcm.create_armed_notification(
                     device_location=location,
-                    source=source,
+                    source=source_traducido,
                     device_id=device_id
                 )
 
             elif event.event_type == EventType.SYSTEM_DISARMED:
                 source = event.data.get("source", "Sistema")
+                # Traducir sources del ESP32 a español
+                source_traducido = {
+                    "schedule": "Horario",
+                    "remote": "Remoto",
+                    "local": "Local",
+                    "keypad": "Teclado",
+                    "alexa": "Alexa"
+                }.get(source, source)
                 notification = self.fcm.create_disarmed_notification(
                     device_location=location,
-                    source=source,
+                    source=source_traducido,
                     device_id=device_id
                 )
 
@@ -497,6 +561,58 @@ class AlarmBridgeService:
             self.fcm.send_to_device_users(device_id, notification)
         except Exception as e:
             logger.error(f"Error enviando push de dispositivo offline: {e}")
+
+    def _send_push_scheduled_arm(self):
+        """Envía push notification cuando el sistema se arma por horario"""
+        if not self.fcm.is_available():
+            return
+
+        try:
+            # Obtener todos los dispositivos conocidos para enviar push
+            all_device_ids = self.device_manager.get_all_device_ids() if self.device_manager else []
+
+            if not all_device_ids and self.mqtt:
+                all_device_ids = [self.mqtt.device_id] if self.mqtt.device_id else []
+
+            for device_id in all_device_ids:
+                location = firebase_manager.get_device_location(device_id) or "Sistema"
+                notification = self.fcm.create_armed_notification(
+                    device_location=location,
+                    source="Horario",  # Traducido
+                    device_id=device_id
+                )
+                sent = self.fcm.send_to_device_users(device_id, notification)
+                if sent > 0:
+                    logger.info(f"Push de armado por horario enviado a {sent} usuarios ({device_id})")
+
+        except Exception as e:
+            logger.error(f"Error enviando push de armado por horario: {e}")
+
+    def _send_push_scheduled_disarm(self):
+        """Envía push notification cuando el sistema se desarma por horario"""
+        if not self.fcm.is_available():
+            return
+
+        try:
+            # Obtener todos los dispositivos conocidos para enviar push
+            all_device_ids = self.device_manager.get_all_device_ids() if self.device_manager else []
+
+            if not all_device_ids and self.mqtt:
+                all_device_ids = [self.mqtt.device_id] if self.mqtt.device_id else []
+
+            for device_id in all_device_ids:
+                location = firebase_manager.get_device_location(device_id) or "Sistema"
+                notification = self.fcm.create_disarmed_notification(
+                    device_location=location,
+                    source="Horario",  # Traducido
+                    device_id=device_id
+                )
+                sent = self.fcm.send_to_device_users(device_id, notification)
+                if sent > 0:
+                    logger.info(f"Push de desarmado por horario enviado a {sent} usuarios ({device_id})")
+
+        except Exception as e:
+            logger.error(f"Error enviando push de desarmado por horario: {e}")
 
     async def start_async(self):
         """Inicia el servicio de forma asincrona"""

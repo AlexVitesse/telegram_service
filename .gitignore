@@ -17,10 +17,13 @@ coverage.xml
 *.cover
 *.log
 .pytest_cache/
+nul
 
 # Environment variables & Secrets
 .env
 firebase_credentials.json
+.claude/
+
 
 # IDEs
 .idea/
