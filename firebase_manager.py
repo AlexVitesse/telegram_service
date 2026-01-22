@@ -71,6 +71,9 @@ class FirebaseManager:
         self._devices_listener = None
         self._schedules_listener = None
 
+        # Cache de últimos valores para detectar cambios reales (evitar comandos duplicados)
+        self._last_known_values: Dict[str, Dict[str, Any]] = {}
+
     def initialize(self) -> bool:
         """Inicializa la conexion con Firebase RTDB"""
         if not FIREBASE_AVAILABLE:
@@ -343,33 +346,52 @@ class FirebaseManager:
 
             # Caso 2: Patch a nivel dispositivo (ej: path=/device_id, data={'Tiempo_Bomba': 180, ...})
             elif command_key == "" and isinstance(event.data, dict):
-                # Procesar Tiempo_Bomba si viene en el diccionario
+                # Inicializar cache de valores para este dispositivo si no existe
+                if device_id not in self._last_known_values:
+                    self._last_known_values[device_id] = {}
+
+                # Procesar Tiempo_Bomba si viene en el diccionario Y cambió
                 if 'Tiempo_Bomba' in event.data:
                     tiempo_bomba = event.data['Tiempo_Bomba']
+                    last_tiempo = self._last_known_values[device_id].get('Tiempo_Bomba')
                     if isinstance(tiempo_bomba, (int, float)) and tiempo_bomba >= 10:
-                        seconds = int(tiempo_bomba)
-                        logger.info(f"Comando de App (patch): TIEMPO DE SALIDA {seconds}s para {device_id}")
-                        self.mqtt_handler.send_set_exit_time(seconds=seconds, device_id=device_id)
+                        if last_tiempo != tiempo_bomba:
+                            seconds = int(tiempo_bomba)
+                            logger.info(f"Comando de App (patch): TIEMPO DE SALIDA {seconds}s para {device_id} (anterior: {last_tiempo})")
+                            self.mqtt_handler.send_set_exit_time(seconds=seconds, device_id=device_id)
+                            self._last_known_values[device_id]['Tiempo_Bomba'] = tiempo_bomba
+                        else:
+                            logger.debug(f"Tiempo_Bomba sin cambio para {device_id}: {tiempo_bomba}")
 
-                # Procesar ModoBengala si viene en el diccionario
+                # Procesar ModoBengala si viene en el diccionario Y cambió
                 if 'ModoBengala' in event.data:
                     modo = event.data['ModoBengala']
-                    if modo == 0:
-                        logger.info(f"Comando de App (patch): MODO BENGALA AUTOMATICO para {device_id}")
-                        self.mqtt_handler.send_command(cmd=Command.SET_BENGALA_MODE.value, args={"mode": 0}, device_id=device_id)
-                    elif modo == 1:
-                        logger.info(f"Comando de App (patch): MODO BENGALA PREGUNTA para {device_id}")
-                        self.mqtt_handler.send_command(cmd=Command.SET_BENGALA_MODE.value, args={"mode": 1}, device_id=device_id)
+                    last_modo = self._last_known_values[device_id].get('ModoBengala')
+                    if last_modo != modo:
+                        if modo == 0:
+                            logger.info(f"Comando de App (patch): MODO BENGALA AUTOMATICO para {device_id} (anterior: {last_modo})")
+                            self.mqtt_handler.send_command(cmd=Command.SET_BENGALA_MODE.value, args={"mode": 0}, device_id=device_id)
+                        elif modo == 1:
+                            logger.info(f"Comando de App (patch): MODO BENGALA PREGUNTA para {device_id} (anterior: {last_modo})")
+                            self.mqtt_handler.send_command(cmd=Command.SET_BENGALA_MODE.value, args={"mode": 1}, device_id=device_id)
+                        self._last_known_values[device_id]['ModoBengala'] = modo
+                    else:
+                        logger.debug(f"ModoBengala sin cambio para {device_id}: {modo}")
 
-                # Procesar BengalaHab si viene en el diccionario
+                # Procesar BengalaHab si viene en el diccionario Y cambió
                 if 'BengalaHab' in event.data:
                     habilitada = event.data['BengalaHab']
-                    if habilitada is True:
-                        logger.info(f"Comando de App (patch): HABILITAR BENGALA para {device_id}")
-                        self.mqtt_handler.send_command(cmd=Command.ACTIVATE_BENGALA.value, device_id=device_id)
-                    elif habilitada is False:
-                        logger.info(f"Comando de App (patch): DESHABILITAR BENGALA para {device_id}")
-                        self.mqtt_handler.send_command(cmd=Command.DEACTIVATE_BENGALA.value, device_id=device_id)
+                    last_hab = self._last_known_values[device_id].get('BengalaHab')
+                    if last_hab != habilitada:
+                        if habilitada is True:
+                            logger.info(f"Comando de App (patch): HABILITAR BENGALA para {device_id} (anterior: {last_hab})")
+                            self.mqtt_handler.send_command(cmd=Command.ACTIVATE_BENGALA.value, device_id=device_id)
+                        elif habilitada is False:
+                            logger.info(f"Comando de App (patch): DESHABILITAR BENGALA para {device_id} (anterior: {last_hab})")
+                            self.mqtt_handler.send_command(cmd=Command.DEACTIVATE_BENGALA.value, device_id=device_id)
+                        self._last_known_values[device_id]['BengalaHab'] = habilitada
+                    else:
+                        logger.debug(f"BengalaHab sin cambio para {device_id}: {habilitada}")
 
     def _schedule_listener(self, event) -> None:
         """
