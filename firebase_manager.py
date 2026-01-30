@@ -393,6 +393,90 @@ class FirebaseManager:
                     else:
                         logger.debug(f"BengalaHab sin cambio para {device_id}: {habilitada}")
 
+    def _sync_scheduler_from_initial_data(self, all_schedules: dict) -> None:
+        """
+        Sincroniza el scheduler local con los datos iniciales de Firebase.
+        Busca el horario habilitado más reciente para sincronizar.
+        Estructura: {userId: {devices: {deviceId: {schedule_data}}}}
+        """
+        try:
+            best_schedule = None
+            best_updated = ""
+
+            for user_id, user_data in all_schedules.items():
+                if not isinstance(user_data, dict):
+                    continue
+                devices = user_data.get('devices', {})
+                if not isinstance(devices, dict):
+                    continue
+
+                for device_id, schedule_data in devices.items():
+                    if not isinstance(schedule_data, dict):
+                        continue
+                    if not schedule_data.get('enabled', False):
+                        continue
+                    if 'activationTime' not in schedule_data or 'deactivationTime' not in schedule_data:
+                        continue
+
+                    # Preferir el horario más reciente
+                    updated = schedule_data.get('lastUpdated', '')
+                    if updated > best_updated:
+                        best_updated = updated
+                        best_schedule = schedule_data
+
+            if best_schedule:
+                activation_time = best_schedule.get('activationTime', '')
+                deactivation_time = best_schedule.get('deactivationTime', '')
+                days = best_schedule.get('days', [])
+
+                def parse_time_init(time_str: str) -> tuple:
+                    if not time_str or ':' not in time_str:
+                        return 0, 0
+                    if 'T' in time_str:
+                        time_str = time_str.split('T')[1]
+                    parts = time_str.split(':')
+                    try:
+                        return int(parts[0]), int(parts[1])
+                    except (ValueError, IndexError):
+                        return 0, 0
+
+                on_hour, on_minute = parse_time_init(activation_time)
+                off_hour, off_minute = parse_time_init(deactivation_time)
+
+                # Solo sincronizar si el horario de Firebase difiere del local
+                cfg = scheduler.config
+                if (cfg.enabled != True or
+                    cfg.on_hour != on_hour or cfg.on_minute != on_minute or
+                    cfg.off_hour != off_hour or cfg.off_minute != off_minute):
+
+                    scheduler.config.enabled = True
+                    scheduler.config.on_hour = on_hour
+                    scheduler.config.on_minute = on_minute
+                    scheduler.config.off_hour = off_hour
+                    scheduler.config.off_minute = off_minute
+                    if days:
+                        scheduler.config.days = days
+                    else:
+                        scheduler.config.days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+                    # Limpiar todos los flags para el nuevo horario
+                    scheduler.config.last_on_reminder_sent = ""
+                    scheduler.config.last_off_reminder_sent = ""
+                    scheduler.config.last_on_executed = ""
+                    scheduler.config.last_off_executed = ""
+                    scheduler._save_config()
+                    logger.info(
+                        f"Scheduler sincronizado desde Firebase inicial: "
+                        f"on={on_hour:02d}:{on_minute:02d}, off={off_hour:02d}:{off_minute:02d}, "
+                        f"días={scheduler.format_days()}"
+                    )
+                else:
+                    logger.debug("Scheduler local ya está sincronizado con Firebase")
+            else:
+                logger.debug("No se encontró horario habilitado en datos iniciales de Firebase")
+
+        except Exception as e:
+            logger.error(f"Error sincronizando scheduler desde datos iniciales: {e}")
+
     def _schedule_listener(self, event) -> None:
         """
         Callback para procesar cambios de horarios programados.
@@ -407,8 +491,9 @@ class FirebaseManager:
 
         logger.debug(f"Evento de Horarios: Type={event.event_type}, Path={event.path}, Data={event.data}")
 
-        # Ignorar evento inicial con todos los datos
-        if event.path == '/':
+        # Evento inicial con todos los datos - sincronizar scheduler local
+        if event.path == '/' and isinstance(event.data, dict):
+            self._sync_scheduler_from_initial_data(event.data)
             return
 
         parts = event.path.split('/')
@@ -472,19 +557,25 @@ class FirebaseManager:
                 days = schedule_data.get('days', [])  # Lista de días: ['Lunes', 'Martes', ...]
                 updated_by = schedule_data.get('lastUpdatedBy', '')
 
-                # Parsear horas (formato "HH:MM")
+                # Parsear horas (formato "HH:MM" o "YYYY-MM-DDTHH:MM")
                 on_hour, on_minute = 0, 0
                 off_hour, off_minute = 0, 0
 
-                if activation_time and ':' in activation_time:
-                    parts_time = activation_time.split(':')
-                    on_hour = int(parts_time[0])
-                    on_minute = int(parts_time[1])
+                def parse_time(time_str: str) -> tuple:
+                    """Parsea hora en formato HH:MM o YYYY-MM-DDTHH:MM"""
+                    if not time_str or ':' not in time_str:
+                        return 0, 0
+                    # Si tiene 'T', es formato ISO - extraer solo la parte de hora
+                    if 'T' in time_str:
+                        time_str = time_str.split('T')[1]  # Obtener parte después de T
+                    parts = time_str.split(':')
+                    try:
+                        return int(parts[0]), int(parts[1])
+                    except (ValueError, IndexError):
+                        return 0, 0
 
-                if deactivation_time and ':' in deactivation_time:
-                    parts_time = deactivation_time.split(':')
-                    off_hour = int(parts_time[0])
-                    off_minute = int(parts_time[1])
+                on_hour, on_minute = parse_time(activation_time)
+                off_hour, off_minute = parse_time(deactivation_time)
 
                 # Convertir nombres de días a índices (0=Domingo, 1=Lunes, ...)
                 day_name_to_index = {
@@ -526,8 +617,15 @@ class FirebaseManager:
                         scheduler.config.days = days
                     else:
                         scheduler.config.days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+                    # Limpiar TODOS los flags para permitir que el nuevo horario se ejecute
+                    # Sin esto, si un horario anterior ya ejecutó hoy, el nuevo horario
+                    # no se ejecutaría porque last_on_executed/last_off_executed ya tienen la fecha de hoy
+                    scheduler.config.last_on_reminder_sent = ""
+                    scheduler.config.last_off_reminder_sent = ""
+                    scheduler.config.last_on_executed = ""
+                    scheduler.config.last_off_executed = ""
                     scheduler._save_config()
-                    logger.info(f"Scheduler local sincronizado desde App (días: {scheduler.format_days()})")
+                    logger.info(f"Scheduler local sincronizado desde App (días: {scheduler.format_days()}, flags limpiados)")
 
             except Exception as e:
                 logger.error(f"Error procesando horario: {e}")
@@ -652,6 +750,7 @@ class FirebaseManager:
         try:
             all_devices = self._get_all_devices()
             if not all_devices:
+                logger.debug(f"get_authorized_devices({chat_id}): No hay dispositivos en cache/Firebase")
                 return []
 
             authorized = []
@@ -662,10 +761,18 @@ class FirebaseManager:
                     continue
 
                 telegram_id = str(device_data.get('Telegram_ID', ''))
+                telegram_id_2 = str(device_data.get('Telegram_ID_2', ''))
                 group_id = str(device_data.get('Group_ID', ''))
 
-                if telegram_id == chat_id_str or group_id == chat_id_str:
+                if telegram_id == chat_id_str or telegram_id_2 == chat_id_str or group_id == chat_id_str:
                     authorized.append(device_id)
+                    if telegram_id == chat_id_str:
+                        match_type = "Telegram_ID"
+                    elif telegram_id_2 == chat_id_str:
+                        match_type = "Telegram_ID_2"
+                    else:
+                        match_type = "Group_ID"
+                    logger.debug(f"get_authorized_devices({chat_id}): Match en {device_id} via {match_type}")
 
             # Filtrar duplicados: si hay ID truncado y completo, quedarse solo con el truncado
             # Ejemplo: ['6C_C8_40_4F_C7', '6C_C8_40_4F_C7_B2'] -> ['6C_C8_40_4F_C7']
@@ -686,7 +793,10 @@ class FirebaseManager:
                 if is_truncated or not has_truncated_version:
                     unique_devices.append(dev_id)
 
-            logger.debug(f"Dispositivos autorizados para chat {chat_id}: {unique_devices}")
+            if unique_devices:
+                logger.info(f"get_authorized_devices({chat_id}): {len(unique_devices)} dispositivo(s): {unique_devices}")
+            else:
+                logger.warning(f"get_authorized_devices({chat_id}): SIN dispositivos autorizados (authorized={authorized})")
             return unique_devices
 
         except Exception as e:
@@ -712,28 +822,21 @@ class FirebaseManager:
                         continue
                     # Verificar si es el mismo dispositivo (uno es prefijo del otro)
                     if dev_id.startswith(device_id) or device_id.startswith(dev_id):
+                        # Leer los 3 campos de usuario: Telegram_ID, Telegram_ID_2, Group_ID
                         telegram_id = dev_data.get('Telegram_ID')
+                        telegram_id_2 = dev_data.get('Telegram_ID_2')
                         group_id = dev_data.get('Group_ID')
-                        if telegram_id:
-                            # Manejar IDs concatenados con ||| (bug de la app)
-                            telegram_str = str(telegram_id)
-                            if '|||' in telegram_str:
-                                logger.warning(f"Telegram_ID concatenado detectado para {dev_id}: {telegram_str}")
-                                for tid in telegram_str.split('|||'):
-                                    if tid.strip():
-                                        chats.add(tid.strip())
-                            else:
-                                chats.add(telegram_str)
-                        if group_id:
-                            # También manejar por si acaso en Group_ID
-                            group_str = str(group_id)
-                            if '|||' in group_str:
-                                logger.warning(f"Group_ID concatenado detectado para {dev_id}: {group_str}")
-                                for gid in group_str.split('|||'):
-                                    if gid.strip():
-                                        chats.add(gid.strip())
-                            else:
-                                chats.add(group_str)
+
+                        for field_name, field_value in [('Telegram_ID', telegram_id), ('Telegram_ID_2', telegram_id_2), ('Group_ID', group_id)]:
+                            if field_value:
+                                field_str = str(field_value)
+                                if '|||' in field_str:
+                                    logger.warning(f"{field_name} concatenado detectado para {dev_id}: {field_str}")
+                                    for tid in field_str.split('|||'):
+                                        if tid.strip():
+                                            chats.add(tid.strip())
+                                else:
+                                    chats.add(field_str)
                 return chats
 
             # Usar solo el cache (el listener lo mantiene actualizado)
@@ -843,9 +946,10 @@ class FirebaseManager:
                     continue
 
                 telegram_id = str(device_data.get('Telegram_ID', ''))
+                telegram_id_2 = str(device_data.get('Telegram_ID_2', ''))
                 group_id = str(device_data.get('Group_ID', ''))
 
-                # Manejar IDs concatenados con ||| (legacy de la app)
+                # Verificar en Telegram_ID
                 if '|||' in telegram_id:
                     telegram_ids = [tid.strip() for tid in telegram_id.split('|||') if tid.strip()]
                     if chat_id_str in telegram_ids:
@@ -853,6 +957,11 @@ class FirebaseManager:
                 elif telegram_id == chat_id_str:
                     is_telegram_id = True
 
+                # Verificar en Telegram_ID_2
+                if telegram_id_2 == chat_id_str:
+                    is_telegram_id = True
+
+                # Verificar en Group_ID
                 if '|||' in group_id:
                     group_ids = [gid.strip() for gid in group_id.split('|||') if gid.strip()]
                     if chat_id_str in group_ids:
@@ -977,6 +1086,8 @@ class FirebaseManager:
         """
         Agrega un chat autorizado a un dispositivo.
         Busca coincidencias parciales del device_id (truncado/completo).
+        Prioriza el dispositivo con ID más LARGO (completo = real MQTT) para consistencia.
+        Soporta 3 slots: Telegram_ID (dueño), Telegram_ID_2 (segundo usuario), Group_ID (grupo).
         Retorna True si se agregó correctamente.
         """
         if not self.is_available():
@@ -984,6 +1095,8 @@ class FirebaseManager:
             return False
 
         try:
+            # Forzar recarga del cache para tener datos frescos
+            self.invalidate_cache()
             all_devices = self._get_all_devices()
             if not all_devices:
                 logger.warning(f"No hay dispositivos en Firebase para agregar chat")
@@ -1001,25 +1114,85 @@ class FirebaseManager:
                 logger.warning(f"Dispositivo {device_id} no encontrado en Firebase")
                 return False
 
+            # Ordenar por longitud del ID (más LARGO primero = dispositivo real MQTT)
+            # El dispositivo completo es el que responde a comandos MQTT
+            matching_devices.sort(key=lambda x: len(x[0]), reverse=True)
+            logger.info(f"Dispositivos encontrados para {device_id} (priorizando completo): {[d[0] for d in matching_devices]}")
+
+            # Convertir chat_id a int para consistencia con Telegram_ID existente
+            try:
+                chat_id_int = int(chat_id)
+            except ValueError:
+                chat_id_int = chat_id  # Mantener como string si no es número
+
+            # Determinar si el chat_id es un grupo (ID negativo)
+            is_group_chat = str(chat_id).startswith('-')
+
             added = False
+            added_to_device = None
+
             for existing_id, device_data in matching_devices:
                 device_ref = self.db.reference(f'ESP32/{existing_id}')
+                current_telegram_id = device_data.get('Telegram_ID')
+                current_telegram_id_2 = device_data.get('Telegram_ID_2')
+                current_group_id = device_data.get('Group_ID')
 
-                # Si no tiene Telegram_ID, agregarlo ahí
-                if not device_data.get('Telegram_ID'):
-                    device_ref.child('Telegram_ID').set(chat_id)
-                    logger.info(f"Chat {chat_id} agregado a {existing_id} como Telegram_ID")
-                    added = True
-                # Si ya tiene Telegram_ID pero no Group_ID, agregarlo como Group_ID
-                elif not device_data.get('Group_ID'):
-                    device_ref.child('Group_ID').set(chat_id)
-                    logger.info(f"Chat {chat_id} agregado a {existing_id} como Group_ID")
-                    added = True
+                logger.info(f"Revisando {existing_id}: Telegram_ID={current_telegram_id}, Telegram_ID_2={current_telegram_id_2}, Group_ID={current_group_id}")
+
+                # Verificar si el chat ya está autorizado
+                chat_str = str(chat_id_int)
+                if (str(current_telegram_id) == chat_str or
+                    str(current_telegram_id_2) == chat_str or
+                    str(current_group_id) == chat_str):
+                    logger.info(f"Chat {chat_id} ya está autorizado en {existing_id}")
+                    return True
+
+                if is_group_chat:
+                    # Para grupos: solo usar Group_ID
+                    if not current_group_id:
+                        device_ref.child('Group_ID').set(chat_id_int)
+                        logger.info(f"✅ Grupo {chat_id} agregado a {existing_id} como Group_ID")
+                        added = True
+                        added_to_device = existing_id
+                        break
+                    else:
+                        logger.warning(f"Dispositivo {existing_id} ya tiene Group_ID={current_group_id}")
                 else:
-                    logger.warning(f"El dispositivo {existing_id} ya tiene Telegram_ID y Group_ID asignados")
+                    # Para usuarios: usar Telegram_ID → Telegram_ID_2
+                    if not current_telegram_id:
+                        device_ref.child('Telegram_ID').set(chat_id_int)
+                        logger.info(f"✅ Chat {chat_id} agregado a {existing_id} como Telegram_ID")
+                        added = True
+                        added_to_device = existing_id
+                        break
+                    elif not current_telegram_id_2:
+                        device_ref.child('Telegram_ID_2').set(chat_id_int)
+                        logger.info(f"✅ Chat {chat_id} agregado a {existing_id} como Telegram_ID_2")
+                        added = True
+                        added_to_device = existing_id
+                        break
+                    else:
+                        logger.warning(f"Dispositivo {existing_id} ya tiene Telegram_ID={current_telegram_id} y Telegram_ID_2={current_telegram_id_2}")
 
-            # Invalidar caché para recargar
+            if not added:
+                slot_type = "Group_ID" if is_group_chat else "Telegram_ID/Telegram_ID_2"
+                logger.error(f"❌ No se pudo agregar chat {chat_id} - slots de {slot_type} llenos en todos los dispositivos")
+
+            # Invalidar y recargar caché para asegurar consistencia
             self.invalidate_cache()
+
+            # Forzar recarga inmediata del dispositivo modificado
+            if added_to_device:
+                try:
+                    fresh_data = self.db.reference(f'ESP32/{added_to_device}').get()
+                    if self._all_devices_cache is None:
+                        self._all_devices_cache = {}
+                    self._all_devices_cache[added_to_device] = fresh_data
+                    self._cache_timestamp = time.time()
+                    logger.info(f"Cache actualizado para {added_to_device}: Telegram_ID={fresh_data.get('Telegram_ID')}, Telegram_ID_2={fresh_data.get('Telegram_ID_2')}, Group_ID={fresh_data.get('Group_ID')}")
+                except Exception as e:
+                    logger.warning(f"No se pudo recargar cache para {added_to_device}: {e}")
+
             return added
 
         except Exception as e:
@@ -1052,6 +1225,13 @@ class FirebaseManager:
             if telegram_id == chat_id_str:
                 device_ref.child('Telegram_ID').delete()
                 logger.info(f"Telegram_ID {chat_id} removido de {device_id}")
+                unlinked = True
+
+            # Verificar si el chat_id coincide con Telegram_ID_2
+            telegram_id_2 = str(device_data.get('Telegram_ID_2', ''))
+            if telegram_id_2 == chat_id_str:
+                device_ref.child('Telegram_ID_2').delete()
+                logger.info(f"Telegram_ID_2 {chat_id} removido de {device_id}")
                 unlinked = True
 
             # Verificar si el chat_id coincide con Group_ID

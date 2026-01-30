@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List, Callable, TYPE_CHECKING
 from functools import wraps
 import firebase_admin
+import telegram
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -661,11 +662,14 @@ class TelegramBot:
 
         await asyncio.sleep(5)
 
-        # Verificar confirmación por ID original o truncado
+        # Verificar confirmación por ID original, truncado, o resuelto (completo)
         armed_count = 0
         for device_id in devices:
             truncated_id = self.mqtt_handler.truncate_device_id(device_id)
-            if self.device_manager.is_armed(device_id) or self.device_manager.is_armed(truncated_id):
+            resolved_id = self.mqtt_handler.resolve_full_device_id(device_id)
+            if (self.device_manager.is_armed(device_id) or
+                self.device_manager.is_armed(truncated_id) or
+                self.device_manager.is_armed(resolved_id)):
                 armed_count += 1
 
         if armed_count > 0:
@@ -698,11 +702,14 @@ class TelegramBot:
 
         await asyncio.sleep(5)
 
-        # Verificar confirmación por ID original o truncado
+        # Verificar confirmación por ID original, truncado, o resuelto (completo)
         disarmed_count = 0
         for device_id in devices:
             truncated_id = self.mqtt_handler.truncate_device_id(device_id)
-            if not self.device_manager.is_armed(device_id) and not self.device_manager.is_armed(truncated_id):
+            resolved_id = self.mqtt_handler.resolve_full_device_id(device_id)
+            if (not self.device_manager.is_armed(device_id) and
+                not self.device_manager.is_armed(truncated_id) and
+                not self.device_manager.is_armed(resolved_id)):
                 disarmed_count += 1
 
         if disarmed_count > 0:
@@ -2053,13 +2060,19 @@ class TelegramBot:
 
         # Manejar evento de alarma disparada con flujo de bengala
         if event.event_type == EventType.ALARM_TRIGGERED:
+            logger.info(f"🚨 ALARM_TRIGGERED recibido de {device_id}")
             bengala_mode = self.device_manager.get_bengala_mode(device_id)
             bengala_enabled = self.device_manager.is_bengala_enabled(device_id)
             sensor_name = event.data.get("sensorName", "Sensor desconocido")
             sensor_location = event.data.get("location", device_location)
 
+            logger.info(f"🚨 Configuración: bengala_mode={bengala_mode}, bengala_enabled={bengala_enabled}")
+            logger.info(f"🚨 Sensor: {sensor_name}, Location: {sensor_location}")
+            logger.info(f"🚨 Chats autorizados: {chat_ids}")
+
             if bengala_mode == 1 and bengala_enabled:  # Modo pregunta con bengala habilitada
                 # Iniciar flujo de confirmación de bengala (con botón de disparar bengala)
+                logger.info(f"🚨 Iniciando flujo de confirmación de bengala para {device_id}")
                 await self._start_bengala_confirmation(
                     device_id=device_id,
                     chat_ids=chat_ids,
@@ -2069,6 +2082,7 @@ class TelegramBot:
                 return  # El mensaje de confirmación ya se envía en _start_bengala_confirmation
             else:
                 # Modo automático o bengala deshabilitada: solo botón de desactivar
+                logger.info(f"🚨 Iniciando notificación de alarma (modo auto) para {device_id}")
                 await self._start_alarm_notification(
                     device_id=device_id,
                     chat_ids=chat_ids,
@@ -2154,7 +2168,9 @@ class TelegramBot:
                 is_group = str(chat_id).startswith('-')
                 if is_group:
                     # Grupo: mensaje simple sin botones de bengala
-                    await self.send_message(chat_id, alert_msg_group, "Markdown", has_keyboard=True)
+                    # skip_anti_spam=True porque alarmas son eventos críticos
+                    await self.send_message(chat_id, alert_msg_group, "Markdown", has_keyboard=True, skip_anti_spam=True)
+                    logger.info(f"🚨 Notificación de alarma enviada a GRUPO {chat_id}")
                 else:
                     # Chat privado: mensaje con botones
                     await self.application.bot.send_message(
@@ -2163,10 +2179,11 @@ class TelegramBot:
                         parse_mode=ParseMode.MARKDOWN,
                         reply_markup=keyboard_private
                     )
+                    logger.info(f"🚨 Notificación de alarma enviada a PRIVADO {chat_id}")
             except Exception as e:
                 logger.error(f"Error enviando confirmación de bengala a {chat_id}: {e}")
 
-        logger.info(f"Flujo de confirmación de bengala iniciado para {device_id}")
+        logger.info(f"Flujo de confirmación de bengala iniciado para {device_id} (sensor: {sensor_name})")
 
     async def _start_alarm_notification(
         self,
@@ -2209,7 +2226,9 @@ class TelegramBot:
                 is_group = str(chat_id).startswith('-')
                 if is_group:
                     # Grupo: mensaje sin botones inline (usará teclado principal)
-                    await self.send_message(chat_id, alert_msg, "Markdown", has_keyboard=True)
+                    # skip_anti_spam=True porque alarmas son eventos críticos
+                    await self.send_message(chat_id, alert_msg, "Markdown", has_keyboard=True, skip_anti_spam=True)
+                    logger.info(f"🚨 Notificación de alarma (auto) enviada a GRUPO {chat_id}")
                 else:
                     # Chat privado: mensaje con botón de desactivar
                     await self.application.bot.send_message(
@@ -2218,6 +2237,7 @@ class TelegramBot:
                         parse_mode=ParseMode.MARKDOWN,
                         reply_markup=keyboard
                     )
+                    logger.info(f"🚨 Notificación de alarma (auto) enviada a PRIVADO {chat_id}")
             except Exception as e:
                 logger.error(f"Error enviando notificación de alarma a {chat_id}: {e}")
 
@@ -2225,7 +2245,7 @@ class TelegramBot:
         reminder_task = asyncio.create_task(self._alarm_reminder_task(device_id))
         self._alarm_notifications[device_id]["reminder_task"] = reminder_task
 
-        logger.info(f"Notificación de alarma iniciada para {device_id} (modo auto/deshabilitado)")
+        logger.info(f"Notificación de alarma iniciada para {device_id} (sensor: {sensor_name}, modo auto/deshabilitado)")
 
     async def _alarm_reminder_task(self, device_id: str):
         """
@@ -2357,10 +2377,11 @@ class TelegramBot:
 
                         # Solo enviar si pasó el intervalo (1 minuto para privados)
                         if current_time - last_sent >= self.REMINDER_INTERVAL_PRIVATE:
-                            await self.send_message(chat_id, reminder_msg, "Markdown", has_keyboard=True)
+                            # skip_anti_spam=True porque recordatorios de alarma son críticos
+                            await self.send_message(chat_id, reminder_msg, "Markdown", has_keyboard=True, skip_anti_spam=True)
                             last_reminder_time[chat_id] = current_time
                             confirmation.reminder_count += 1
-                            logger.debug(f"Recordatorio bengala enviado a {chat_id}")
+                            logger.info(f"⚠️ Recordatorio bengala enviado a {chat_id}")
                     except Exception as e:
                         logger.error(f"Error enviando recordatorio a {chat_id}: {e}")
 
@@ -2472,7 +2493,8 @@ class TelegramBot:
         parse_mode: str = "",
         keyboard: str = "",
         has_keyboard: bool = False,
-        reply_markup: Optional[Any] = None
+        reply_markup: Optional[Any] = None,
+        skip_anti_spam: bool = False
     ):
         """Envia un mensaje a un chat de Telegram
 
@@ -2484,9 +2506,10 @@ class TelegramBot:
             has_keyboard: Si True, muestra el teclado estándar
             reply_markup: Markup directo (InlineKeyboardMarkup, ReplyKeyboardMarkup, etc.)
                          Si se proporciona, tiene prioridad sobre keyboard/has_keyboard
+            skip_anti_spam: Si True, omite la verificación anti-spam (para eventos críticos como alarmas)
         """
         # --- Anti-Spam ---
-        if self._was_recently_sent(chat_id, text):
+        if not skip_anti_spam and self._was_recently_sent(chat_id, text):
             return  # Detener si es un mensaje duplicado
         # -----------------
         try:

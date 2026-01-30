@@ -19,6 +19,7 @@ import asyncio
 import logging
 import signal
 import sys
+import time as _time
 from typing import Dict, Any
 
 from config import config
@@ -58,6 +59,10 @@ class AlarmBridgeService:
         self._connection_monitor_task = None
         self._alarm_reminder_task = None
         self._firebase_monitor_task = None
+        # Flag para indicar que la última acción arm/disarm fue por horario
+        # Cuando el ESP32 responde con source="remote", lo reemplazamos por "schedule"
+        self._pending_scheduled_action: str = ""  # "arm" o "disarm" o ""
+        self._pending_scheduled_time: float = 0.0  # timestamp del último scheduled action
 
         # Registrar callbacks de MQTT
         self._setup_mqtt_callbacks()
@@ -84,36 +89,26 @@ class AlarmBridgeService:
         """Callback para activacion automatica programada"""
         logger.info("Activacion automatica programada")
 
+        # Marcar que esta acción es por horario para que el event handler
+        # use source="schedule" en vez de "remote" y no duplique push
+        self._pending_scheduled_action = "arm"
+        self._pending_scheduled_time = _time.time()
+
         # Enviar comando al ESP32
+        # El ESP32 responderá con SYSTEM_ARMED (source="remote")
+        # _handle_event detectará el flag y lo tratará como "schedule"
         self.mqtt.send_arm()
-
-        # Notificar a todos los usuarios via Telegram
-        msg = (
-            "🔒 *ACTIVACION AUTOMATICA*\n\n"
-            f"⏰ Hora programada: {scheduler.config.format_on_time()}\n"
-            "El sistema se está armando automáticamente."
-        )
-        self._schedule_telegram_broadcast_for_device(self.mqtt.device_id, msg)
-
-        # Enviar push notification a la App
-        self._send_push_scheduled_arm()
 
     async def _scheduled_disarm(self):
         """Callback para desactivacion automatica programada"""
         logger.info("Desactivacion automatica programada")
 
+        # Marcar que esta acción es por horario
+        self._pending_scheduled_action = "disarm"
+        self._pending_scheduled_time = _time.time()
+
+        # Enviar comando al ESP32
         self.mqtt.send_disarm()
-
-        # Notificar via Telegram
-        msg = (
-            "🔓 *DESACTIVACION AUTOMATICA*\n\n"
-            f"⏰ Hora programada: {scheduler.config.format_off_time()}\n"
-            "El sistema se ha desarmado automáticamente."
-        )
-        self._schedule_telegram_broadcast_for_device(self.mqtt.device_id, msg)
-
-        # Enviar push notification a la App
-        self._send_push_scheduled_disarm()
 
     async def _scheduled_reminder(self, action: str, minutes: int):
         """
@@ -169,7 +164,22 @@ class AlarmBridgeService:
         Delega al TelegramBot para manejar lógica de bengala y notificaciones.
         También envía push notifications a la App.
         """
-        logger.info(f"[{event.device_id}] Evento: {event.event_type}")
+        logger.info(f"[{event.device_id}] Evento recibido: {event.event_type}")
+
+        # Log adicional para eventos de alarma
+        if event.event_type == EventType.ALARM_TRIGGERED:
+            logger.info(f"🚨 [MAIN] ALARM_TRIGGERED de {event.device_id}")
+            logger.info(f"🚨 [MAIN] loop={self._loop}, telegram_running={self.telegram.is_running() if self.telegram else False}")
+
+        # Detectar si este evento arm/disarm fue originado por el scheduler
+        # El ESP32 reporta source="remote" pero nosotros sabemos que fue por horario
+        if self._pending_scheduled_action and (_time.time() - self._pending_scheduled_time) < 30:
+            if (event.event_type == EventType.SYSTEM_ARMED and self._pending_scheduled_action == "arm") or \
+               (event.event_type == EventType.SYSTEM_DISARMED and self._pending_scheduled_action == "disarm"):
+                logger.info(f"⏰ Evento {event.event_type} detectado como acción de HORARIO (reemplazando source)")
+                event.data["source"] = "schedule"
+                self._pending_scheduled_action = ""
+                self._pending_scheduled_time = 0.0
 
         # Delegar al TelegramBot que tiene la lógica de confirmación de bengala
         if self._loop and self.telegram.is_running():
@@ -388,9 +398,11 @@ class AlarmBridgeService:
             is_group = int(chat_id) < 0
             if not is_group:
                 asyncio.run_coroutine_threadsafe(
-                    self.telegram.send_message(chat_id, message, "Markdown", reply_markup=reply_markup),
+                    # skip_anti_spam=True porque recordatorios de alarma son críticos
+                    self.telegram.send_message(chat_id, message, "Markdown", reply_markup=reply_markup, skip_anti_spam=True),
                     self._loop
                 )
+                logger.debug(f"⚠️ Recordatorio de alarma enviado a {chat_id}")
 
     def _schedule_telegram_broadcast_private_only(self, device_id: str, message: str):
         """Envia un mensaje de texto solo a chats privados (no a grupos)"""

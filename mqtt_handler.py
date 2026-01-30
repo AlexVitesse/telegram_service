@@ -162,6 +162,8 @@ class MqttHandler:
 
             # Update device state in DeviceManager
             if event.event_type == EventType.ALARM_TRIGGERED:
+                logger.info(f"🚨 MQTT: ALARM_TRIGGERED recibido de {event.device_id}")
+                logger.info(f"🚨 MQTT: Datos del evento: {event.data}")
                 self.device_manager.set_alarming_state(event.device_id, True)
             elif event.event_type == EventType.ALARM_STOPPED or event.event_type == EventType.SYSTEM_DISARMED:
                 self.device_manager.set_alarming_state(event.device_id, False)
@@ -315,16 +317,42 @@ class MqttHandler:
             return device_id[:-3]
         return device_id
 
+    def resolve_full_device_id(self, device_id: str) -> str:
+        """
+        Resuelve un device_id potencialmente truncado al ID completo del dispositivo MQTT real.
+        Busca en los dispositivos conocidos del device_manager uno que empiece con el ID dado.
+        Ejemplo: '6C_C8_40_4F' -> '6C_C8_40_4F_C7' (si existe)
+        Retorna el ID original si no se encuentra coincidencia.
+        """
+        if not self.device_manager:
+            return device_id
+
+        all_ids = self.device_manager.get_all_device_ids()
+        for known_id in all_ids:
+            # Si un ID conocido empieza con el ID dado y es más largo, es la versión completa
+            if known_id != device_id and known_id.startswith(device_id):
+                logger.info(f"🔗 ID resuelto: {device_id} -> {known_id} (dispositivo MQTT real)")
+                return known_id
+
+        return device_id
+
     def send_command(self, cmd: str, args: Dict[str, Any] = None,
                      device_id: str = None, queue_if_offline: bool = False) -> bool:
         """
         Envia un comando al ESP32 (tanto al ID completo como al truncado).
+        Resuelve IDs truncados al ID real del dispositivo MQTT.
         Si queue_if_offline=True y el dispositivo está offline, encola el comando.
         """
         target_device = device_id or self.device_id
         if not target_device:
             logger.error("No hay device_id configurado")
             return False
+
+        # Resolver ID truncado al ID real del dispositivo MQTT
+        resolved_device = self.resolve_full_device_id(target_device)
+        if resolved_device != target_device:
+            logger.info(f"🔗 Comando {cmd}: resolviendo {target_device} -> {resolved_device}")
+            target_device = resolved_device
 
         # Si se debe encolar cuando está offline, verificar estado
         if queue_if_offline and not self.is_device_online(target_device):

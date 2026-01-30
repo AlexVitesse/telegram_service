@@ -34,6 +34,8 @@ class ScheduleConfig:
     notify_before_minutes: int = 5  # Notificar X minutos antes
     last_on_executed: str = ""      # Fecha de última ejecución on
     last_off_executed: str = ""     # Fecha de última ejecución off
+    last_on_reminder_sent: str = ""   # Fecha de último recordatorio de activación
+    last_off_reminder_sent: str = ""  # Fecha de último recordatorio de desactivación
 
     def __post_init__(self):
         # Si days es None, activar todos los días por defecto
@@ -59,7 +61,9 @@ class ScheduleConfig:
             days=days,
             notify_before_minutes=data.get('notify_before_minutes', 5),
             last_on_executed=data.get('last_on_executed', ''),
-            last_off_executed=data.get('last_off_executed', '')
+            last_off_executed=data.get('last_off_executed', ''),
+            last_on_reminder_sent=data.get('last_on_reminder_sent', ''),
+            last_off_reminder_sent=data.get('last_off_reminder_sent', '')
         )
 
     def get_on_time(self) -> time:
@@ -144,6 +148,9 @@ class Scheduler:
     def set_enabled(self, enabled: bool):
         """Habilita o deshabilita la programación"""
         self.config.enabled = enabled
+        # Limpiar flags de recordatorio para permitir nuevos envíos
+        self.config.last_on_reminder_sent = ""
+        self.config.last_off_reminder_sent = ""
         self._save_config()
         logger.info(f"Schedule {'habilitado' if enabled else 'deshabilitado'}")
 
@@ -153,6 +160,8 @@ class Scheduler:
             return False
         self.config.on_hour = hour
         self.config.on_minute = minute
+        # Limpiar flag de recordatorio de activación
+        self.config.last_on_reminder_sent = ""
         self._save_config()
         logger.info(f"Hora de activación: {self.config.format_on_time()}")
         return True
@@ -163,6 +172,8 @@ class Scheduler:
             return False
         self.config.off_hour = hour
         self.config.off_minute = minute
+        # Limpiar flag de recordatorio de desactivación
+        self.config.last_off_reminder_sent = ""
         self._save_config()
         logger.info(f"Hora de desactivación: {self.config.format_off_time()}")
         return True
@@ -365,6 +376,12 @@ class Scheduler:
         if not self._is_today_active():
             return False
 
+        today_key = self._get_today_key()
+
+        # Ya se envió el recordatorio hoy
+        if self.config.last_on_reminder_sent == today_key:
+            return False
+
         now = datetime.now()
         current_minutes = now.hour * 60 + now.minute
         target_minutes = self.config.on_hour * 60 + self.config.on_minute
@@ -379,6 +396,12 @@ class Scheduler:
 
         # Verificar si hoy es un día activo
         if not self._is_today_active():
+            return False
+
+        today_key = self._get_today_key()
+
+        # Ya se envió el recordatorio hoy
+        if self.config.last_off_reminder_sent == today_key:
             return False
 
         now = datetime.now()
@@ -398,6 +421,9 @@ class Scheduler:
         if self._should_send_on_reminder():
             if self._on_reminder_callback:
                 logger.info(f"⏰ Enviando recordatorio de ACTIVACIÓN ({self.config.notify_before_minutes} min antes)")
+                # Marcar como enviado ANTES de enviar para evitar duplicados
+                self.config.last_on_reminder_sent = self._get_today_key()
+                self._save_config()
                 await self._on_reminder_callback("on", self.config.notify_before_minutes)
             else:
                 logger.warning("⏰ Recordatorio de activación pendiente pero no hay callback registrado")
@@ -405,6 +431,9 @@ class Scheduler:
         if self._should_send_off_reminder():
             if self._on_reminder_callback:
                 logger.info(f"⏰ Enviando recordatorio de DESACTIVACIÓN ({self.config.notify_before_minutes} min antes)")
+                # Marcar como enviado ANTES de enviar para evitar duplicados
+                self.config.last_off_reminder_sent = self._get_today_key()
+                self._save_config()
                 await self._on_reminder_callback("off", self.config.notify_before_minutes)
             else:
                 logger.warning("⏰ Recordatorio de desactivación pendiente pero no hay callback registrado")
