@@ -1,21 +1,19 @@
 {
   "enabled": true,
-  "on_hour": 10,
-  "on_minute": 25,
-  "off_hour": 10,
-  "off_minute": 35,
+  "on_hour": 14,
+  "on_minute": 0,
+  "off_hour": 14,
+  "off_minute": 10,
   "days": [
-    "Domingo",
     "Lunes",
     "Martes",
     "Mi\u00e9rcoles",
     "Jueves",
-    "Viernes",
-    "S\u00e1bado"
+    "Viernes"
   ],
   "notify_before_minutes": 5,
-  "last_on_executed": "",
-  "last_off_executed": "",
-  "last_on_reminder_sent": "",
-  "last_off_reminder_sent": ""
+  "last_on_executed": "2026-02-03",
+  "last_off_executed": "2026-02-03",
+  "last_on_reminder_sent": "2026-02-03",
+  "last_off_reminder_sent": "2026-02-03"
 }
