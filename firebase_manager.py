@@ -318,7 +318,8 @@ class FirebaseManager:
                     logger.info(f"Comando de App: DESARMAR para {device_id}")
                     self.mqtt_handler.send_command(cmd=Command.DISARM.value, device_id=device_id)
 
-            elif command_key == 'DisparoApp' and event.data is not None:
+            elif command_key == 'DisparoApp' and event.data is True:
+                # Solo disparar cuando DisparoApp cambia a True, no cuando se resetea a False
                 logger.info(f"Comando de App: DISPARO para {device_id}")
                 self.mqtt_handler.send_command(cmd=Command.TRIGGER_ALARM.value, device_id=device_id)
 

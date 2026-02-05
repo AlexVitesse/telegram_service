@@ -1465,7 +1465,16 @@ class TelegramBot:
             # 2. Actualizar Firebase (con nombres de días para la App)
             if self.firebase_manager.is_available():
                 try:
-                    schedule_path = f"Horarios/{chat_id}/devices/{device_id}"
+                    # Usar el Telegram_ID del propietario del dispositivo, no el chat_id
+                    # Esto es necesario porque si el comando viene de un grupo, chat_id sería
+                    # el ID del grupo, pero la App busca horarios por el Telegram_ID del dispositivo
+                    owner_id = self.firebase_manager.get_device_owner(device_id)
+                    if not owner_id:
+                        # Fallback: usar chat_id si no se encuentra propietario
+                        owner_id = chat_id
+                        logger.warning(f"No se encontró propietario para {device_id}, usando chat_id: {chat_id}")
+
+                    schedule_path = f"Horarios/{owner_id}/devices/{device_id}"
                     schedule_data = {
                         "activationTime": scheduler.config.format_on_time(),
                         "deactivationTime": scheduler.config.format_off_time(),
