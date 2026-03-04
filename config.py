@@ -48,6 +48,7 @@ class MqttConfig:
 class TelegramConfig:
     bot_token: str = _get_env("TELEGRAM_BOT_TOKEN", "")
     admin_chat_id: str = _get_env("TELEGRAM_ADMIN_CHAT_ID", "")
+    admin_bot_token: str = _get_env("ADMIN_BOT_TOKEN", "")
 
 
 @dataclass
@@ -59,10 +60,17 @@ class FirebaseConfig:
 
 
 @dataclass
+class AIConfig:
+    groq_api_key: str = _get_env("GROQ_API_KEY", "")
+    enabled: bool = _get_env_bool("AI_ENABLED", True)
+
+
+@dataclass
 class Config:
     mqtt: MqttConfig
     telegram: TelegramConfig
     firebase: FirebaseConfig
+    ai: AIConfig
     device_id: str = _get_env("DEVICE_ID", "")
     debug: bool = _get_env_bool("DEBUG", True)
     log_file: str = _get_env("LOG_FILE", "alarm_service.log")
@@ -73,6 +81,7 @@ config = Config(
     mqtt=MqttConfig(),
     telegram=TelegramConfig(),
     firebase=FirebaseConfig(),
+    ai=AIConfig(),
 )
 
 # Validar que las credenciales críticas estén configuradas

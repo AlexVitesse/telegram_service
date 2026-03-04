@@ -6,6 +6,7 @@ Nueva arquitectura: Python maneja usuarios y notificaciones.
 Usa Firebase para verificar permisos antes de enviar comandos.
 """
 import asyncio
+import datetime
 import json
 import logging
 import time
@@ -35,6 +36,7 @@ from config import config
 from scheduler import scheduler
 from mqtt_protocol import MqttEvent, EventType
 from device_manager import DeviceManager
+from ai_handler import AIHandler
 
 if TYPE_CHECKING: # ADD THIS BLOCK
     from firebase_manager import FirebaseManager
@@ -234,6 +236,13 @@ class TelegramBot:
 
         # Dispositivo seleccionado para horarios (por chat_id)
         self._horarios_selected_device: Dict[str, str] = {}  # chat_id -> device_id o "all"
+
+        # AI Handler (Groq) - lenguaje natural
+        self.ai_handler: Optional[AIHandler] = None
+        if config.ai.enabled and config.ai.groq_api_key:
+            self.ai_handler = AIHandler(api_key=config.ai.groq_api_key)
+        else:
+            logger.info("🤖 AI Handler deshabilitado (AI_ENABLED=false o sin GROQ_API_KEY)")
 
     def _is_user_authorized(self, chat_id: str) -> bool:
         """
@@ -638,8 +647,6 @@ class TelegramBot:
 
     async def _arm_devices(self, update_or_query, devices: List[str], single_device: bool = False):
         """Arma uno o varios dispositivos y espera confirmación"""
-        # Determinar si es un Update o CallbackQuery
-        # CallbackQuery tiene 'data', Update tiene 'effective_chat'
         is_callback = hasattr(update_or_query, 'data')
 
         if is_callback:
@@ -653,33 +660,40 @@ class TelegramBot:
         device_text = "1 dispositivo" if device_count == 1 else f"{device_count} dispositivos"
 
         await reply_func(
-            f"🔒 Enviando comando para *armar* {device_text}... Esperando confirmación (7s).",
+            f"🔒 Enviando comando para *armar* {device_text}...",
             parse_mode=ParseMode.MARKDOWN
         )
 
         for device_id in devices:
             self.mqtt_handler.send_arm(device_id=device_id)
 
-        await asyncio.sleep(5)
-
-        # Verificar confirmación por ID original, truncado, o resuelto (completo)
+        # Esperar hasta 10 segundos con verificación cada 2s
         armed_count = 0
-        for device_id in devices:
-            truncated_id = self.mqtt_handler.truncate_device_id(device_id)
-            resolved_id = self.mqtt_handler.resolve_full_device_id(device_id)
-            if (self.device_manager.is_armed(device_id) or
-                self.device_manager.is_armed(truncated_id) or
-                self.device_manager.is_armed(resolved_id)):
-                armed_count += 1
+        for attempt in range(5):
+            await asyncio.sleep(2)
+            armed_count = 0
+            for device_id in devices:
+                truncated_id = self.mqtt_handler.truncate_device_id(device_id)
+                resolved_id = self.mqtt_handler.resolve_full_device_id(device_id)
+                if (self.device_manager.is_armed(device_id) or
+                    self.device_manager.is_armed(truncated_id) or
+                    self.device_manager.is_armed(resolved_id)):
+                    armed_count += 1
+            if armed_count >= device_count:
+                break
 
         if armed_count > 0:
             await self.send_message(chat_id, f"✅ {armed_count}/{device_count} dispositivo(s) armado(s) correctamente.", "Markdown")
         else:
-            await self.send_message(chat_id, "❌ Ningún dispositivo confirmó el armado. Puede que estén offline.", "Markdown")
+            # Verificar si el dispositivo está online antes de decir "offline"
+            online_count = sum(1 for d in devices if self.device_manager.is_online(d))
+            if online_count > 0:
+                await self.send_message(chat_id, f"⏳ Comando enviado a {online_count} dispositivo(s) en línea. La confirmación puede tardar unos segundos.", "Markdown")
+            else:
+                await self.send_message(chat_id, "⚠️ Dispositivo(s) sin conexión. El comando se ejecutará cuando se reconecten.", "Markdown")
 
     async def _disarm_devices(self, update_or_query, devices: List[str], single_device: bool = False):
         """Desarma uno o varios dispositivos y espera confirmación"""
-        # Determinar si es un Update o CallbackQuery
         is_callback = hasattr(update_or_query, 'data')
 
         if is_callback:
@@ -693,29 +707,36 @@ class TelegramBot:
         device_text = "1 dispositivo" if device_count == 1 else f"{device_count} dispositivos"
 
         await reply_func(
-            f"🔓 Enviando comando para *desarmar* {device_text}... Esperando confirmación (7s).",
+            f"🔓 Enviando comando para *desarmar* {device_text}...",
             parse_mode=ParseMode.MARKDOWN
         )
 
         for device_id in devices:
             self.mqtt_handler.send_disarm(device_id=device_id)
 
-        await asyncio.sleep(5)
-
-        # Verificar confirmación por ID original, truncado, o resuelto (completo)
+        # Esperar hasta 10 segundos con verificación cada 2s
         disarmed_count = 0
-        for device_id in devices:
-            truncated_id = self.mqtt_handler.truncate_device_id(device_id)
-            resolved_id = self.mqtt_handler.resolve_full_device_id(device_id)
-            if (not self.device_manager.is_armed(device_id) and
-                not self.device_manager.is_armed(truncated_id) and
-                not self.device_manager.is_armed(resolved_id)):
-                disarmed_count += 1
+        for attempt in range(5):
+            await asyncio.sleep(2)
+            disarmed_count = 0
+            for device_id in devices:
+                truncated_id = self.mqtt_handler.truncate_device_id(device_id)
+                resolved_id = self.mqtt_handler.resolve_full_device_id(device_id)
+                if (not self.device_manager.is_armed(device_id) and
+                    not self.device_manager.is_armed(truncated_id) and
+                    not self.device_manager.is_armed(resolved_id)):
+                    disarmed_count += 1
+            if disarmed_count >= device_count:
+                break
 
         if disarmed_count > 0:
             await self.send_message(chat_id, f"✅ {disarmed_count}/{device_count} dispositivo(s) desarmado(s) correctamente.", "Markdown")
         else:
-            await self.send_message(chat_id, "❌ Ningún dispositivo confirmó el desarmado. Puede que estén offline.", "Markdown")
+            online_count = sum(1 for d in devices if self.device_manager.is_online(d))
+            if online_count > 0:
+                await self.send_message(chat_id, f"⏳ Comando enviado a {online_count} dispositivo(s) en línea. La confirmación puede tardar unos segundos.", "Markdown")
+            else:
+                await self.send_message(chat_id, "⚠️ Dispositivo(s) sin conexión. El comando se ejecutará cuando se reconecten.", "Markdown")
 
     @require_auth
     async def _cmd_off(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1508,14 +1529,17 @@ class TelegramBot:
         await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
     async def _handle_unknown_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handler para mensajes de texto que no son comandos"""
+        """Handler para mensajes de texto que no son comandos.
+        Si la IA está habilitada, intenta interpretar el mensaje en lenguaje natural."""
         user = update.effective_user
         chat_id = str(update.effective_chat.id)
+        text = update.message.text or ""
 
-        logger.info(f"Mensaje de texto de {user.first_name} ({chat_id}): {update.message.text[:50]}")
+        logger.info(f"Mensaje de texto de {user.first_name} ({chat_id}): {text[:60]}")
 
-        # Verificar si el usuario esta autorizado
-        if not self.firebase_manager.get_authorized_devices(chat_id):
+        # Verificar autorización
+        authorized_devices = self.firebase_manager.get_authorized_devices(chat_id)
+        if not authorized_devices:
             await update.message.reply_text(
                 "🚫 *Usuario no autorizado*\n\n"
                 "No estas registrado en el sistema.\n"
@@ -1524,12 +1548,194 @@ class TelegramBot:
             )
             return
 
-        # Usuario autorizado pero envio texto en lugar de comando
-        await update.message.reply_text(
-            "ℹ️ Usa comandos para interactuar con el sistema.\n"
-            "Escribe /help para ver los comandos disponibles.",
-            reply_markup=self._get_keyboard()
-        )
+        # Intentar interpretar con IA
+        if self.ai_handler:
+            await self._handle_ai_message(update, chat_id, text, authorized_devices)
+        else:
+            await update.message.reply_text(
+                "ℹ️ Usa comandos para interactuar con el sistema.\n"
+                "Escribe /help para ver los comandos disponibles.",
+                reply_markup=self._get_keyboard()
+            )
+
+    async def _handle_ai_message(
+        self,
+        update: Update,
+        chat_id: str,
+        text: str,
+        authorized_device_ids: List[str],
+    ):
+        """Interpreta el mensaje con Groq y ejecuta la acción correspondiente."""
+        # Construir contexto de dispositivos para la IA
+        devices_context = []
+        for dev_id in authorized_device_ids:
+            state = self.device_manager.get_device_info(dev_id) or {}
+            nombre = self.firebase_manager.get_device_location(dev_id) or dev_id
+            devices_context.append({
+                "id": dev_id,
+                "name": nombre,
+                "is_armed": state.get("is_armed", False),
+                "is_online": state.get("is_online", False),
+            })
+
+        # Llamar a Groq
+        result = self.ai_handler.parse_intent(text, devices_context)
+
+        if result is None or result["intent"] == "unknown":
+            await update.message.reply_text(
+                "ℹ️ No entendí ese mensaje.\n"
+                "Puedes escribirme en lenguaje natural, por ejemplo:\n"
+                "• _\"activa la alarma\"_\n"
+                "• _\"apaga la de bodega\"_\n"
+                "• _\"¿cuál es el estado?\"_\n\n"
+                "O usa /help para ver los comandos.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=self._get_keyboard()
+            )
+            return
+
+        intent = result["intent"]
+        device_name = result.get("device")  # nombre o "all" o null
+        reply_text = result.get("reply", "Entendido.")
+
+        # Intents que no necesitan resolver un dispositivo específico
+        if intent == "list_devices":
+            lines = []
+            for d in devices_context:
+                estado = "🔴 Armado" if d["is_armed"] else "🟢 Desarmado"
+                conexion = "🌐 En línea" if d["is_online"] else "📴 Offline"
+                name = d.get("name") or d["id"]
+                lines.append(f"• *{name}* — {estado} | {conexion}")
+            resumen = "\n".join(lines) if lines else "Sin dispositivos registrados."
+            await update.message.reply_text(
+                f"📋 Tienes *{len(devices_context)}* dispositivo(s):\n\n{resumen}",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=self._get_keyboard()
+            )
+            logger.info(f"🤖 IA → LIST_DEVICES para {chat_id}")
+            return
+
+        if intent == "query_schedule":
+            cfg = scheduler.config
+            if not cfg.enabled:
+                msg = (
+                    "📅 *Horario automático:* Deshabilitado\n\n"
+                    "Puedes configurarlo escribiendo algo como:\n"
+                    "_\"arma lunes a viernes de 10pm a 6am\"_"
+                )
+            else:
+                dias = ", ".join(cfg.days) if cfg.days else "Todos los días"
+                msg = (
+                    "📅 *Horario automático configurado:*\n\n"
+                    f"🔴 Arma a las: *{cfg.on_time_display}*\n"
+                    f"🟢 Desarma a las: *{cfg.off_time_display}*\n"
+                    f"📆 Días: *{dias}*"
+                )
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=self._get_keyboard())
+            logger.info(f"🤖 IA → QUERY_SCHEDULE para {chat_id}")
+            return
+
+        if intent == "last_event":
+            lines = []
+            for d in devices_context:
+                state = self.device_manager.get_device_info(d["id"]) or {}
+                t = state.get("last_alarm_event_time", 0)
+                name = d.get("name") or d["id"]
+                if t:
+                    dt = datetime.datetime.fromtimestamp(t).strftime("%d/%m/%Y %H:%M:%S")
+                    lines.append(f"• *{name}*: última alarma el {dt}")
+                else:
+                    lines.append(f"• *{name}*: sin alarmas registradas en esta sesión")
+            resumen = "\n".join(lines) if lines else "Sin datos disponibles."
+            await update.message.reply_text(
+                f"🕐 *Historial de alarmas:*\n\n{resumen}",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=self._get_keyboard()
+            )
+            logger.info(f"🤖 IA → LAST_EVENT para {chat_id}")
+            return
+
+        # Resolver device_ids a partir del nombre indicado por la IA
+        target_ids = self._resolve_device_ids_by_name(device_name, authorized_device_ids, devices_context)
+
+        if not target_ids:
+            await update.message.reply_text(
+                f"⚠️ No encontré el dispositivo *{device_name}*.\n"
+                "Verifica el nombre o usa /status para ver los dispositivos disponibles.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        # Confirmar al usuario lo que se va a hacer
+        await update.message.reply_text(f"🤖 {reply_text}", reply_markup=self._get_keyboard())
+
+        # Ejecutar intent
+        if intent == "arm":
+            for dev_id in target_ids:
+                self.mqtt_handler.send_arm(dev_id)
+            logger.info(f"🤖 IA → ARM en {target_ids} solicitado por {chat_id}")
+
+        elif intent == "disarm":
+            for dev_id in target_ids:
+                self.mqtt_handler.send_disarm(dev_id)
+            logger.info(f"🤖 IA → DISARM en {target_ids} solicitado por {chat_id}")
+
+        elif intent == "status":
+            for dev_id in target_ids:
+                self.mqtt_handler.send_get_status(dev_id)
+            logger.info(f"🤖 IA → STATUS en {target_ids} solicitado por {chat_id}")
+
+        elif intent == "stop_alarm":
+            for dev_id in target_ids:
+                self.mqtt_handler.send_stop_alarm(dev_id)
+            logger.info(f"🤖 IA → STOP_ALARM en {target_ids} solicitado por {chat_id}")
+
+        elif intent == "trigger_bengala":
+            for dev_id in target_ids:
+                self.mqtt_handler.send_activate_bengala(device_id=dev_id)
+            logger.info(f"🤖 IA → TRIGGER_BENGALA en {target_ids} solicitado por {chat_id}")
+
+        elif intent == "schedule":
+            params = result.get("params", {})
+            required = {"enabled", "on_hour", "on_minute", "off_hour", "off_minute"}
+            if not required.issubset(params.keys()):
+                await update.message.reply_text(
+                    "⚠️ No pude interpretar el horario completo.\n"
+                    "Ejemplo: _\"arma lunes a viernes de 10pm a 6am\"_",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+            days = params.get("days", [0, 1, 2, 3, 4, 5, 6])
+            for dev_id in target_ids:
+                self.mqtt_handler.send_set_schedule(
+                    enabled=params["enabled"],
+                    on_hour=params["on_hour"],
+                    on_minute=params["on_minute"],
+                    off_hour=params["off_hour"],
+                    off_minute=params["off_minute"],
+                    days=days,
+                    device_id=dev_id,
+                )
+            logger.info(f"🤖 IA → SCHEDULE en {target_ids}: {params}")
+
+
+    def _resolve_device_ids_by_name(
+        self,
+        device_name: Optional[str],
+        authorized_ids: List[str],
+        devices_context: List[Dict[str, Any]],
+    ) -> List[str]:
+        """Convierte el nombre de dispositivo que devuelve la IA en IDs reales."""
+        if not device_name or device_name == "all":
+            return authorized_ids
+
+        name_lower = device_name.lower()
+        matched = [
+            d["id"] for d in devices_context
+            if name_lower in (d.get("name") or "").lower()
+            or name_lower in d["id"].lower()
+        ]
+        return matched if matched else authorized_ids
 
     async def _handle_unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler para comandos no reconocidos"""

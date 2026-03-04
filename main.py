@@ -17,6 +17,7 @@ Uso:
 """
 import asyncio
 import logging
+import os
 import signal
 import sys
 import time as _time
@@ -33,13 +34,25 @@ from firebase_manager import firebase_manager
 from mqtt_protocol import MqttEvent, MqttTelemetry, EventType
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-# Configurar logging
+# Configurar logging con rotación automática
+from logging.handlers import RotatingFileHandler
+
+# Paths para comunicación con admin_bot
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PID_FILE = os.path.join(_BASE_DIR, ".service.pid")
+PAUSE_FLAG = os.path.join(_BASE_DIR, ".pause_flag")
+
 logging.basicConfig(
     level=logging.DEBUG if config.debug else logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(config.log_file, encoding='utf-8')
+        RotatingFileHandler(
+            config.log_file,
+            maxBytes=10 * 1024 * 1024,  # 10 MB por archivo
+            backupCount=3,              # Mantener 3 archivos anteriores
+            encoding='utf-8'
+        )
     ]
 )
 logger = logging.getLogger(__name__)
@@ -675,6 +688,14 @@ class AlarmBridgeService:
                 self._monitor_firebase_listener()
             )
 
+        # Escribir PID file para admin_bot
+        try:
+            with open(PID_FILE, "w") as f:
+                f.write(str(os.getpid()))
+            logger.info(f"PID {os.getpid()} escrito en {PID_FILE}")
+        except Exception as e:
+            logger.warning(f"No se pudo escribir PID file: {e}")
+
         logger.info("Servicio iniciado correctamente")
         logger.info(f"Broker MQTT: {config.mqtt.broker}:{config.mqtt.port}")
         logger.info(f"TLS: {'Habilitado' if config.mqtt.use_tls else 'Deshabilitado'}")
@@ -718,6 +739,13 @@ class AlarmBridgeService:
         await self.telegram.stop()
         self.mqtt.stop()
 
+        # Limpiar PID file
+        try:
+            if os.path.exists(PID_FILE):
+                os.remove(PID_FILE)
+        except OSError:
+            pass
+
         logger.info("Servicio detenido")
 
     async def run_async(self):
@@ -727,7 +755,19 @@ class AlarmBridgeService:
 
         try:
             # Mantener el servicio corriendo
+            _paused = False
             while self.running:
+                if os.path.exists(PAUSE_FLAG):
+                    if not _paused:
+                        logger.warning("Servicio PAUSADO por admin_bot (flag detectado)")
+                        self.mqtt.stop()
+                        _paused = True
+                else:
+                    if _paused:
+                        logger.info("Servicio REANUDADO por admin_bot (flag eliminado)")
+                        self.mqtt.connect()
+                        self.mqtt.start()
+                        _paused = False
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             logger.info("Servicio cancelado")
