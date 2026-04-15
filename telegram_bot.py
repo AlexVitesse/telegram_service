@@ -1772,14 +1772,14 @@ class TelegramBot:
             answer = await self.ai_handler.chat_with_context(text, context_chunks)
 
             sources = set(
-                r.chunk.source_file.replace(".md", "").lstrip("0123456789_")
+                r.chunk.source_file.replace(".md", "").lstrip("0123456789_").replace("_", " ")
                 for r in results
             )
             source_hint = " | ".join(sources)
 
+            # Enviar sin Markdown para evitar errores de parsing
             await update.message.reply_text(
-                f"{answer}\n\n_Fuente: {source_hint}_",
-                parse_mode=ParseMode.MARKDOWN,
+                f"{answer}\n\n(Fuente: {source_hint})",
                 reply_markup=self._get_keyboard()
             )
             logger.info("📚 RAG respuesta para '%s' (fuentes: %s)", text[:40], sources)
