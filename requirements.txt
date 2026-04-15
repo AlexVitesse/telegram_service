@@ -10,5 +10,11 @@ python-dotenv>=1.0.0
 # Async support
 asyncio-mqtt>=0.16.2
 
-# IA - Lenguaje natural (Groq)
-groq>=0.9.0
+# IA - Lenguaje natural
+httpx>=0.25.0
+
+# RAG - Knowledge Base
+scikit-learn>=1.3.0
+
+# IA - Groq (fallback opcional, solo si LLM_BACKEND=groq)
+# groq>=0.9.0

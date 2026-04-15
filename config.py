@@ -61,8 +61,19 @@ class FirebaseConfig:
 
 @dataclass
 class AIConfig:
-    groq_api_key: str = _get_env("GROQ_API_KEY", "")
     enabled: bool = _get_env_bool("AI_ENABLED", True)
+    # LLM Backend: "ollama" (default, local) o "groq" (remoto, fallback)
+    llm_backend: str = _get_env("LLM_BACKEND", "ollama")
+    # Ollama (principal)
+    ollama_base_url: str = _get_env("OLLAMA_BASE_URL", "http://localhost:11434")
+    ollama_model: str = _get_env("OLLAMA_MODEL", "gtp-oss:20b")
+    # Groq (fallback opcional)
+    groq_api_key: str = _get_env("GROQ_API_KEY", "")
+    groq_model: str = _get_env("GROQ_MODEL", "llama-3.1-8b-instant")
+    # RAG
+    rag_enabled: bool = _get_env_bool("RAG_ENABLED", True)
+    rag_max_chunks: int = _get_env_int("RAG_MAX_CHUNKS", 3)
+    rag_min_score: float = float(_get_env("RAG_MIN_SCORE", "0.15"))
 
 
 @dataclass

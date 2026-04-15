@@ -37,6 +37,7 @@ from scheduler import scheduler
 from mqtt_protocol import MqttEvent, EventType
 from device_manager import DeviceManager
 from ai_handler import AIHandler
+from rag_handler import KnowledgeBase
 
 if TYPE_CHECKING: # ADD THIS BLOCK
     from firebase_manager import FirebaseManager
@@ -237,12 +238,26 @@ class TelegramBot:
         # Dispositivo seleccionado para horarios (por chat_id)
         self._horarios_selected_device: Dict[str, str] = {}  # chat_id -> device_id o "all"
 
-        # AI Handler (Groq) - lenguaje natural
+        # AI Handler (Ollama/Groq) - lenguaje natural + RAG
         self.ai_handler: Optional[AIHandler] = None
-        if config.ai.enabled and config.ai.groq_api_key:
-            self.ai_handler = AIHandler(api_key=config.ai.groq_api_key)
+        self.knowledge_base: Optional[KnowledgeBase] = None
+        if config.ai.enabled:
+            self.ai_handler = AIHandler(
+                llm_backend=config.ai.llm_backend,
+                ollama_base_url=config.ai.ollama_base_url,
+                ollama_model=config.ai.ollama_model,
+                groq_api_key=config.ai.groq_api_key,
+                groq_model=config.ai.groq_model,
+            )
+            # Knowledge Base para RAG
+            if config.ai.rag_enabled:
+                import os
+                kb_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge_base")
+                self.knowledge_base = KnowledgeBase(kb_dir)
+                chunk_count = self.knowledge_base.load()
+                logger.info("📚 RAG Knowledge Base: %d chunks cargados", chunk_count)
         else:
-            logger.info("🤖 AI Handler deshabilitado (AI_ENABLED=false o sin GROQ_API_KEY)")
+            logger.info("🤖 AI Handler deshabilitado (AI_ENABLED=false)")
 
     def _is_user_authorized(self, chat_id: str) -> bool:
         """
@@ -305,6 +320,7 @@ class TelegramBot:
         app.add_handler(CommandHandler("sensors", self._cmd_sensors))
         app.add_handler(CommandHandler("adduser", self._cmd_adduser))
         app.add_handler(CommandHandler("desvincular", self._cmd_desvincular))
+        app.add_handler(CommandHandler("reload_kb", self._cmd_reload_kb))
 
         # Callbacks de botones inline
         app.add_handler(CallbackQueryHandler(self._handle_callback))
@@ -1565,7 +1581,7 @@ class TelegramBot:
         text: str,
         authorized_device_ids: List[str],
     ):
-        """Interpreta el mensaje con Groq y ejecuta la acción correspondiente."""
+        """Interpreta el mensaje con IA y ejecuta la acción correspondiente."""
         # Construir contexto de dispositivos para la IA
         devices_context = []
         for dev_id in authorized_device_ids:
@@ -1578,8 +1594,13 @@ class TelegramBot:
                 "is_online": state.get("is_online", False),
             })
 
-        # Llamar a Groq
-        result = self.ai_handler.parse_intent(text, devices_context)
+        # Llamar al LLM (async)
+        result = await self.ai_handler.parse_intent(text, devices_context)
+
+        # Intent "question" → RAG
+        if result and result["intent"] == "question":
+            await self._handle_rag_chat(update, text)
+            return
 
         if result is None or result["intent"] == "unknown":
             await update.message.reply_text(
@@ -1718,6 +1739,71 @@ class TelegramBot:
                 )
             logger.info(f"🤖 IA → SCHEDULE en {target_ids}: {params}")
 
+
+    async def _handle_rag_chat(self, update: Update, text: str):
+        """Responde preguntas informativas usando RAG sobre la knowledge base."""
+        if not self.knowledge_base or not self.ai_handler:
+            await update.message.reply_text(
+                "ℹ️ La base de conocimiento no está disponible.\n"
+                "Usa /help para ver los comandos.",
+                reply_markup=self._get_keyboard()
+            )
+            return
+
+        # Indicador de escritura
+        await update.effective_chat.send_action("typing")
+
+        try:
+            results = self.knowledge_base.search(
+                text,
+                top_k=config.ai.rag_max_chunks,
+                min_score=config.ai.rag_min_score,
+            )
+
+            if not results:
+                await update.message.reply_text(
+                    "No encontré información relevante sobre eso en la documentación.\n"
+                    "Intenta reformular tu pregunta o usa /help para ver los comandos.",
+                    reply_markup=self._get_keyboard()
+                )
+                return
+
+            context_chunks = [r.chunk.text for r in results]
+            answer = await self.ai_handler.chat_with_context(text, context_chunks)
+
+            sources = set(
+                r.chunk.source_file.replace(".md", "").lstrip("0123456789_")
+                for r in results
+            )
+            source_hint = " | ".join(sources)
+
+            await update.message.reply_text(
+                f"{answer}\n\n_Fuente: {source_hint}_",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=self._get_keyboard()
+            )
+            logger.info("📚 RAG respuesta para '%s' (fuentes: %s)", text[:40], sources)
+
+        except Exception as e:
+            logger.error("📚 Error en RAG chat: %s", e)
+            await update.message.reply_text(
+                "Hubo un error procesando tu pregunta. Intenta de nuevo.",
+                reply_markup=self._get_keyboard()
+            )
+
+    async def _cmd_reload_kb(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Admin: recargar la knowledge base sin reiniciar el servicio."""
+        chat_id = str(update.effective_chat.id)
+        if not self.firebase_manager.is_user_admin(chat_id):
+            return
+
+        if not self.knowledge_base:
+            await update.message.reply_text("📚 Knowledge base no está habilitada.")
+            return
+
+        count = self.knowledge_base.reload()
+        await update.message.reply_text(f"📚 Knowledge base recargada: {count} chunks indexados.")
+        logger.info("📚 Knowledge base recargada por admin %s: %d chunks", chat_id, count)
 
     def _resolve_device_ids_by_name(
         self,
@@ -2805,6 +2891,8 @@ class TelegramBot:
             await self.application.stop()
             await self.application.shutdown()
             self._running = False
+            if self.ai_handler:
+                await self.ai_handler.close()
             logger.info("Bot de Telegram detenido")
 
     def is_running(self) -> bool:
