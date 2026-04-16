@@ -1687,43 +1687,42 @@ class TelegramBot:
             )
             return
 
-        # Confirmar al usuario lo que se va a hacer
-        await update.message.reply_text(f"🤖 {reply_text}", reply_markup=self._get_keyboard())
+        # Ejecutar intent reutilizando los mismos flujos que los comandos directos
+        logger.info(f"🤖 IA → {intent.upper()} en {target_ids} solicitado por {chat_id}")
 
-        # Ejecutar intent
         if intent == "arm":
-            for dev_id in target_ids:
-                self.mqtt_handler.send_arm(dev_id)
-            logger.info(f"🤖 IA → ARM en {target_ids} solicitado por {chat_id}")
+            await self._arm_devices(update, target_ids)
 
         elif intent == "disarm":
-            for dev_id in target_ids:
-                self.mqtt_handler.send_disarm(dev_id)
-            logger.info(f"🤖 IA → DISARM en {target_ids} solicitado por {chat_id}")
+            await self._disarm_devices(update, target_ids)
 
         elif intent == "status":
-            for dev_id in target_ids:
-                self.mqtt_handler.send_get_status(dev_id)
-            logger.info(f"🤖 IA → STATUS en {target_ids} solicitado por {chat_id}")
+            await self._get_device_status(update, target_ids)
 
         elif intent == "stop_alarm":
             for dev_id in target_ids:
                 self.mqtt_handler.send_stop_alarm(dev_id)
-            logger.info(f"🤖 IA → STOP_ALARM en {target_ids} solicitado por {chat_id}")
+            await update.message.reply_text(
+                "🔇 Comando de detener sirena enviado.",
+                reply_markup=self._get_keyboard()
+            )
 
         elif intent == "trigger_bengala":
             for dev_id in target_ids:
                 self.mqtt_handler.send_activate_bengala(device_id=dev_id)
-            logger.info(f"🤖 IA → TRIGGER_BENGALA en {target_ids} solicitado por {chat_id}")
+            await update.message.reply_text(
+                "🔥 Comando de bengala enviado.",
+                reply_markup=self._get_keyboard()
+            )
 
         elif intent == "schedule":
             params = result.get("params", {})
             required = {"enabled", "on_hour", "on_minute", "off_hour", "off_minute"}
             if not required.issubset(params.keys()):
                 await update.message.reply_text(
-                    "⚠️ No pude interpretar el horario completo.\n"
-                    "Ejemplo: _\"arma lunes a viernes de 10pm a 6am\"_",
-                    parse_mode=ParseMode.MARKDOWN
+                    "No pude interpretar el horario completo.\n"
+                    "Ejemplo: \"arma lunes a viernes de 10pm a 6am\"",
+                    reply_markup=self._get_keyboard()
                 )
                 return
             days = params.get("days", [0, 1, 2, 3, 4, 5, 6])
