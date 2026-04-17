@@ -66,3 +66,49 @@ Si se desea que varias personas reciban notificaciones de alarma en un grupo com
 ## Tiempo limite de configuracion
 
 El modo configuracion BLE tiene un timeout de 5 minutos. Si no se completa la configuracion dentro de ese tiempo, el Master sale automaticamente del modo configuracion y vuelve a su operacion normal. Sera necesario repetir el proceso desde el Paso 1.
+
+## Configuracion del kit completo paso a paso
+
+El kit Sentinel Guard incluye el Modulo Master (ESP32 + LoRa), sensores PIR, sensores magneticos, sirena, modulo de bengala y teclado. Para configurar todo el sistema como un kit nuevo:
+
+### Paso 1: Encender el Master
+
+1. Conectar el Master a su fuente de alimentacion 12V.
+2. Esperar a que el LED del Master indique que esta encendido.
+3. Verificar que no haya interferencias fisicas en su ubicacion.
+
+### Paso 2: Configurar WiFi y ubicacion del Master
+
+Seguir el procedimiento BLE descrito arriba en la seccion "Configuracion del Master via Bluetooth". Solo se envian SSID, contrasena WiFi y nombre de ubicacion. Luego el Master se reinicia y conecta a la red.
+
+### Paso 3: Encender los modulos secundarios (slaves)
+
+Los sensores PIR, magneticos, la sirena, la bengala y el teclado vienen ya emparejados de fabrica con el Master incluido en el kit. No requieren configuracion adicional. Solo hay que:
+
+1. Colocar cada modulo en su ubicacion fisica definitiva.
+2. Conectar o insertar sus pilas segun el caso.
+3. Verificar que cada modulo parpadee su LED de encendido.
+
+La comunicacion entre el Master y los slaves usa LoRa con un canal preconfigurado, por eso no se requiere emparejamiento manual.
+
+### Paso 4: Vincular con Telegram
+
+Seguir la seccion "Vinculacion con Telegram" de este documento. Enviar /start al bot desde Telegram para registrarse como Administrador Principal.
+
+### Paso 5: Vincular con la app Sentinel Guard
+
+1. Crear cuenta en la app (si no existe).
+2. Entrar a la pantalla Dispositivos.
+3. Presionar el boton para agregar dispositivo.
+4. La app detectara el Master ya conectado a la nube y lo asociara a la cuenta.
+
+### Paso 6: Probar el sistema
+
+1. Armar la alarma con el comando /on en Telegram o desde la app.
+2. Activar un sensor (abrir una puerta con sensor magnetico o pasar frente a un PIR).
+3. Confirmar que la sirena suena y que el bot notifica el evento.
+4. Desarmar con /off o desde la app.
+
+### Sincronizacion automatica
+
+Los horarios, configuracion de bengala, codigo del teclado y demas ajustes se sincronizan automaticamente entre la app, Telegram y el Master. No es necesario repetir la configuracion en cada canal.

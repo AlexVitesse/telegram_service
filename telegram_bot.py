@@ -38,6 +38,7 @@ from mqtt_protocol import MqttEvent, EventType
 from device_manager import DeviceManager
 from ai_handler import AIHandler
 from rag_handler import KnowledgeBase
+from interaction_logger import InteractionLogger
 
 if TYPE_CHECKING: # ADD THIS BLOCK
     from firebase_manager import FirebaseManager
@@ -241,6 +242,7 @@ class TelegramBot:
         # AI Handler (Ollama/Groq) - lenguaje natural + RAG
         self.ai_handler: Optional[AIHandler] = None
         self.knowledge_base: Optional[KnowledgeBase] = None
+        self.interaction_logger = InteractionLogger(config.interactions_log_file)
         if config.ai.enabled:
             self.ai_handler = AIHandler(
                 llm_backend=config.ai.llm_backend,
@@ -248,12 +250,19 @@ class TelegramBot:
                 ollama_model=config.ai.ollama_model,
                 groq_api_key=config.ai.groq_api_key,
                 groq_model=config.ai.groq_model,
+                intent_model=config.ai.intent_model,
+                chat_model=config.ai.chat_model,
             )
             # Knowledge Base para RAG
             if config.ai.rag_enabled:
                 import os
                 kb_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge_base")
-                self.knowledge_base = KnowledgeBase(kb_dir)
+                self.knowledge_base = KnowledgeBase(
+                    kb_dir,
+                    ollama_base_url=config.ai.ollama_base_url,
+                    embed_model=config.ai.ollama_embed_model,
+                    use_embeddings=config.ai.use_embeddings,
+                )
                 chunk_count = self.knowledge_base.load()
                 logger.info("📚 RAG Knowledge Base: %d chunks cargados", chunk_count)
         else:
@@ -1582,6 +1591,10 @@ class TelegramBot:
         authorized_device_ids: List[str],
     ):
         """Interpreta el mensaje con IA y ejecuta la acción correspondiente."""
+        import time as _t
+        _t0 = _t.monotonic()
+        user_name = update.effective_user.first_name or ""
+
         # Construir contexto de dispositivos para la IA
         devices_context = []
         for dev_id in authorized_device_ids:
@@ -1597,27 +1610,60 @@ class TelegramBot:
         # Llamar al LLM (async)
         result = await self.ai_handler.parse_intent(text, devices_context)
 
-        # Intent "question" → RAG
+        intent = result["intent"] if result else None
+        confidence = result.get("confidence") if result else None
+        backend = getattr(self.ai_handler, "_backend", None)
+
+        # Intent "question" → RAG (delega el logging)
         if result and result["intent"] == "question":
-            await self._handle_rag_chat(update, text)
+            await self._handle_rag_chat(
+                update, text,
+                user_id=chat_id, user_name=user_name,
+                intent=intent, confidence=confidence, backend=backend,
+                started_at=_t0,
+            )
             return
 
         if result is None or result["intent"] == "unknown":
-            await update.message.reply_text(
-                "ℹ️ No entendí ese mensaje.\n"
+            # Si no se reconoció el intent, intentar RAG como último recurso
+            if self.knowledge_base:
+                results = self.knowledge_base.search(text, top_k=config.ai.rag_max_chunks, min_score=config.ai.rag_min_score)
+                if results:
+                    await self._handle_rag_chat(
+                        update, text,
+                        user_id=chat_id, user_name=user_name,
+                        intent=intent or "unknown", confidence=confidence, backend=backend,
+                        started_at=_t0,
+                    )
+                    return
+            fallback_msg = (
+                "No entendí ese mensaje.\n"
                 "Puedes escribirme en lenguaje natural, por ejemplo:\n"
-                "• _\"activa la alarma\"_\n"
-                "• _\"apaga la de bodega\"_\n"
-                "• _\"¿cuál es el estado?\"_\n\n"
-                "O usa /help para ver los comandos.",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=self._get_keyboard()
+                "\"activa la alarma\", \"como configuro la bengala?\"\n\n"
+                "O usa /help para ver los comandos."
+            )
+            await update.message.reply_text(fallback_msg, reply_markup=self._get_keyboard())
+            self.interaction_logger.record(
+                user_id=chat_id, user_name=user_name, query=text,
+                intent=intent, confidence=confidence, backend=backend,
+                response_type="fallback", response=fallback_msg,
+                elapsed_ms=int((_t.monotonic() - _t0) * 1000),
+                ok=False, error="no_intent_no_rag",
             )
             return
 
         intent = result["intent"]
         device_name = result.get("device")  # nombre o "all" o null
         reply_text = result.get("reply", "Entendido.")
+
+        def _log_action(response_text: str, ok: bool = True, error: Optional[str] = None):
+            self.interaction_logger.record(
+                user_id=chat_id, user_name=user_name, query=text,
+                intent=intent, confidence=confidence, backend=backend,
+                response_type="action", response=response_text,
+                elapsed_ms=int((_t.monotonic() - _t0) * 1000),
+                ok=ok, error=error,
+            )
 
         # Intents que no necesitan resolver un dispositivo específico
         if intent == "list_devices":
@@ -1628,12 +1674,14 @@ class TelegramBot:
                 name = d.get("name") or d["id"]
                 lines.append(f"• *{name}* — {estado} | {conexion}")
             resumen = "\n".join(lines) if lines else "Sin dispositivos registrados."
+            msg = f"📋 Tienes *{len(devices_context)}* dispositivo(s):\n\n{resumen}"
             await update.message.reply_text(
-                f"📋 Tienes *{len(devices_context)}* dispositivo(s):\n\n{resumen}",
+                msg,
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=self._get_keyboard()
             )
             logger.info(f"🤖 IA → LIST_DEVICES para {chat_id}")
+            _log_action(msg)
             return
 
         if intent == "query_schedule":
@@ -1648,12 +1696,13 @@ class TelegramBot:
                 dias = ", ".join(cfg.days) if cfg.days else "Todos los días"
                 msg = (
                     "📅 *Horario automático configurado:*\n\n"
-                    f"🔴 Arma a las: *{cfg.on_time_display}*\n"
-                    f"🟢 Desarma a las: *{cfg.off_time_display}*\n"
+                    f"🔴 Arma a las: *{cfg.format_on_time_12h()}*\n"
+                    f"🟢 Desarma a las: *{cfg.format_off_time_12h()}*\n"
                     f"📆 Días: *{dias}*"
                 )
             await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=self._get_keyboard())
             logger.info(f"🤖 IA → QUERY_SCHEDULE para {chat_id}")
+            _log_action(msg)
             return
 
         if intent == "last_event":
@@ -1668,23 +1717,26 @@ class TelegramBot:
                 else:
                     lines.append(f"• *{name}*: sin alarmas registradas en esta sesión")
             resumen = "\n".join(lines) if lines else "Sin datos disponibles."
+            msg = f"🕐 *Historial de alarmas:*\n\n{resumen}"
             await update.message.reply_text(
-                f"🕐 *Historial de alarmas:*\n\n{resumen}",
+                msg,
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=self._get_keyboard()
             )
             logger.info(f"🤖 IA → LAST_EVENT para {chat_id}")
+            _log_action(msg)
             return
 
         # Resolver device_ids a partir del nombre indicado por la IA
         target_ids = self._resolve_device_ids_by_name(device_name, authorized_device_ids, devices_context)
 
         if not target_ids:
-            await update.message.reply_text(
+            msg = (
                 f"⚠️ No encontré el dispositivo *{device_name}*.\n"
-                "Verifica el nombre o usa /status para ver los dispositivos disponibles.",
-                parse_mode=ParseMode.MARKDOWN
+                "Verifica el nombre o usa /status para ver los dispositivos disponibles."
             )
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+            _log_action(msg, ok=False, error="device_not_found")
             return
 
         # Ejecutar intent reutilizando los mismos flujos que los comandos directos
@@ -1692,38 +1744,40 @@ class TelegramBot:
 
         if intent == "arm":
             await self._arm_devices(update, target_ids)
+            _log_action(f"arm → {target_ids}")
 
         elif intent == "disarm":
             await self._disarm_devices(update, target_ids)
+            _log_action(f"disarm → {target_ids}")
 
         elif intent == "status":
             await self._get_device_status(update, target_ids)
+            _log_action(f"status → {target_ids}")
 
         elif intent == "stop_alarm":
             for dev_id in target_ids:
                 self.mqtt_handler.send_stop_alarm(dev_id)
-            await update.message.reply_text(
-                "🔇 Comando de detener sirena enviado.",
-                reply_markup=self._get_keyboard()
-            )
+            msg = "🔇 Comando de detener sirena enviado."
+            await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+            _log_action(msg)
 
         elif intent == "trigger_bengala":
             for dev_id in target_ids:
                 self.mqtt_handler.send_activate_bengala(device_id=dev_id)
-            await update.message.reply_text(
-                "🔥 Comando de bengala enviado.",
-                reply_markup=self._get_keyboard()
-            )
+            msg = "🔥 Comando de bengala enviado."
+            await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+            _log_action(msg)
 
         elif intent == "schedule":
             params = result.get("params", {})
             required = {"enabled", "on_hour", "on_minute", "off_hour", "off_minute"}
             if not required.issubset(params.keys()):
-                await update.message.reply_text(
+                msg = (
                     "No pude interpretar el horario completo.\n"
-                    "Ejemplo: \"arma lunes a viernes de 10pm a 6am\"",
-                    reply_markup=self._get_keyboard()
+                    "Ejemplo: \"arma lunes a viernes de 10pm a 6am\""
                 )
+                await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+                _log_action(msg, ok=False, error="schedule_missing_params")
                 return
             days = params.get("days", [0, 1, 2, 3, 4, 5, 6])
             for dev_id in target_ids:
@@ -1737,15 +1791,42 @@ class TelegramBot:
                     device_id=dev_id,
                 )
             logger.info(f"🤖 IA → SCHEDULE en {target_ids}: {params}")
+            _log_action(f"schedule aplicado → {target_ids} params={params}")
 
 
-    async def _handle_rag_chat(self, update: Update, text: str):
+    async def _handle_rag_chat(
+        self,
+        update: Update,
+        text: str,
+        *,
+        user_id: Optional[str] = None,
+        user_name: str = "",
+        intent: Optional[str] = None,
+        confidence: Optional[float] = None,
+        backend: Optional[str] = None,
+        started_at: Optional[float] = None,
+    ):
         """Responde preguntas informativas usando RAG sobre la knowledge base."""
+        import time as _t
+        _t0 = started_at if started_at is not None else _t.monotonic()
+        if user_id is None:
+            user_id = str(update.effective_chat.id)
+            user_name = update.effective_user.first_name or ""
+
+        def _elapsed_ms():
+            return int((_t.monotonic() - _t0) * 1000)
+
         if not self.knowledge_base or not self.ai_handler:
-            await update.message.reply_text(
+            msg = (
                 "ℹ️ La base de conocimiento no está disponible.\n"
-                "Usa /help para ver los comandos.",
-                reply_markup=self._get_keyboard()
+                "Usa /help para ver los comandos."
+            )
+            await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+            self.interaction_logger.record(
+                user_id=user_id, user_name=user_name, query=text,
+                intent=intent, confidence=confidence, backend=backend,
+                response_type="fallback", response=msg,
+                elapsed_ms=_elapsed_ms(), ok=False, error="kb_not_available",
             )
             return
 
@@ -1759,35 +1840,57 @@ class TelegramBot:
                 min_score=config.ai.rag_min_score,
             )
 
+            # Debug: log scores
+            for r in results:
+                logger.debug("📚 RAG match: score=%.3f | %s > %s", r.score, r.chunk.source_file, r.chunk.heading[:50])
+
             if not results:
-                await update.message.reply_text(
+                msg = (
                     "No encontré información relevante sobre eso en la documentación.\n"
-                    "Intenta reformular tu pregunta o usa /help para ver los comandos.",
-                    reply_markup=self._get_keyboard()
+                    "Intenta reformular tu pregunta o usa /help para ver los comandos."
+                )
+                await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+                self.interaction_logger.record(
+                    user_id=user_id, user_name=user_name, query=text,
+                    intent=intent, confidence=confidence, backend=backend,
+                    response_type="rag", response=msg,
+                    rag_sources=[], rag_scores=[],
+                    elapsed_ms=_elapsed_ms(), ok=False, error="rag_no_results",
                 )
                 return
 
             context_chunks = [r.chunk.text for r in results]
             answer = await self.ai_handler.chat_with_context(text, context_chunks)
 
+            sources_raw = [r.chunk.source_file for r in results]
+            scores = [round(r.score, 3) for r in results]
             sources = set(
-                r.chunk.source_file.replace(".md", "").lstrip("0123456789_").replace("_", " ")
-                for r in results
+                s.replace(".md", "").lstrip("0123456789_").replace("_", " ")
+                for s in sources_raw
             )
             source_hint = " | ".join(sources)
 
+            full_response = f"{answer}\n\n(Fuente: {source_hint})"
             # Enviar sin Markdown para evitar errores de parsing
-            await update.message.reply_text(
-                f"{answer}\n\n(Fuente: {source_hint})",
-                reply_markup=self._get_keyboard()
-            )
+            await update.message.reply_text(full_response, reply_markup=self._get_keyboard())
             logger.info("📚 RAG respuesta para '%s' (fuentes: %s)", text[:40], sources)
+            self.interaction_logger.record(
+                user_id=user_id, user_name=user_name, query=text,
+                intent=intent or "question", confidence=confidence, backend=backend,
+                response_type="rag", response=full_response,
+                rag_sources=sources_raw, rag_scores=scores,
+                elapsed_ms=_elapsed_ms(), ok=True,
+            )
 
         except Exception as e:
             logger.error("📚 Error en RAG chat: %s", e)
-            await update.message.reply_text(
-                "Hubo un error procesando tu pregunta. Intenta de nuevo.",
-                reply_markup=self._get_keyboard()
+            msg = "Hubo un error procesando tu pregunta. Intenta de nuevo."
+            await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+            self.interaction_logger.record(
+                user_id=user_id, user_name=user_name, query=text,
+                intent=intent, confidence=confidence, backend=backend,
+                response_type="error", response=msg,
+                elapsed_ms=_elapsed_ms(), ok=False, error=f"{type(e).__name__}: {e}",
             )
 
     async def _cmd_reload_kb(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -15,6 +15,15 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+def _looks_like_ollama_model(name: str) -> bool:
+    return ":" in name
+
+
+def _looks_like_groq_model(name: str) -> bool:
+    n = name.lower()
+    return "instant" in n or n.startswith("groq/") or n.startswith("openai/")
+
 # ---------------------------------------------------------------------------
 # Prompt para intent parsing
 # ---------------------------------------------------------------------------
@@ -71,6 +80,8 @@ IMPORTANTE:
 - Si el usuario ORDENA hacer algo (activar, desactivar, etc.) → intent correspondiente.
 - Ejemplos de "question": "cómo configuro la bengala?", "qué es el modo pregunta?", "cómo agrego un usuario?"
 - Ejemplos de comando: "activa la alarma", "apaga el sistema", "arma todo"
+- Si la pregunta es sobre HORARIOS / agenda / programacion (contiene "horario", "horarios", "agenda", "programacion"), usa intent "query_schedule" aunque mencione un dispositivo. Ejemplos: "Horarios?", "que horario tiene Estudio?", "horario de Oficina", "Horario que se encuentra Estudio?".
+- Si la pregunta es sobre ESTADO de armado (contiene "esta armada", "esta activa", "cual es el estado", "como esta"), usa intent "status". Ejemplos: "como esta la alarma?", "esta armada la casa?", "que alarma esta activada?".
 - Si el mensaje es un saludo sin relación con alarmas → intent "unknown".
 - El campo "reply" debe ser una respuesta corta y amigable en español.
 - Siempre incluye "params": {} aunque esté vacío.
@@ -83,13 +94,20 @@ RAG_CHAT_PROMPT = """Eres el asistente del sistema de alarma SentinelGuard.
 Responde preguntas usando EXCLUSIVAMENTE la documentación que aparece abajo.
 
 REGLAS ESTRICTAS:
-- SOLO usa información que aparece textualmente en la documentación proporcionada.
+- SOLO usa información que aparece en la documentación proporcionada abajo.
 - NUNCA inventes comandos, funciones, pasos o características que no estén en la documentación.
-- NUNCA menciones intensidad, niveles, o configuraciones que no aparezcan en los textos.
 - Si algo no está en la documentación, responde: "No tengo esa información. Usa /help o contacta al administrador."
 - Responde en español, claro y conciso.
 - Formato de texto plano. Sin asteriscos, sin guiones bajos, sin markdown.
-- Incluye los pasos o datos tal como aparecen en la documentación.
+- Da respuestas COMPLETAS. No cortes la respuesta a la mitad.
+
+PRECISION OBLIGATORIA:
+- Cuando la documentación mencione numeros especificos (distancias, angulos, tiempos, codigos, contrasenas), SIEMPRE incluyelos textualmente. Ejemplo: "110 grados", "7 metros", "1234", "3 intentos".
+- Cuando la documentación liste pasos o procedimientos, reproducilos fielmente en el mismo orden. No parafrasees ni resumas los pasos.
+- Incluye comandos exactos tal como aparecen: /bengala, /adduser, /horarios, etc.
+- Incluye valores por defecto y codigos especificos: contrasena default 1234, tecla #, etc.
+- Cita las especificaciones tecnicas tal cual: angulo de deteccion, rango, altura de montaje, etc.
+- NO parafrasees la documentación. Usa las mismas palabras y valores que aparecen en ella.
 """
 
 
@@ -106,14 +124,34 @@ class AIHandler:
         ollama_model: str = "gtp-oss:20b",
         groq_api_key: str = "",
         groq_model: str = "llama-3.1-8b-instant",
+        intent_model: str = "",
+        chat_model: str = "",
     ):
         self._backend = llm_backend
         self._ollama_base_url = ollama_base_url.rstrip("/")
         self._ollama_model = ollama_model
         self._groq_api_key = groq_api_key
         self._groq_model = groq_model
+        # Modelos específicos por tarea (si no se especifican, usan el default del backend)
+        default_task_model = ollama_model if llm_backend == "ollama" else groq_model
+        self._intent_model = intent_model or default_task_model
+        self._chat_model = chat_model or default_task_model
         self._groq_client = None
         self._http_client: Optional[httpx.AsyncClient] = None
+
+        # Detectar configuración incompatible: backend=ollama con modelos de Groq
+        if llm_backend == "ollama":
+            for label, model in (("intent", self._intent_model), ("chat", self._chat_model)):
+                if _looks_like_groq_model(model) and not _looks_like_ollama_model(model):
+                    logger.warning(
+                        "🤖 %s_model='%s' parece ser un modelo de Groq pero backend=ollama. "
+                        "Usando ollama_model='%s' como fallback automatico.",
+                        label, model, ollama_model,
+                    )
+                    if label == "intent":
+                        self._intent_model = ollama_model
+                    else:
+                        self._chat_model = ollama_model
 
         # Inicializar Groq si hay API key (para fallback)
         if groq_api_key:
@@ -124,10 +162,11 @@ class AIHandler:
                 logger.warning("🤖 Paquete 'groq' no instalado, fallback Groq deshabilitado")
 
         logger.info(
-            "🤖 AI Handler inicializado — backend: %s | modelo: %s%s",
+            "🤖 AI Handler — backend: %s | intent: %s | chat: %s%s",
             self._backend,
-            self._ollama_model if self._backend == "ollama" else self._groq_model,
-            " (fallback Groq disponible)" if self._groq_client else "",
+            self._intent_model,
+            self._chat_model,
+            " (fallback Groq)" if self._groq_client else "",
         )
 
     async def _ensure_http_client(self):
@@ -139,13 +178,14 @@ class AIHandler:
     # LLM calls
     # ------------------------------------------------------------------
 
-    async def _call_ollama(self, system_prompt: str, user_prompt: str, temperature: float = 0.1, max_tokens: int = 512) -> str:
+    async def _call_ollama(self, system_prompt: str, user_prompt: str, model: str = "", temperature: float = 0.1, max_tokens: int = 512) -> str:
         """Llama a Ollama REST API."""
         await self._ensure_http_client()
+        effective_model = model or self._ollama_model
         response = await self._http_client.post(
             f"{self._ollama_base_url}/api/chat",
             json={
-                "model": self._ollama_model,
+                "model": effective_model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -158,16 +198,30 @@ class AIHandler:
             },
         )
         response.raise_for_status()
-        return response.json()["message"]["content"].strip()
+        body = response.json()
+        if "error" in body:
+            logger.error("🤖 Ollama error (model=%s): %s", effective_model, body["error"])
+            raise RuntimeError(f"Ollama error: {body['error']}")
+        content = body.get("message", {}).get("content", "").strip()
+        if not content:
+            logger.error(
+                "🤖 Ollama respondió vacío (model=%s). Body: %s",
+                effective_model,
+                json.dumps(body, ensure_ascii=False)[:1000],
+            )
+            raise RuntimeError(f"Ollama empty response (model={effective_model})")
+        return content
 
-    async def _call_groq(self, system_prompt: str, user_prompt: str, temperature: float = 0.1, max_tokens: int = 512) -> str:
+    async def _call_groq(self, system_prompt: str, user_prompt: str, model: str = "", temperature: float = 0.1, max_tokens: int = 512) -> str:
         """Llama a Groq API (bloqueante, envuelta en thread)."""
         if not self._groq_client:
             raise RuntimeError("Groq client no disponible")
 
+        use_model = model or self._groq_model
+
         def _blocking_call():
             resp = self._groq_client.chat.completions.create(
-                model=self._groq_model,
+                model=use_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -179,25 +233,28 @@ class AIHandler:
 
         return await asyncio.to_thread(_blocking_call)
 
-    async def _call_llm(self, system_prompt: str, user_prompt: str, temperature: float = 0.1, max_tokens: int = 512) -> str:
+    async def _call_llm(self, system_prompt: str, user_prompt: str, model: str = "", temperature: float = 0.1, max_tokens: int = 512) -> str:
         """
         Llama al LLM configurado. Si falla el principal, intenta el fallback.
+        El model se pasa al backend principal. El fallback usa su modelo default.
         """
         if self._backend == "ollama":
             try:
-                return await self._call_ollama(system_prompt, user_prompt, temperature, max_tokens)
+                return await self._call_ollama(system_prompt, user_prompt, model, temperature, max_tokens)
             except Exception as e:
                 logger.warning("🤖 Ollama falló (%s), intentando fallback Groq...", e)
                 if self._groq_client:
-                    return await self._call_groq(system_prompt, user_prompt, temperature, max_tokens)
+                    # Fallback: usar modelo default de Groq, no el de Ollama
+                    return await self._call_groq(system_prompt, user_prompt, "", temperature, max_tokens)
                 raise
         else:
             # Backend groq
             try:
-                return await self._call_groq(system_prompt, user_prompt, temperature, max_tokens)
+                return await self._call_groq(system_prompt, user_prompt, model, temperature, max_tokens)
             except Exception as e:
                 logger.warning("🤖 Groq falló (%s), intentando fallback Ollama...", e)
-                return await self._call_ollama(system_prompt, user_prompt, temperature, max_tokens)
+                # Fallback: usar modelo default de Ollama, no el de Groq
+                return await self._call_ollama(system_prompt, user_prompt, "", temperature, max_tokens)
 
     # ------------------------------------------------------------------
     # Intent parsing
@@ -234,21 +291,38 @@ class AIHandler:
             f"Mensaje del usuario: \"{user_message}\""
         )
 
+        raw = ""
         try:
             raw = await self._call_llm(
                 system_prompt=INTENT_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
+                model=self._intent_model,
                 temperature=0.1,
                 max_tokens=256,
             )
-            logger.debug("🤖 Respuesta LLM (intent): %s", raw)
+            logger.debug("🤖 Respuesta LLM (intent) model=%s: %s", self._intent_model, raw)
 
-            # Extraer JSON de la respuesta (por si viene con texto extra)
-            json_match = re.search(r'\{.*\}', raw, re.DOTALL)
-            if json_match:
-                raw = json_match.group()
+            result = self._parse_intent_json(raw)
+            if result is None:
+                # Fallback a Groq si es posible y aún no hemos fallado a Groq
+                if self._backend == "ollama" and self._groq_client:
+                    logger.warning(
+                        "🤖 Intent JSON invalido de Ollama (raw=%r). Reintentando con Groq...",
+                        raw[:500],
+                    )
+                    raw = await self._call_groq(
+                        system_prompt=INTENT_SYSTEM_PROMPT,
+                        user_prompt=user_prompt,
+                        model="",
+                        temperature=0.1,
+                        max_tokens=256,
+                    )
+                    logger.debug("🤖 Respuesta LLM (intent/groq-fallback): %s", raw)
+                    result = self._parse_intent_json(raw)
 
-            result = json.loads(raw)
+            if result is None:
+                logger.warning("🤖 Respuesta LLM no es JSON valido: %r", raw[:500])
+                return None
 
             required_keys = {"intent", "device", "confidence", "reply"}
             if not required_keys.issubset(result.keys()):
@@ -272,11 +346,20 @@ class AIHandler:
             )
             return result
 
-        except json.JSONDecodeError:
-            logger.warning("🤖 Respuesta LLM no es JSON válido: %s", raw)
-            return None
         except Exception as e:
-            logger.error("🤖 Error en LLM (parse_intent): %s", e)
+            logger.error("🤖 Error en LLM (parse_intent): %s | raw=%r", e, raw[:500])
+            return None
+
+    @staticmethod
+    def _parse_intent_json(raw: str) -> Optional[Dict[str, Any]]:
+        if not raw:
+            return None
+        json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not json_match:
+            return None
+        try:
+            return json.loads(json_match.group())
+        except json.JSONDecodeError:
             return None
 
     # ------------------------------------------------------------------
@@ -304,8 +387,9 @@ class AIHandler:
             answer = await self._call_llm(
                 system_prompt=RAG_CHAT_PROMPT,
                 user_prompt=user_prompt,
+                model=self._chat_model,
                 temperature=0.3,
-                max_tokens=512,
+                max_tokens=1024,
             )
             logger.info("🤖 RAG chat respondido (%d chars) | backend: %s", len(answer), self._backend)
             return answer

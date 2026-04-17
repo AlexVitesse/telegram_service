@@ -67,13 +67,20 @@ class AIConfig:
     # Ollama (principal)
     ollama_base_url: str = _get_env("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = _get_env("OLLAMA_MODEL", "gtp-oss:20b")
+    # Modelo para intent parsing (JSON estricto, necesita ser preciso)
+    intent_model: str = _get_env("INTENT_MODEL", "llama-3.1-8b-instant")
+    # Modelo para RAG chat (respuestas conversacionales)
+    chat_model: str = _get_env("CHAT_MODEL", "openai/gpt-oss-20b")
     # Groq (fallback opcional)
     groq_api_key: str = _get_env("GROQ_API_KEY", "")
     groq_model: str = _get_env("GROQ_MODEL", "llama-3.1-8b-instant")
     # RAG
     rag_enabled: bool = _get_env_bool("RAG_ENABLED", True)
-    rag_max_chunks: int = _get_env_int("RAG_MAX_CHUNKS", 3)
-    rag_min_score: float = float(_get_env("RAG_MIN_SCORE", "0.15"))
+    rag_max_chunks: int = _get_env_int("RAG_MAX_CHUNKS", 4)
+    rag_min_score: float = float(_get_env("RAG_MIN_SCORE", "0.08"))
+    # Embeddings (Ollama) para búsqueda semántica
+    ollama_embed_model: str = _get_env("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+    use_embeddings: bool = _get_env_bool("USE_EMBEDDINGS", True)
 
 
 @dataclass
@@ -85,6 +92,11 @@ class Config:
     device_id: str = _get_env("DEVICE_ID", "")
     debug: bool = _get_env_bool("DEBUG", True)
     log_file: str = _get_env("LOG_FILE", "alarm_service.log")
+    # Log JSONL separado con las interacciones Q&A para analisis posterior
+    interactions_log_file: str = _get_env(
+        "INTERACTIONS_LOG_FILE",
+        os.path.join(BASE_DIR, "logs", "ai_interactions.jsonl"),
+    )
 
 
 # Instancia global de configuración
