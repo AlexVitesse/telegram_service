@@ -9,6 +9,7 @@ import os
 import re
 import glob
 import logging
+import unicodedata
 import numpy as np
 from dataclasses import dataclass
 from typing import List, Optional
@@ -31,10 +32,36 @@ TROUBLESHOOTING_KEYWORDS = (
 TROUBLESHOOTING_FILES = ("13_solucion_problemas.md", "14_faq.md")
 TROUBLESHOOTING_BOOST = 0.12  # Suma al score de chunks de troubleshooting
 
+# Boost cuando la query contiene un token distintivo del filename de un doc.
+# Tokens cortos (len < 5) se ignoran para evitar matches ruidosos ("los", "que", "de", "app").
+FILENAME_TOKEN_BOOST = 0.10
+FILENAME_TOKEN_MIN_LEN = 5
+
 
 def _is_troubleshooting_query(query: str) -> bool:
     q = query.lower()
     return any(kw in q for kw in TROUBLESHOOTING_KEYWORDS)
+
+
+def _normalize_for_match(text: str) -> str:
+    """Minúsculas sin acentos."""
+    nfkd = unicodedata.normalize("NFKD", text.lower())
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def _stem_es(token: str) -> str:
+    """Quita plurales en espanol (-es/-s) para unir usuario/usuarios,
+    permiso/permisos. Heuristico simple; no es un stemmer completo."""
+    if len(token) > 5 and token.endswith("es"):
+        return token[:-2]
+    if len(token) > 4 and token.endswith("s"):
+        return token[:-1]
+    return token
+
+
+def _clean_doc_title(filename: str) -> str:
+    """Filename -> titulo legible. Ej: '12_usuarios_permisos.md' -> 'usuarios permisos'."""
+    return filename.replace(".md", "").lstrip("0123456789_").replace("_", " ")
 
 
 @dataclass
@@ -88,6 +115,9 @@ class KnowledgeBase:
         self._vectorizer = None
         self._tfidf_matrix = None
 
+        # Precomputado en load(): file -> set de tokens >=MIN_LEN (normalizados+stem).
+        self._file_tokens: dict = {}
+
     def load(self) -> int:
         """
         Carga todos los .md del directorio, los divide en chunks
@@ -107,6 +137,7 @@ class KnowledgeBase:
             logger.warning("📚 No se encontraron archivos .md en %s", self.kb_dir)
             return 0
 
+        self._file_tokens = {}
         for filepath in md_files:
             filename = os.path.basename(filepath)
             try:
@@ -114,6 +145,11 @@ class KnowledgeBase:
                     content = f.read()
                 chunks = self._split_by_headings(content, filename)
                 self.chunks.extend(chunks)
+                self._file_tokens[filename] = {
+                    _stem_es(_normalize_for_match(t))
+                    for t in _clean_doc_title(filename).split()
+                    if len(t) >= FILENAME_TOKEN_MIN_LEN
+                }
             except Exception as e:
                 logger.error("📚 Error leyendo %s: %s", filename, e)
 
@@ -181,12 +217,19 @@ class KnowledgeBase:
             response.raise_for_status()
             return np.array(response.json()["embedding"], dtype=np.float32)
 
+    @staticmethod
+    def _chunk_index_text(chunk: "DocumentChunk") -> str:
+        """Texto para construir el indice. Incluye filename tokens
+        (ej. 'permisos') que de otro modo no entrarian al vector.
+        Este texto NO se pasa al LLM — el LLM solo ve chunk.text."""
+        return f"{_clean_doc_title(chunk.source_file)}\n{chunk.heading}\n{chunk.text}"
+
     def _build_embeddings_index(self):
         """Genera embeddings para todos los chunks."""
         logger.info("📚 Generando embeddings para %d chunks...", len(self.chunks))
         embeddings = []
         for i, chunk in enumerate(self.chunks):
-            text = f"{chunk.heading}\n{chunk.text}"
+            text = self._chunk_index_text(chunk)
             emb = self._get_embedding(text)
             embeddings.append(emb)
             if (i + 1) % 20 == 0:
@@ -199,25 +242,42 @@ class KnowledgeBase:
         self._embeddings = self._embeddings / norms
         logger.info("📚 Embeddings generados: %d vectores de dim %d", *self._embeddings.shape)
 
-    def _search_embeddings(self, query: str, top_k: int, min_score: float) -> List[SearchResult]:
-        """Busca por cosine similarity sobre embeddings. Boost para troubleshooting."""
-        query_emb = self._get_embedding(query)
-        query_emb = query_emb / (np.linalg.norm(query_emb) or 1)
+    def _apply_boosts(self, query: str, scores: np.ndarray) -> None:
+        """Aplica boosts in-place sobre el vector de scores: troubleshooting
+        (cuando la query indica un problema) y filename-match (cuando un
+        token distintivo del nombre del doc aparece en la query)."""
+        is_trouble = _is_troubleshooting_query(query)
+        q_tokens = {
+            _stem_es(t) for t in re.findall(r"\w+", _normalize_for_match(query))
+        }
+        filename_matches = {
+            f for f, tokens in self._file_tokens.items() if tokens & q_tokens
+        }
+        if not is_trouble and not filename_matches:
+            return
+        for i, chunk in enumerate(self.chunks):
+            if is_trouble and chunk.source_file in TROUBLESHOOTING_FILES:
+                scores[i] += TROUBLESHOOTING_BOOST
+            if chunk.source_file in filename_matches:
+                scores[i] += FILENAME_TOKEN_BOOST
 
-        scores = (self._embeddings @ query_emb).copy()
-        if _is_troubleshooting_query(query):
-            for i, chunk in enumerate(self.chunks):
-                if chunk.source_file in TROUBLESHOOTING_FILES:
-                    scores[i] += TROUBLESHOOTING_BOOST
-        ranked_indices = scores.argsort()[::-1]
-
+    def _rank_and_filter(
+        self, scores: np.ndarray, top_k: int, min_score: float
+    ) -> List[SearchResult]:
         results = []
-        for idx in ranked_indices[:top_k]:
+        for idx in scores.argsort()[::-1][:top_k]:
             score = float(scores[idx])
             if score < min_score:
                 break
             results.append(SearchResult(chunk=self.chunks[idx], score=score))
         return results
+
+    def _search_embeddings(self, query: str, top_k: int, min_score: float) -> List[SearchResult]:
+        query_emb = self._get_embedding(query)
+        query_emb = query_emb / (np.linalg.norm(query_emb) or 1)
+        scores = (self._embeddings @ query_emb).copy()
+        self._apply_boosts(query, scores)
+        return self._rank_and_filter(scores, top_k, min_score)
 
     # ------------------------------------------------------------------
     # TF-IDF (fallback)
@@ -227,7 +287,7 @@ class KnowledgeBase:
         """Construye el índice TF-IDF sobre todos los chunks."""
         from sklearn.feature_extraction.text import TfidfVectorizer
 
-        texts = [f"{c.heading}\n{c.text}" for c in self.chunks]
+        texts = [self._chunk_index_text(c) for c in self.chunks]
         self._vectorizer = TfidfVectorizer(
             ngram_range=(1, 2),
             max_features=5000,
@@ -240,24 +300,11 @@ class KnowledgeBase:
         logger.debug("📚 Índice TF-IDF construido: %d features", len(self._vectorizer.get_feature_names_out()))
 
     def _search_tfidf(self, query: str, top_k: int, min_score: float) -> List[SearchResult]:
-        """Busca por cosine similarity sobre TF-IDF. Boost para troubleshooting."""
         from sklearn.metrics.pairwise import cosine_similarity
-
         query_vec = self._vectorizer.transform([query])
         scores = cosine_similarity(query_vec, self._tfidf_matrix).flatten().copy()
-        if _is_troubleshooting_query(query):
-            for i, chunk in enumerate(self.chunks):
-                if chunk.source_file in TROUBLESHOOTING_FILES:
-                    scores[i] += TROUBLESHOOTING_BOOST
-        ranked_indices = scores.argsort()[::-1]
-
-        results = []
-        for idx in ranked_indices[:top_k]:
-            score = float(scores[idx])
-            if score < min_score:
-                break
-            results.append(SearchResult(chunk=self.chunks[idx], score=score))
-        return results
+        self._apply_boosts(query, scores)
+        return self._rank_and_filter(scores, top_k, min_score)
 
     # ------------------------------------------------------------------
     # Chunking
