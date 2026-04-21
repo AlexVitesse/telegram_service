@@ -1,5 +1,9 @@
 # Preguntas Frecuentes (FAQ)
 
+## Preguntas frecuentes sobre Sentinel Guard
+
+Este documento reune las preguntas frecuentes (FAQ) mas comunes sobre el uso y funcionamiento del sistema de alarma Sentinel Guard. Incluye dudas generales sobre dispositivos, conectividad, bateria, alcance LoRa, multiples usuarios y cobertura sin internet. Para dudas especificas sobre instalacion o solucion de problemas, consulta los documentos dedicados.
+
 ## Cuantos dispositivos puedo tener?
 
 Puedes tener multiples dispositivos en una misma cuenta. Cada dispositivo se vincula individualmente mediante Bluetooth (BLE). Todos se controlan desde la misma app Sentinel Guard y desde Telegram.

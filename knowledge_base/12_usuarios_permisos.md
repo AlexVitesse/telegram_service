@@ -1,5 +1,28 @@
 # Usuarios y Permisos
 
+## Como se configuran los permisos del sistema
+
+Los permisos de usuario se configuran desde Telegram. Configurar un permiso significa dar acceso a un nuevo usuario para que pueda controlar los dispositivos. Los permisos se configuran paso a paso con los comandos del bot y no requieren la app ni hardware adicional. Solo los administradores pueden configurar permisos.
+
+### Pasos para configurar un nuevo permiso
+
+1. Paso 1: El administrador envia /adduser al bot de Telegram.
+2. Paso 2: El bot genera un codigo de invitacion con el formato /join_DEVICE_ID.
+3. Paso 3: El administrador comparte ese codigo con el nuevo usuario por un medio externo (WhatsApp, SMS, correo).
+4. Paso 4: El nuevo usuario envia /join_DEVICE_ID al bot desde su Telegram.
+5. Paso 5: El bot notifica al administrador con la solicitud del nuevo usuario.
+6. Paso 6: El administrador aprueba el permiso ejecutando /approve_CHATID.
+7. Paso 7: El nuevo usuario queda registrado con permisos de acceso configurados.
+
+Asi se configura un permiso nuevo en el sistema. Como se configuran los permisos: con los comandos /adduser, /approve_CHATID, /desvincular y /permisos desde Telegram. Los permisos se configuran de forma digital, no desde la app movil. Para revisar los permisos ya configurados, el administrador usa /permisos.
+
+### Configurar permisos: resumen de comandos
+
+- /adduser - configurar un nuevo permiso, agregar un nuevo usuario.
+- /approve_CHATID - aprobar la configuracion del permiso del nuevo usuario.
+- /desvincular - quitar permisos de acceso.
+- /permisos - ver todos los permisos configurados (solo admins).
+
 ## Roles del sistema
 
 Sentinel Guard maneja dos roles de usuario:

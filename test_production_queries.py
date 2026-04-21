@@ -165,6 +165,36 @@ PRODUCTION_QUERIES = [
         "baseline": "RAG hablo de sync de horarios, no de pareo inicial (regular)",
         "fix": "Fix #5 - nuevo chunk habla de modulos preparados",
     },
+    {
+        "id": 12,
+        "user": "PANA",
+        "query": "Como configuro los permisos",
+        "intent": "question",
+        "rag_expect_words": ["permisos", "admin"],
+        "rag_expect_source_any": ["usuarios_permisos"],
+        "baseline": "RAG respondio 'No tengo esa informacion' - fuentes: bengala, configuracion_inicial (MAL)",
+        "fix": "Fix filename-in-embedding (rag_handler._chunk_index_text)",
+    },
+    {
+        "id": 13,
+        "user": "PANA",
+        "query": "Los Permisos como se configura?",
+        "intent": "question",
+        "rag_expect_words": ["permisos"],
+        "rag_expect_source_any": ["usuarios_permisos"],
+        "baseline": "Mismo fallo que #12 - fuentes: bengala, configuracion_inicial (MAL)",
+        "fix": "Parcial: el filename-in-embedding no alcanza; requiere sinonimos en 12_usuarios_permisos.md",
+    },
+    {
+        "id": 14,
+        "user": "PANA",
+        "query": "Gestionar usuarios?",
+        "intent": "question",
+        "rag_expect_words": ["usuarios", "admin"],
+        "rag_expect_source_any": ["usuarios_permisos"],
+        "baseline": "OK pero incompleto - no mencionaba /adduser ni /approve_CHATID (solo /start, /permisos, Telegram_ID_2)",
+        "fix": "Fix filename-in-embedding mejora recall; seccion 'Agregar nuevos usuarios' entra mejor en top-k",
+    },
 ]
 
 
