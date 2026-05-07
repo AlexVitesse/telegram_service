@@ -12,6 +12,7 @@ from mqtt_protocol import Command # Importar el Enum de Comandos
 from scheduler import scheduler  # Para sincronizar horarios
 
 from config import config # Asegurarse que config tenga la databaseURL
+from chat_id_utils import normalize_chat_id, looks_like_stripped_supergroup
 
 if TYPE_CHECKING:
     from mqtt_handler import MqttHandler
@@ -761,9 +762,11 @@ class FirebaseManager:
                 if not isinstance(device_data, dict):
                     continue
 
-                telegram_id = str(device_data.get('Telegram_ID', ''))
-                telegram_id_2 = str(device_data.get('Telegram_ID_2', ''))
-                group_id = str(device_data.get('Group_ID', ''))
+                # Normalizar valores guardados (auto-fix supergrupos sin '-' por si el dato esta viejo)
+                af = config.telegram.auto_fix_group_id
+                telegram_id = normalize_chat_id(device_data.get('Telegram_ID', ''), auto_fix=af)
+                telegram_id_2 = normalize_chat_id(device_data.get('Telegram_ID_2', ''), auto_fix=af)
+                group_id = normalize_chat_id(device_data.get('Group_ID', ''), auto_fix=af)
 
                 if telegram_id == chat_id_str or telegram_id_2 == chat_id_str or group_id == chat_id_str:
                     authorized.append(device_id)
@@ -834,10 +837,16 @@ class FirebaseManager:
                                 if '|||' in field_str:
                                     logger.warning(f"{field_name} concatenado detectado para {dev_id}: {field_str}")
                                     for tid in field_str.split('|||'):
-                                        if tid.strip():
-                                            chats.add(tid.strip())
+                                        tid = tid.strip()
+                                        if tid:
+                                            # Auto-fix defensivo para datos viejos malformados
+                                            chats.add(normalize_chat_id(
+                                                tid, auto_fix=config.telegram.auto_fix_group_id
+                                            ))
                                 else:
-                                    chats.add(field_str)
+                                    chats.add(normalize_chat_id(
+                                        field_str, auto_fix=config.telegram.auto_fix_group_id
+                                    ))
                 return chats
 
             # Usar solo el cache (el listener lo mantiene actualizado)
@@ -941,14 +950,16 @@ class FirebaseManager:
             chat_id_str = str(chat_id)
             is_telegram_id = False
             is_group_id = False
+            af = config.telegram.auto_fix_group_id
 
             for device_data in all_devices.values():
                 if not isinstance(device_data, dict):
                     continue
 
-                telegram_id = str(device_data.get('Telegram_ID', ''))
-                telegram_id_2 = str(device_data.get('Telegram_ID_2', ''))
-                group_id = str(device_data.get('Group_ID', ''))
+                # Normalizar valores guardados (auto-fix supergrupos sin '-' si el dato esta viejo)
+                telegram_id = normalize_chat_id(device_data.get('Telegram_ID', ''), auto_fix=af)
+                telegram_id_2 = normalize_chat_id(device_data.get('Telegram_ID_2', ''), auto_fix=af)
+                group_id = normalize_chat_id(device_data.get('Group_ID', ''), auto_fix=af)
 
                 # Verificar en Telegram_ID
                 if '|||' in telegram_id:
@@ -1003,6 +1014,51 @@ class FirebaseManager:
     def get_all_users_formatted(self) -> str:
         """Obtiene lista formateada de usuarios (stub)"""
         return "📋 Lista de usuarios no disponible en esta versión."
+
+    def save_lead(
+        self,
+        chat_id: str,
+        first_name: str,
+        email: str,
+        phone: str = "",
+        original_question: str = "",
+    ) -> bool:
+        """
+        Guarda un lead capturado del modo vendedor en Firebase.
+
+        Path: /Leads/{chat_id}. Si ya existe, sobrescribe (se asume que el
+        prospecto repitio el flujo de captura intencionalmente).
+
+        Args:
+            chat_id: chat_id de Telegram del prospecto.
+            first_name: nombre del usuario en Telegram.
+            email: email validado.
+            phone: telefono (opcional, "" si saltado).
+            original_question: pregunta inicial que disparo el interes.
+
+        Returns:
+            True si se guardo correctamente.
+        """
+        if not self.is_available():
+            logger.warning("Firebase no disponible para guardar lead")
+            return False
+
+        try:
+            lead_ref = self.db.reference(f'Leads/{chat_id}')
+            lead_ref.set({
+                'chat_id': str(chat_id),
+                'first_name': first_name or "",
+                'email': email,
+                'phone': phone or "",
+                'original_question': (original_question or "")[:500],
+                'created_at': int(time.time()),
+                'status': 'new',
+            })
+            logger.info(f"💼 Lead guardado: {first_name} ({chat_id}) email={email}")
+            return True
+        except Exception as e:
+            logger.error(f"Error guardando lead {chat_id}: {e}")
+            return False
 
     def add_pending_request(self, chat_id: str, name: str, device_id: str):
         """
@@ -1090,9 +1146,19 @@ class FirebaseManager:
         Prioriza el dispositivo con ID más LARGO (completo = real MQTT) para consistencia.
         Soporta 3 slots: Telegram_ID (dueño), Telegram_ID_2 (segundo usuario), Group_ID (grupo).
         Retorna True si se agregó correctamente.
+
+        Aplica auto-correccion defensiva: si el chat_id parece un supergrupo
+        sin '-' (patron 100xxxxxxxxxx de 13 digitos), le agrega el '-' antes
+        de guardar y loguea WARNING. Controlado por TELEGRAM_AUTO_FIX_GROUP_ID.
         """
         if not self.is_available():
             logger.warning("Firebase no disponible para agregar chat autorizado")
+            return False
+
+        # Normalizar chat_id (auto-corrige supergrupo sin '-' si aplica)
+        chat_id = normalize_chat_id(chat_id, auto_fix=config.telegram.auto_fix_group_id)
+        if not chat_id:
+            logger.error("add_authorized_chat: chat_id vacio o invalido")
             return False
 
         try:

@@ -49,6 +49,10 @@ class TelegramConfig:
     bot_token: str = _get_env("TELEGRAM_BOT_TOKEN", "")
     admin_chat_id: str = _get_env("TELEGRAM_ADMIN_CHAT_ID", "")
     admin_bot_token: str = _get_env("ADMIN_BOT_TOKEN", "")
+    # Auto-corregir IDs de supergrupo guardados sin '-' (default true).
+    # La app Ionic a veces los guarda mal; este flag aplica un fix defensivo.
+    # Setear a "false" si alguna vez sospechas un falso positivo.
+    auto_fix_group_id: bool = _get_env_bool("TELEGRAM_AUTO_FIX_GROUP_ID", True)
 
 
 @dataclass
@@ -84,11 +88,26 @@ class AIConfig:
 
 
 @dataclass
+class SupportConfig:
+    """Datos de contacto humano y enlaces que se muestran al usuario cuando
+    el bot no puede resolver una consulta, detecta una queja, o entra
+    en modo vendedor. Todos los campos se leen de .env; si quedan
+    vacios, no se incluyen en el mensaje."""
+    email: str = _get_env("SUPPORT_EMAIL", "")
+    phone: str = _get_env("SUPPORT_PHONE", "")
+    hours: str = _get_env("SUPPORT_HOURS", "")
+    # URLs comerciales: usadas en modo vendedor (usuarios no registrados)
+    app_store_url: str = _get_env("SUPPORT_APP_STORE_URL", "")
+    landing_url: str = _get_env("SUPPORT_LANDING_URL", "")
+
+
+@dataclass
 class Config:
     mqtt: MqttConfig
     telegram: TelegramConfig
     firebase: FirebaseConfig
     ai: AIConfig
+    support: SupportConfig
     device_id: str = _get_env("DEVICE_ID", "")
     debug: bool = _get_env_bool("DEBUG", True)
     log_file: str = _get_env("LOG_FILE", "alarm_service.log")
@@ -105,6 +124,7 @@ config = Config(
     telegram=TelegramConfig(),
     firebase=FirebaseConfig(),
     ai=AIConfig(),
+    support=SupportConfig(),
 )
 
 # Validar que las credenciales críticas estén configuradas

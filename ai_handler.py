@@ -50,12 +50,13 @@ Valores válidos para "intent":
 - "schedule"       → configurar horario automático de armado/desarmado
 - "query_schedule" → consultar / ver qué horarios están configurados actualmente
 - "question"       → el usuario quiere información, ayuda, explicación, pregunta algo sobre el sistema (NO es un comando)
+- "complaint"      → el usuario tiene una queja, reclamo, expresa frustracion, o pide explicitamente hablar con una persona / agente humano / soporte humano
 - "unknown"        → el mensaje no tiene relación con el sistema de alarma
 
 Para "device":
 - Usa el nombre exacto del dispositivo si se menciona específicamente.
 - Usa "all" si el usuario dice "todo", "todas", "el sistema" o no especifica.
-- Usa null si el intent es "unknown" o "question".
+- Usa null si el intent es "unknown", "question" o "complaint".
 
 Para intent "schedule", agrega en "params":
 {
@@ -79,6 +80,7 @@ IMPORTANTE:
 - Si el usuario PREGUNTA cómo hacer algo, pide explicación o ayuda → intent "question".
 - Si el usuario ORDENA hacer algo (activar, desactivar, etc.) → intent correspondiente.
 - Ejemplos de "question": "cómo configuro la bengala?", "qué es el modo pregunta?", "cómo agrego un usuario?"
+- Ejemplos de "complaint": "tengo una queja", "esto no me sirve", "quiero hablar con una persona", "necesito un humano", "esto es pesimo".
 - Ejemplos de comando: "activa la alarma", "apaga el sistema", "arma todo"
 - Si la pregunta es sobre HORARIOS / agenda / programacion (contiene "horario", "horarios", "agenda", "programacion"), usa intent "query_schedule" aunque mencione un dispositivo. Ejemplos: "Horarios?", "que horario tiene Estudio?", "horario de Oficina", "Horario que se encuentra Estudio?".
 - Si la pregunta es sobre ESTADO de armado (contiene "esta armada", "esta activa", "cual es el estado", "como esta"), usa intent "status". Ejemplos: "como esta la alarma?", "esta armada la casa?", "que alarma esta activada?".
@@ -96,7 +98,7 @@ Responde preguntas usando EXCLUSIVAMENTE la documentación que aparece abajo.
 REGLAS ESTRICTAS:
 - SOLO usa información que aparece en la documentación proporcionada abajo.
 - NUNCA inventes comandos, funciones, pasos o características que no estén en la documentación.
-- Si algo no está en la documentación, responde: "No tengo esa información. Usa /help o contacta al administrador."
+- Si algo no está en la documentación, responde EXACTAMENTE con el texto: NO_INFO_AVAILABLE (sin nada mas, sin explicaciones).
 - Responde en español, claro y conciso.
 - Formato de texto plano. Sin asteriscos, sin guiones bajos, sin markdown.
 - Da respuestas COMPLETAS. No cortes la respuesta a la mitad.
@@ -109,6 +111,45 @@ PRECISION OBLIGATORIA:
 - Cita las especificaciones tecnicas tal cual: angulo de deteccion, rango, altura de montaje, etc.
 - NO parafrasees la documentación. Usa las mismas palabras y valores que aparecen en ella.
 """
+
+# ---------------------------------------------------------------------------
+# Prompt para modo vendedor (usuarios NO registrados)
+# ---------------------------------------------------------------------------
+SALES_CHAT_PROMPT = """Sos un asesor comercial del sistema de alarma SentinelGuard.
+Hablas con alguien que aun NO tiene el sistema. Tu objetivo es:
+1. Explicar como funciona y por que es util (con datos reales de la documentacion).
+2. Despejar dudas tecnicas o practicas.
+3. Invitar a comprar / pedir mas info al final de cada respuesta.
+
+REGLAS ESTRICTAS:
+- SOLO usa informacion que aparece en la documentacion proporcionada abajo.
+- NUNCA inventes caracteristicas que no esten en la documentacion.
+- Tono cordial, cercano, en espanol rioplatense (vos, podes). No uses jerga tecnica innecesaria.
+- Formato de texto plano, SIN markdown (sin asteriscos, sin guiones bajos).
+- Respuestas concisas: 3-6 lineas idealmente. Esto es un chat, no un brochure.
+
+PROHIBICIONES:
+- NUNCA des precios, costos ni planes — todavia no estan publicados.
+  Si preguntan precio, costo, valor, cuanto sale: redirigi al email/landing.
+- NUNCA menciones comandos del bot (/on, /off, /status, /bengala, etc).
+  Esos son para usuarios ya registrados con el sistema instalado.
+- NUNCA menciones detalles tecnicos internos: Firebase, MQTT, broker, VPS,
+  arquitectura del backend. Hablale de la experiencia del usuario.
+- Si la pregunta NO se relaciona con SentinelGuard (saludos vacios, off-topic),
+  responde brevemente quien sos y volve al tema. No mantengas conversacion off-topic.
+
+CIERRE OBLIGATORIO:
+Toda respuesta termina con un CTA breve al final, separado por una linea en blanco.
+Los datos de contacto te los paso en la documentacion abajo bajo el bloque [CONTACTO].
+Usalos textuales (email, link App Store, landing si esta disponible).
+Variantes aceptables del CTA:
+- "Para empezar, descargá la app o escribinos a {email}."
+- "Si te interesa adquirir el equipo, escribinos a {email}."
+- "Mas info y contacto: {email}."
+"""
+
+
+
 
 
 class AIHandler:
@@ -396,6 +437,74 @@ class AIHandler:
         except Exception as e:
             logger.error("🤖 Error en LLM (chat_with_context): %s", e)
             return "Lo siento, hubo un error procesando tu pregunta. Intenta de nuevo o usa /help."
+
+    # ------------------------------------------------------------------
+    # Modo vendedor (usuarios NO registrados)
+    # ------------------------------------------------------------------
+
+    async def chat_sales(
+        self,
+        user_message: str,
+        context_chunks: List[str],
+        *,
+        support_email: str = "",
+        app_store_url: str = "",
+        landing_url: str = "",
+    ) -> str:
+        """
+        Genera una respuesta en modo vendedor para alguien que aun no
+        tiene el sistema. Reutiliza la KB existente pero con SALES_CHAT_PROMPT
+        que enfoca la respuesta hacia el cierre comercial.
+
+        Args:
+            user_message: pregunta del prospecto.
+            context_chunks: fragmentos relevantes de la knowledge base.
+            support_email: email de soporte (se inyecta en el bloque [CONTACTO]).
+            app_store_url: link a la app en App Store.
+            landing_url: link al landing (opcional).
+
+        Returns:
+            Respuesta generada por el LLM con CTA de cierre.
+        """
+        context_text = "\n\n---\n\n".join(context_chunks) if context_chunks else "(Sin documentacion relevante encontrada — respondé desde principios generales del producto sin inventar caracteristicas.)"
+
+        contact_lines = []
+        if support_email:
+            contact_lines.append(f"Email: {support_email}")
+        if app_store_url:
+            contact_lines.append(f"App Store: {app_store_url}")
+        if landing_url:
+            contact_lines.append(f"Landing: {landing_url}")
+        contact_block = "\n".join(contact_lines) if contact_lines else "(Sin canales de contacto configurados.)"
+
+        user_prompt = (
+            f"Documentacion del producto:\n{context_text}\n\n"
+            f"[CONTACTO — usar textualmente al cerrar la respuesta]\n{contact_block}\n\n"
+            f"Pregunta del prospecto: {user_message}"
+        )
+
+        try:
+            answer = await self._call_llm(
+                system_prompt=SALES_CHAT_PROMPT,
+                user_prompt=user_prompt,
+                model=self._chat_model,
+                temperature=0.5,  # mas creativo que el RAG estricto, pero no inventa
+                max_tokens=600,
+            )
+            logger.info("🛒 Sales chat respondido (%d chars) | backend: %s", len(answer), self._backend)
+            return answer
+        except Exception as e:
+            logger.error("🛒 Error en LLM (chat_sales): %s", e)
+            # Fallback minimo con el contacto en duro
+            fallback = (
+                "Disculpá, no pude procesar tu consulta en este momento. "
+                "Si querés mas info sobre SentinelGuard:"
+            )
+            if support_email:
+                fallback += f"\nEscribinos a {support_email}"
+            if app_store_url:
+                fallback += f"\nDescargá la app: {app_store_url}"
+            return fallback
 
     # ------------------------------------------------------------------
     # Cleanup

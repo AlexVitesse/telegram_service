@@ -39,6 +39,12 @@ from device_manager import DeviceManager
 from ai_handler import AIHandler
 from rag_handler import KnowledgeBase
 from interaction_logger import InteractionLogger
+from escalation_handler import (
+    NO_INFO_SENTINEL,
+    build_escalation_message,
+    looks_like_complaint,
+)
+from chat_id_utils import normalize_chat_id, looks_like_stripped_supergroup
 
 if TYPE_CHECKING: # ADD THIS BLOCK
     from firebase_manager import FirebaseManager
@@ -60,6 +66,25 @@ class BengalaConfirmation:
     def is_expired(self, timeout_seconds: int = 120) -> bool:
         """Verifica si la confirmación ha expirado (default 2 minutos)."""
         return (time.time() - self.timestamp) >= timeout_seconds
+
+
+@dataclass
+class LeadCaptureState:
+    """Estado del flujo de captura de lead para un usuario NO registrado.
+
+    Maquina de estados simple: email -> phone -> done.
+    Si el usuario abandona, expira a los 10 minutos y se descarta.
+    """
+    chat_id: str
+    first_name: str
+    started_at: float
+    waiting_for: str  # "email" | "phone" | "done"
+    email: str = ""
+    phone: str = ""
+    original_question: str = ""
+
+    def is_expired(self, timeout_seconds: int = 600) -> bool:
+        return (time.time() - self.started_at) >= timeout_seconds
 
 
 def require_auth(func):
@@ -239,6 +264,21 @@ class TelegramBot:
         # Dispositivo seleccionado para horarios (por chat_id)
         self._horarios_selected_device: Dict[str, str] = {}  # chat_id -> device_id o "all"
 
+        # Rate limit para usuarios NO registrados (modo vendedor).
+        # Mapa: chat_id -> [timestamps de los ultimos mensajes].
+        # In-memory: se resetea con cada deploy (intencional, simple).
+        self._unauth_rate_limits: Dict[str, List[float]] = {}
+        self.UNAUTH_RATE_LIMIT_MAX = 3       # max 3 mensajes
+        self.UNAUTH_RATE_LIMIT_WINDOW = 300  # cada 5 min
+
+        # Welcome de modo vendedor: marcamos al chat_id la primera vez
+        # para no repetir el mensaje en cada turno.
+        self._unauth_welcomed: set = set()
+
+        # Estado de captura de leads (usuarios no registrados que clickearon "Quiero comprar")
+        # chat_id -> LeadCaptureState. Expira a los 10 min.
+        self._lead_states: Dict[str, LeadCaptureState] = {}
+
         # AI Handler (Ollama/Groq) - lenguaje natural + RAG
         self.ai_handler: Optional[AIHandler] = None
         self.knowledge_base: Optional[KnowledgeBase] = None
@@ -330,6 +370,12 @@ class TelegramBot:
         app.add_handler(CommandHandler("adduser", self._cmd_adduser))
         app.add_handler(CommandHandler("desvincular", self._cmd_desvincular))
         app.add_handler(CommandHandler("reload_kb", self._cmd_reload_kb))
+
+        # Escalacion a soporte humano
+        app.add_handler(CommandHandler("soporte", self._cmd_soporte))
+
+        # Modo vendedor: intro para usuarios no registrados
+        app.add_handler(CommandHandler("info", self._cmd_info))
 
         # Callbacks de botones inline
         app.add_handler(CallbackQueryHandler(self._handle_callback))
@@ -486,6 +532,9 @@ class TelegramBot:
         help_text += "`/horarios desactivar HH:MM` - Hora de desarmado\n"
         help_text += "`/horarios dias [L,M,X,J,V|todos|semana|finde]`\n"
         help_text += "`/horarios cambiar` - Cambiar dispositivo seleccionado\n\n"
+        help_text += "🆘 *Soporte:*\n"
+        help_text += "`/soporte` - Hablar con una persona del equipo\n"
+        help_text += "`/info` - Información del producto (para nuevos usuarios)\n\n"
 
         if self._is_user_admin(chat_id):
             help_text += "⚙️ *Admin:*\n"
@@ -1565,12 +1614,9 @@ class TelegramBot:
         # Verificar autorización
         authorized_devices = self.firebase_manager.get_authorized_devices(chat_id)
         if not authorized_devices:
-            await update.message.reply_text(
-                "🚫 *Usuario no autorizado*\n\n"
-                "No estas registrado en el sistema.\n"
-                "Usa /start para comenzar o contacta a un administrador.",
-                parse_mode=ParseMode.MARKDOWN
-            )
+            # Usuario NO registrado: rutear a modo vendedor en vez de bloquear.
+            # Las funciones de control siguen detras de @require_auth, no hay riesgo.
+            await self._handle_sales_chat(update, text)
             return
 
         # Intentar interpretar con IA
@@ -1614,6 +1660,26 @@ class TelegramBot:
         confidence = result.get("confidence") if result else None
         backend = getattr(self.ai_handler, "_backend", None)
 
+        # Escalacion: queja o pedido explicito de hablar con humano.
+        # Acepta tanto el intent del LLM como el detector de keywords (red de seguridad).
+        is_complaint_intent = (
+            result is not None
+            and result.get("intent") == "complaint"
+            and (confidence is None or confidence >= 0.7)
+        )
+        if is_complaint_intent or looks_like_complaint(text):
+            msg = build_escalation_message("complaint", config.support)
+            await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+            self.interaction_logger.record(
+                user_id=chat_id, user_name=user_name, query=text,
+                intent=intent or "complaint", confidence=confidence, backend=backend,
+                response_type="escalation", response=msg,
+                elapsed_ms=int((_t.monotonic() - _t0) * 1000),
+                ok=True,
+            )
+            logger.info("🆘 Escalacion (queja) para %s: %r", chat_id, text[:80])
+            return
+
         # Intent "question" → RAG (delega el logging)
         if result and result["intent"] == "question":
             await self._handle_rag_chat(
@@ -1636,11 +1702,34 @@ class TelegramBot:
                         started_at=_t0,
                     )
                     return
+
+            # Si parece una pregunta real (>3 palabras, con '?' o palabra interrogativa),
+            # escalar a soporte humano en vez del fallback generico.
+            stripped = text.strip().lower()
+            interrog = ("?", "como ", "cómo ", "que ", "qué ", "por que", "por qué",
+                        "porque", "donde ", "dónde ", "cuando ", "cuándo ", "cual ", "cuál ",
+                        "ayuda", "necesito", "no puedo", "no me funciona")
+            looks_like_question = (
+                len(stripped.split()) >= 4
+                and any(kw in stripped for kw in interrog)
+            )
+            if looks_like_question:
+                msg = build_escalation_message("no_results", config.support)
+                await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+                self.interaction_logger.record(
+                    user_id=chat_id, user_name=user_name, query=text,
+                    intent=intent, confidence=confidence, backend=backend,
+                    response_type="escalation", response=msg,
+                    elapsed_ms=int((_t.monotonic() - _t0) * 1000),
+                    ok=False, error="no_intent_no_rag",
+                )
+                return
+
             fallback_msg = (
                 "No entendí ese mensaje.\n"
                 "Puedes escribirme en lenguaje natural, por ejemplo:\n"
                 "\"activa la alarma\", \"como configuro la bengala?\"\n\n"
-                "O usa /help para ver los comandos."
+                "O usa /help para ver los comandos. Si necesitás ayuda humana, /soporte."
             )
             await update.message.reply_text(fallback_msg, reply_markup=self._get_keyboard())
             self.interaction_logger.record(
@@ -1845,15 +1934,12 @@ class TelegramBot:
                 logger.debug("📚 RAG match: score=%.3f | %s > %s", r.score, r.chunk.source_file, r.chunk.heading[:50])
 
             if not results:
-                msg = (
-                    "No encontré información relevante sobre eso en la documentación.\n"
-                    "Intenta reformular tu pregunta o usa /help para ver los comandos."
-                )
+                msg = build_escalation_message("no_results", config.support)
                 await update.message.reply_text(msg, reply_markup=self._get_keyboard())
                 self.interaction_logger.record(
                     user_id=user_id, user_name=user_name, query=text,
                     intent=intent, confidence=confidence, backend=backend,
-                    response_type="rag", response=msg,
+                    response_type="escalation", response=msg,
                     rag_sources=[], rag_scores=[],
                     elapsed_ms=_elapsed_ms(), ok=False, error="rag_no_results",
                 )
@@ -1861,6 +1947,20 @@ class TelegramBot:
 
             context_chunks = [r.chunk.text for r in results]
             answer = await self.ai_handler.chat_with_context(text, context_chunks)
+
+            # Si el LLM marca que no encontro info en la documentacion, escalamos.
+            if NO_INFO_SENTINEL in answer:
+                msg = build_escalation_message("no_results", config.support)
+                await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+                self.interaction_logger.record(
+                    user_id=user_id, user_name=user_name, query=text,
+                    intent=intent or "question", confidence=confidence, backend=backend,
+                    response_type="escalation", response=msg,
+                    rag_sources=[r.chunk.source_file for r in results],
+                    rag_scores=[round(r.score, 3) for r in results],
+                    elapsed_ms=_elapsed_ms(), ok=False, error="llm_no_info",
+                )
+                return
 
             sources_raw = [r.chunk.source_file for r in results]
             scores = [round(r.score, 3) for r in results]
@@ -1906,6 +2006,446 @@ class TelegramBot:
         count = self.knowledge_base.reload()
         await update.message.reply_text(f"📚 Knowledge base recargada: {count} chunks indexados.")
         logger.info("📚 Knowledge base recargada por admin %s: %d chunks", chat_id, count)
+
+    async def _cmd_soporte(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Devuelve los datos de contacto humano (SUPPORT_EMAIL/PHONE/HOURS)."""
+        chat_id = str(update.effective_chat.id)
+        user_name = update.effective_user.first_name or ""
+        msg = build_escalation_message("manual", config.support)
+        await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+        self.interaction_logger.record(
+            user_id=chat_id, user_name=user_name, query="/soporte",
+            intent="manual", response_type="escalation", response=msg, ok=True,
+        )
+
+    # ------------------------------------------------------------------
+    # Modo vendedor (usuarios NO registrados)
+    # ------------------------------------------------------------------
+
+    async def _cmd_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Intro al producto. Sin auth: lo puede usar cualquiera."""
+        chat_id = str(update.effective_chat.id)
+        user_name = update.effective_user.first_name or ""
+
+        # Si ya esta registrado, redirigi a /help
+        if self.firebase_manager.get_authorized_devices(chat_id):
+            await update.message.reply_text(
+                "Ya tenés acceso al sistema. Usá /help para ver tus comandos.",
+                reply_markup=self._get_keyboard(),
+            )
+            return
+
+        # Marcar como bienvenido para no duplicar el saludo en el primer mensaje libre
+        self._unauth_welcomed.add(chat_id)
+
+        lines = [
+            "Hola! Soy el asistente de SentinelGuard 👋",
+            "",
+            "Sistema de alarma IoT con:",
+            "• Sensores de movimiento (PIR 110°/7m) y apertura",
+            "• Sirena de 110 dB con bengala de humo de disuasión",
+            "• Control desde app móvil, Telegram o teclado físico",
+            "• Notificaciones en tiempo real",
+            "",
+            "Hacé tu pregunta libremente o contactanos:",
+        ]
+        if config.support.email:
+            lines.append(f"📧 {config.support.email}")
+        if config.support.app_store_url:
+            lines.append(f"📱 App Store: {config.support.app_store_url}")
+        if config.support.landing_url:
+            lines.append(f"🌐 Más info: {config.support.landing_url}")
+
+        msg = "\n".join(lines)
+        await update.message.reply_text(msg, reply_markup=self._build_sales_keyboard())
+        self.interaction_logger.record(
+            user_id=chat_id, user_name=user_name, query="/info",
+            intent="prospect", response_type="sales", response=msg, ok=True,
+        )
+
+    def _check_unauth_rate_limit(self, chat_id: str) -> bool:
+        """Rate limit para usuarios NO registrados.
+
+        Returns True si puede mandar el mensaje, False si esta limitado.
+        Limite: UNAUTH_RATE_LIMIT_MAX mensajes en una ventana de
+        UNAUTH_RATE_LIMIT_WINDOW segundos.
+        """
+        now = time.time()
+        window = self.UNAUTH_RATE_LIMIT_WINDOW
+        timestamps = self._unauth_rate_limits.get(chat_id, [])
+        # Filtrar timestamps fuera de la ventana
+        timestamps = [t for t in timestamps if now - t < window]
+        if len(timestamps) >= self.UNAUTH_RATE_LIMIT_MAX:
+            self._unauth_rate_limits[chat_id] = timestamps
+            return False
+        timestamps.append(now)
+        self._unauth_rate_limits[chat_id] = timestamps
+        return True
+
+    @staticmethod
+    def _looks_like_real_question(text: str) -> bool:
+        """True si el texto parece una pregunta/consulta real (no saludo o ruido).
+
+        Filtra mensajes triviales para no gastar LLM con stickers, "hola",
+        "ok", emojis sueltos. Heuristica laxa: >=3 palabras o tiene '?'.
+        """
+        if not text:
+            return False
+        s = text.strip()
+        if not s:
+            return False
+        if "?" in s:
+            return True
+        return len(s.split()) >= 3
+
+    @staticmethod
+    def _validate_email(text: str) -> Optional[str]:
+        """Valida y normaliza un email. Retorna el email lowercased si es valido, None si no."""
+        if not text:
+            return None
+        import re
+        s = text.strip().lower()
+        # Regex simple pero efectivo. No exhaustivo (ej. RFC 5321) — buscamos
+        # cumplir el patron <local>@<dominio>.<tld> sin espacios.
+        if re.match(r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$", s):
+            return s
+        return None
+
+    @staticmethod
+    def _validate_phone(text: str) -> Optional[str]:
+        """Valida un telefono/whatsapp. Retorna el numero limpio si es valido, None si no.
+
+        Acepta: digitos, espacios, guiones, parentesis, +, min 7 digitos totales.
+        """
+        if not text:
+            return None
+        import re
+        s = text.strip()
+        # Contar digitos
+        digits = re.sub(r"\D", "", s)
+        if len(digits) < 7 or len(digits) > 18:
+            return None
+        # Verificar que solo tenga caracteres permitidos
+        if not re.match(r"^[+\d\s\-().]+$", s):
+            return None
+        return s
+
+    def _build_sales_keyboard(self) -> Optional[InlineKeyboardMarkup]:
+        """Construye el teclado inline del modo vendedor.
+
+        Botones:
+          📱 Descargar app  (URL → App Store)
+          🛒 Quiero comprar  (callback → inicia captura de lead)
+          💬 Más información  (callback → repaso del producto)
+          🆘 Hablar con persona  (callback → datos de contacto humano)
+
+        Si no hay App Store URL configurado, omite ese boton.
+        """
+        rows = []
+        first_row = []
+        if config.support.app_store_url:
+            first_row.append(
+                InlineKeyboardButton("📱 Descargar app", url=config.support.app_store_url)
+            )
+        first_row.append(
+            InlineKeyboardButton("🛒 Quiero comprar", callback_data="sales_buy")
+        )
+        rows.append(first_row)
+        rows.append([
+            InlineKeyboardButton("💬 Más información", callback_data="sales_more_info"),
+            InlineKeyboardButton("🆘 Hablar con persona", callback_data="sales_support"),
+        ])
+        return InlineKeyboardMarkup(rows)
+
+    def _cleanup_expired_lead_states(self):
+        """Elimina states de lead capture que ya expiraron (10 min)."""
+        expired = [cid for cid, st in self._lead_states.items() if st.is_expired()]
+        for cid in expired:
+            self._lead_states.pop(cid, None)
+            logger.info(f"💼 Lead state expirado para {cid}")
+
+    async def _handle_sales_chat(self, update: Update, text: str):
+        """Modo vendedor: responde a usuarios NO registrados con tono comercial.
+
+        - Si el usuario esta en flujo de captura de lead, rutea ahi.
+        - Comandos de cancelacion ('cancelar', '/cancelar') salen del flujo.
+        - Filtra mensajes triviales (saludos sueltos) con un saludo amistoso.
+        - Aplica rate limit.
+        - Reusa la misma KB que el RAG normal pero con SALES_CHAT_PROMPT.
+        - Loguea las interacciones con response_type='sales' para tracking.
+        """
+        import time as _t
+        _t0 = _t.monotonic()
+        chat_id = str(update.effective_chat.id)
+        user_name = update.effective_user.first_name or ""
+
+        def _elapsed_ms():
+            return int((_t.monotonic() - _t0) * 1000)
+
+        # Limpiar states expirados antes de chequear el actual
+        self._cleanup_expired_lead_states()
+
+        # Si el usuario esta en flujo de captura de lead, rutear ahi
+        lead_state = self._lead_states.get(chat_id)
+        if lead_state and lead_state.waiting_for in ("email", "phone"):
+            # Permitir cancelar
+            stripped = text.strip().lower()
+            if stripped in ("cancelar", "/cancelar", "cancel", "/cancel"):
+                self._lead_states.pop(chat_id, None)
+                await update.message.reply_text(
+                    "Listo, cancelé el registro. Si querés volver a intentar, "
+                    "tocá '🛒 Quiero comprar' de nuevo o usá /info."
+                )
+                return
+            await self._handle_lead_capture_step(update, text, lead_state)
+            return
+
+        # Saludo amistoso si no parece pregunta real
+        if not self._looks_like_real_question(text):
+            if chat_id not in self._unauth_welcomed:
+                self._unauth_welcomed.add(chat_id)
+                msg = (
+                    f"Hola {user_name}! Soy el asistente de SentinelGuard. "
+                    "Hacé tu pregunta sobre el sistema o usá /info para una intro."
+                )
+            else:
+                msg = "Contame qué querés saber del sistema. Usá /info si necesitás un repaso general."
+            await update.message.reply_text(msg, reply_markup=self._build_sales_keyboard())
+            self.interaction_logger.record(
+                user_id=chat_id, user_name=user_name, query=text,
+                intent="prospect", response_type="sales", response=msg,
+                elapsed_ms=_elapsed_ms(), ok=True,
+            )
+            return
+
+        # Rate limit
+        if not self._check_unauth_rate_limit(chat_id):
+            msg = (
+                "Estás mandando muchos mensajes muy rápido. "
+                f"Para info detallada escribinos a {config.support.email or 'el email de soporte'}."
+            )
+            await update.message.reply_text(msg)
+            self.interaction_logger.record(
+                user_id=chat_id, user_name=user_name, query=text,
+                intent="prospect", response_type="sales", response=msg,
+                elapsed_ms=_elapsed_ms(), ok=False, error="rate_limited",
+            )
+            return
+
+        # IA disponible?
+        if not self.ai_handler:
+            msg = (
+                "Para info sobre SentinelGuard:\n"
+                f"📧 {config.support.email}\n"
+                f"📱 {config.support.app_store_url}"
+            )
+            await update.message.reply_text(msg)
+            self.interaction_logger.record(
+                user_id=chat_id, user_name=user_name, query=text,
+                intent="prospect", response_type="sales", response=msg,
+                elapsed_ms=_elapsed_ms(), ok=False, error="ai_disabled",
+            )
+            return
+
+        # Indicador de escritura
+        await update.effective_chat.send_action("typing")
+
+        # Buscar contexto en la KB (si esta disponible)
+        context_chunks: List[str] = []
+        rag_sources: List[str] = []
+        rag_scores: List[float] = []
+        if self.knowledge_base:
+            results = self.knowledge_base.search(
+                text,
+                top_k=config.ai.rag_max_chunks,
+                min_score=config.ai.rag_min_score,
+            )
+            context_chunks = [r.chunk.text for r in results]
+            rag_sources = [r.chunk.source_file for r in results]
+            rag_scores = [round(r.score, 3) for r in results]
+
+        # Llamar al LLM en modo vendedor
+        backend = getattr(self.ai_handler, "_backend", None)
+        try:
+            answer = await self.ai_handler.chat_sales(
+                text,
+                context_chunks,
+                support_email=config.support.email,
+                app_store_url=config.support.app_store_url,
+                landing_url=config.support.landing_url,
+            )
+        except Exception as e:
+            logger.error("🛒 Error en sales chat: %s", e)
+            answer = (
+                "Disculpá, no pude procesar tu consulta. "
+                f"Para más info escribinos a {config.support.email or 'el email de soporte'}."
+            )
+
+        await update.message.reply_text(answer, reply_markup=self._build_sales_keyboard())
+        logger.info("🛒 Sales response a %s (chars=%d, sources=%s)", chat_id, len(answer), rag_sources)
+        self.interaction_logger.record(
+            user_id=chat_id, user_name=user_name, query=text,
+            intent="prospect", confidence=None, backend=backend,
+            response_type="sales", response=answer,
+            rag_sources=rag_sources, rag_scores=rag_scores,
+            elapsed_ms=_elapsed_ms(), ok=True,
+        )
+
+    # ------------------------------------------------------------------
+    # Lead capture: state machine email -> phone -> save
+    # ------------------------------------------------------------------
+
+    async def _handle_lead_capture_step(self, update: Update, text: str, state: LeadCaptureState):
+        """Procesa una respuesta del usuario dentro del flujo de captura de lead."""
+        chat_id = state.chat_id
+
+        if state.waiting_for == "email":
+            email = self._validate_email(text)
+            if not email:
+                await update.message.reply_text(
+                    "Eso no parece un email válido. Mandalo en formato nombre@dominio.com\n"
+                    "(o escribí 'cancelar' si querés salir)"
+                )
+                return
+            state.email = email
+            state.waiting_for = "phone"
+            await update.message.reply_text(
+                "Genial, anotado el email.\n"
+                "¿Querés dejarnos tu WhatsApp/teléfono también? (opcional, escribí 'saltar' para omitir)"
+            )
+            return
+
+        if state.waiting_for == "phone":
+            stripped = text.strip().lower()
+            if stripped in ("saltar", "skip", "no", "omitir", "no gracias"):
+                state.phone = ""
+            else:
+                phone = self._validate_phone(text)
+                if not phone:
+                    await update.message.reply_text(
+                        "El teléfono no parece válido. Probá con código de país (ej: +54 11 5555-5555)\n"
+                        "o escribí 'saltar' para omitir."
+                    )
+                    return
+                state.phone = phone
+
+            state.waiting_for = "done"
+
+            # Guardar en Firebase
+            saved = self.firebase_manager.save_lead(
+                chat_id=chat_id,
+                first_name=state.first_name,
+                email=state.email,
+                phone=state.phone,
+                original_question=state.original_question,
+            )
+
+            # Limpiar state
+            self._lead_states.pop(chat_id, None)
+
+            # Notificar al admin (si esta configurado)
+            await self._notify_admin_new_lead(state, saved=saved)
+
+            # Confirmar al usuario
+            confirmation = (
+                f"¡Listo {state.first_name or ''}! Recibimos tus datos.\n"
+                f"Te contactamos en menos de 24 hábiles a {state.email}."
+            )
+            await update.message.reply_text(confirmation)
+
+            self.interaction_logger.record(
+                user_id=chat_id, user_name=state.first_name, query="[lead_capture]",
+                intent="prospect", response_type="lead_captured",
+                response=f"email={state.email} phone={state.phone or '(sin telefono)'}",
+                ok=saved, error=None if saved else "firebase_save_failed",
+            )
+            logger.info("💼 Lead capturado: %s (%s) email=%s phone=%s",
+                        state.first_name, chat_id, state.email, state.phone or "-")
+            return
+
+    async def _notify_admin_new_lead(self, state: LeadCaptureState, saved: bool):
+        """Envia una notificacion al admin cuando entra un lead nuevo.
+        Si TELEGRAM_ADMIN_CHAT_ID no esta configurado, no hace nada.
+        """
+        admin_id = config.telegram.admin_chat_id
+        if not admin_id:
+            return
+        status = "✅ Guardado en Firebase" if saved else "⚠️ NO se pudo guardar en Firebase"
+        msg = (
+            f"💼 *Lead nuevo*\n"
+            f"👤 {state.first_name or '(sin nombre)'}\n"
+            f"💬 chat_id: `{state.chat_id}`\n"
+            f"📧 {state.email}\n"
+            f"📞 {state.phone or '(sin teléfono)'}\n"
+            f"❓ Pregunta: _{(state.original_question or '(sin pregunta)')[:200]}_\n"
+            f"{status}"
+        )
+        try:
+            await self.send_message(admin_id, msg, parse_mode="Markdown")
+        except Exception as e:
+            logger.warning("No se pudo notificar al admin del lead: %s", e)
+
+    # ------------------------------------------------------------------
+    # Callbacks de modo vendedor
+    # ------------------------------------------------------------------
+
+    async def _handle_sales_callback(self, query, chat_id: str, user_name: str, data: str):
+        """Maneja los callbacks de los botones del modo vendedor.
+
+        Importante: estos callbacks NO requieren autorizacion porque el
+        modo vendedor justamente es para usuarios no registrados.
+        """
+        if data == "sales_buy":
+            # Iniciar captura de lead
+            self._lead_states[chat_id] = LeadCaptureState(
+                chat_id=chat_id,
+                first_name=user_name,
+                started_at=time.time(),
+                waiting_for="email",
+                original_question="",  # no tenemos contexto especifico aca
+            )
+            await query.message.reply_text(
+                "¡Genial! Para que el equipo te contacte, dejame tu email:\n"
+                "(podés escribir 'cancelar' en cualquier momento para salir)"
+            )
+            self.interaction_logger.record(
+                user_id=chat_id, user_name=user_name, query="[btn:sales_buy]",
+                intent="prospect", response_type="lead_started",
+                response="Inicio captura de email", ok=True,
+            )
+            return
+
+        if data == "sales_more_info":
+            # Pequeno repaso del producto sin gastar LLM
+            lines = [
+                "Sentinel Guard en breve:",
+                "",
+                "🛡️ Sistema IoT con sensores PIR, magnéticos, sirena y bengala de humo.",
+                "📱 Control desde app móvil, Telegram o teclado físico.",
+                "🔔 Notificaciones en tiempo real cuando algo pasa.",
+                "🔥 Disuasión activa: el humo cubre 20 m² en segundos.",
+                "🔐 Comunicación cifrada (MQTT con TLS).",
+                "",
+                "Hacé tu pregunta concreta o tocá '🛒 Quiero comprar'.",
+            ]
+            await query.message.reply_text(
+                "\n".join(lines), reply_markup=self._build_sales_keyboard()
+            )
+            self.interaction_logger.record(
+                user_id=chat_id, user_name=user_name, query="[btn:sales_more_info]",
+                intent="prospect", response_type="sales", response="repaso enviado", ok=True,
+            )
+            return
+
+        if data == "sales_support":
+            # Reusar el escalation message que ya tenemos
+            msg = build_escalation_message("manual", config.support)
+            await query.message.reply_text(msg)
+            self.interaction_logger.record(
+                user_id=chat_id, user_name=user_name, query="[btn:sales_support]",
+                intent="prospect", response_type="escalation", response=msg, ok=True,
+            )
+            return
 
     def _resolve_device_ids_by_name(
         self,
@@ -2089,8 +2629,15 @@ class TelegramBot:
         user = query.from_user
         chat_id = str(query.message.chat_id)
         data = query.data
-        
+        user_name = user.first_name or ""
+
         logger.info(f"Callback {data} de {user.first_name}")
+
+        # Callbacks del modo vendedor: NO requieren autorizacion (esos botones
+        # son para usuarios NO registrados). Se manejan antes del check de auth.
+        if data and data.startswith("sales_"):
+            await self._handle_sales_callback(query, chat_id, user_name, data)
+            return
 
         if not self.mqtt_handler:
             await query.edit_message_text("❌ Error: Sistema no conectado")
@@ -2911,6 +3458,19 @@ class TelegramBot:
                          Si se proporciona, tiene prioridad sobre keyboard/has_keyboard
             skip_anti_spam: Si True, omite la verificación anti-spam (para eventos críticos como alarmas)
         """
+        # --- Sanity check: chat_id que parece supergrupo sin '-' (bug app Ionic) ---
+        # Si llegamos aca con un ID malformado, las capas de arriba no lo filtraron.
+        # Normalizamos como ultima red de seguridad antes de pegarle a Telegram.
+        if looks_like_stripped_supergroup(chat_id):
+            original = chat_id
+            chat_id = normalize_chat_id(chat_id, auto_fix=config.telegram.auto_fix_group_id)
+            logger.error(
+                "🚨 send_message recibio chat_id malformado: %s -> %s. "
+                "Esto indica que un dato viejo en Firebase no fue normalizado al leer. "
+                "Investigar quien llamo a send_message con ese ID.",
+                original, chat_id,
+            )
+
         # --- Anti-Spam ---
         if not skip_anti_spam and self._was_recently_sent(chat_id, text):
             return  # Detener si es un mensaje duplicado
