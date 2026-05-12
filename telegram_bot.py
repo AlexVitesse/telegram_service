@@ -279,6 +279,11 @@ class TelegramBot:
         # chat_id -> LeadCaptureState. Expira a los 10 min.
         self._lead_states: Dict[str, LeadCaptureState] = {}
 
+        # Set de chat_ids invalidos sobre los que ya logueamos un CRITICAL una vez.
+        # Evita spam cuando hay datos basura persistentes en Firebase (ej: app obliga
+        # Group_ID y el usuario mete "hola chatid" para avanzar). Se limpia al reiniciar.
+        self._warned_invalid_chat_ids: set = set()
+
         # AI Handler (Ollama/Groq) - lenguaje natural + RAG
         self.ai_handler: Optional[AIHandler] = None
         self.knowledge_base: Optional[KnowledgeBase] = None
@@ -3458,18 +3463,23 @@ class TelegramBot:
                          Si se proporciona, tiene prioridad sobre keyboard/has_keyboard
             skip_anti_spam: Si True, omite la verificación anti-spam (para eventos críticos como alarmas)
         """
-        # --- Sanity check: chat_id que parece supergrupo sin '-' (bug app Ionic) ---
-        # Si llegamos aca con un ID malformado, las capas de arriba no lo filtraron.
-        # Normalizamos como ultima red de seguridad antes de pegarle a Telegram.
-        if looks_like_stripped_supergroup(chat_id):
-            original = chat_id
-            chat_id = normalize_chat_id(chat_id, auto_fix=config.telegram.auto_fix_group_id)
-            logger.error(
-                "🚨 send_message recibio chat_id malformado: %s -> %s. "
-                "Esto indica que un dato viejo en Firebase no fue normalizado al leer. "
-                "Investigar quien llamo a send_message con ese ID.",
-                original, chat_id,
-            )
+        # --- Sanity check de chat_id (ultima red de seguridad) ---
+        # 1. Auto-fix supergrupo sin '-' si aplica
+        # 2. Si el chat_id NO es plausible (basura tipo "hola chatid", "1111"),
+        #    skipear silenciosamente con un solo log por chat_id en cada arranque
+        original_chat_id = str(chat_id) if chat_id is not None else ""
+        chat_id = normalize_chat_id(chat_id, auto_fix=config.telegram.auto_fix_group_id)
+        if not chat_id:
+            # Solo logueamos una vez por chat_id invalido para no llenar el log
+            if original_chat_id and original_chat_id not in self._warned_invalid_chat_ids:
+                self._warned_invalid_chat_ids.add(original_chat_id)
+                logger.critical(
+                    "🚨 send_message recibio chat_id invalido (no plausible): %r. "
+                    "Probablemente hay basura en Firebase (campo obligatorio mal llenado). "
+                    "Skipeando este envio. Proximos intentos para este chat_id se silencian.",
+                    original_chat_id,
+                )
+            return
 
         # --- Anti-Spam ---
         if not skip_anti_spam and self._was_recently_sent(chat_id, text):

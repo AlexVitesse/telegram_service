@@ -839,14 +839,19 @@ class FirebaseManager:
                                     for tid in field_str.split('|||'):
                                         tid = tid.strip()
                                         if tid:
-                                            # Auto-fix defensivo para datos viejos malformados
-                                            chats.add(normalize_chat_id(
+                                            # Auto-fix + validacion. Si la basura no
+                                            # se puede normalizar, normalize devuelve "".
+                                            normalized = normalize_chat_id(
                                                 tid, auto_fix=config.telegram.auto_fix_group_id
-                                            ))
+                                            )
+                                            if normalized:
+                                                chats.add(normalized)
                                 else:
-                                    chats.add(normalize_chat_id(
+                                    normalized = normalize_chat_id(
                                         field_str, auto_fix=config.telegram.auto_fix_group_id
-                                    ))
+                                    )
+                                    if normalized:
+                                        chats.add(normalized)
                 return chats
 
             # Usar solo el cache (el listener lo mantiene actualizado)
