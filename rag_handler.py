@@ -43,6 +43,41 @@ def _is_troubleshooting_query(query: str) -> bool:
     return any(kw in q for kw in TROUBLESHOOTING_KEYWORDS)
 
 
+# URL patterns: protocolo, dominio.tld/path, t.me, www.foo, bit.ly, etc.
+# Cubre los casos comunes que llegan al bot por accidente (links pegados).
+_URL_RE = re.compile(
+    r"""
+    (?:https?://|ftp://)\S+            # protocolo + resto hasta espacio
+    | www\.\S+                          # www. + resto
+    | t\.me/\S+                         # t.me/ + resto
+    | bit\.ly/\S+                       # bit.ly/ + resto
+    | \b\w+\.(?:com|org|net|io|me|click|app|ai|co|dev)(?:/\S*)?\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def looks_like_url_only(text: str) -> bool:
+    """True si el mensaje es esencialmente una URL pegada (no una pregunta).
+
+    Devolvemos True solo si despues de quitar la(s) URL(s) queda muy poco
+    texto util — asi no rechazamos preguntas legitimas tipo
+    "vi en https://x.com/algo, como hago Y?".
+    """
+    if not text:
+        return False
+    s = text.strip()
+    if not s:
+        return False
+    # Quitar URLs detectadas y ver si sobra algo significativo.
+    leftover = _URL_RE.sub("", s).strip()
+    # Quita signos sueltos y emojis basicos.
+    leftover_alnum = re.sub(r"[^\w]", "", leftover, flags=re.UNICODE)
+    # Si el residuo alfa es < 4 chars Y el original contenia al menos una URL,
+    # tratamos el input como "solo link".
+    return bool(_URL_RE.search(s)) and len(leftover_alnum) < 4
+
+
 def _normalize_for_match(text: str) -> str:
     """Minúsculas sin acentos."""
     nfkd = unicodedata.normalize("NFKD", text.lower())
@@ -247,12 +282,7 @@ class KnowledgeBase:
         (cuando la query indica un problema) y filename-match (cuando un
         token distintivo del nombre del doc aparece en la query)."""
         is_trouble = _is_troubleshooting_query(query)
-        q_tokens = {
-            _stem_es(t) for t in re.findall(r"\w+", _normalize_for_match(query))
-        }
-        filename_matches = {
-            f for f, tokens in self._file_tokens.items() if tokens & q_tokens
-        }
+        filename_matches = self._matched_files_for_query(query)
         if not is_trouble and not filename_matches:
             return
         for i, chunk in enumerate(self.chunks):
@@ -261,23 +291,78 @@ class KnowledgeBase:
             if chunk.source_file in filename_matches:
                 scores[i] += FILENAME_TOKEN_BOOST
 
+    # Cuando un archivo gana filename-match (ej. query "horarios" -> 09_horarios.md),
+    # garantizamos al menos N chunks de ese archivo en el top_k. Sin esto, un archivo
+    # con multiples secciones complementarias (ej. "...desde Telegram" vs "...desde la App")
+    # puede entregar solo una al LLM y la respuesta sale parcial/incorrecta.
+    GUARANTEED_CHUNKS_PER_MATCHED_FILE = 2
+
+    def _matched_files_for_query(self, query: str) -> set:
+        if not query:
+            return set()
+        q_tokens = {
+            _stem_es(t) for t in re.findall(r"\w+", _normalize_for_match(query))
+        }
+        return {f for f, tokens in self._file_tokens.items() if tokens & q_tokens}
+
     def _rank_and_filter(
-        self, scores: np.ndarray, top_k: int, min_score: float
+        self,
+        scores: np.ndarray,
+        top_k: int,
+        min_score: float,
+        query: str = "",
     ) -> List[SearchResult]:
-        results = []
-        for idx in scores.argsort()[::-1][:top_k]:
-            score = float(scores[idx])
-            if score < min_score:
+        sorted_idx = scores.argsort()[::-1].tolist()
+
+        # Pasada 1: top_k normal por score.
+        selected: List[int] = []
+        for idx in sorted_idx:
+            if len(selected) >= top_k:
                 break
-            results.append(SearchResult(chunk=self.chunks[idx], score=score))
-        return results
+            if scores[idx] < min_score:
+                break
+            selected.append(idx)
+
+        # Pasada 2: garantizar diversidad por archivo cuando hay filename-match.
+        matched_files = self._matched_files_for_query(query)
+        if matched_files:
+            for f in matched_files:
+                current = sum(1 for i in selected if self.chunks[i].source_file == f)
+                if current >= self.GUARANTEED_CHUNKS_PER_MATCHED_FILE:
+                    continue
+                for cand_idx in sorted_idx:
+                    if cand_idx in selected:
+                        continue
+                    if self.chunks[cand_idx].source_file != f:
+                        continue
+                    if scores[cand_idx] < min_score:
+                        break
+                    # Reemplazar el chunk con peor score que NO sea de un matched_file.
+                    replace_pos = None
+                    for i in range(len(selected) - 1, -1, -1):
+                        if self.chunks[selected[i]].source_file not in matched_files:
+                            replace_pos = i
+                            break
+                    if replace_pos is None:
+                        break
+                    selected[replace_pos] = cand_idx
+                    current += 1
+                    if current >= self.GUARANTEED_CHUNKS_PER_MATCHED_FILE:
+                        break
+            # Reordenar por score real para devolverlos en orden descendente.
+            selected.sort(key=lambda i: -scores[i])
+
+        return [
+            SearchResult(chunk=self.chunks[i], score=float(scores[i]))
+            for i in selected
+        ]
 
     def _search_embeddings(self, query: str, top_k: int, min_score: float) -> List[SearchResult]:
         query_emb = self._get_embedding(query)
         query_emb = query_emb / (np.linalg.norm(query_emb) or 1)
         scores = (self._embeddings @ query_emb).copy()
         self._apply_boosts(query, scores)
-        return self._rank_and_filter(scores, top_k, min_score)
+        return self._rank_and_filter(scores, top_k, min_score, query=query)
 
     # ------------------------------------------------------------------
     # TF-IDF (fallback)
@@ -304,7 +389,7 @@ class KnowledgeBase:
         query_vec = self._vectorizer.transform([query])
         scores = cosine_similarity(query_vec, self._tfidf_matrix).flatten().copy()
         self._apply_boosts(query, scores)
-        return self._rank_and_filter(scores, top_k, min_score)
+        return self._rank_and_filter(scores, top_k, min_score, query=query)
 
     # ------------------------------------------------------------------
     # Chunking

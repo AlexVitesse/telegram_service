@@ -37,7 +37,7 @@ from scheduler import scheduler
 from mqtt_protocol import MqttEvent, EventType
 from device_manager import DeviceManager
 from ai_handler import AIHandler
-from rag_handler import KnowledgeBase
+from rag_handler import KnowledgeBase, looks_like_url_only
 from interaction_logger import InteractionLogger
 from escalation_handler import (
     NO_INFO_SENTINEL,
@@ -1646,6 +1646,26 @@ class TelegramBot:
         _t0 = _t.monotonic()
         user_name = update.effective_user.first_name or ""
 
+        # Guard: si el mensaje es solo un link pegado, no procesarlo con IA/RAG.
+        # Sin esto, queries tipo "https://t.me/foo" caen al RAG y devuelven
+        # un tutorial random (visto en log #16). Respondemos algo neutro.
+        if looks_like_url_only(text):
+            msg = (
+                "Recibí un enlace pero no puedo abrirlo desde acá. "
+                "Si tenés una pregunta sobre Sentinel, escribila como texto "
+                "y te ayudo. Usá /help para ver los comandos disponibles."
+            )
+            await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+            logger.info("🤖 IA: input URL-only descartado para %s: %r", chat_id, text[:80])
+            self.interaction_logger.record(
+                user_id=chat_id, user_name=user_name, query=text,
+                intent="url_only", confidence=None, backend=None,
+                response_type="guard", response=msg,
+                rag_sources=[], rag_scores=[],
+                elapsed_ms=int((_t.monotonic() - _t0) * 1000), ok=True, error=None,
+            )
+            return
+
         # Construir contexto de dispositivos para la IA
         devices_context = []
         for dev_id in authorized_device_ids:
@@ -1864,6 +1884,23 @@ class TelegramBot:
 
         elif intent == "schedule":
             params = result.get("params", {})
+            time_keys = {"on_hour", "on_minute", "off_hour", "off_minute"}
+            has_times = any(k in params for k in time_keys)
+
+            # Toggle puro: solo viene "enabled" → reusar el flow de /horarios on/off
+            # (set_enabled + _sync_schedule_to_devices), conservando horas/dias previos.
+            if "enabled" in params and not has_times:
+                scheduler.set_enabled(bool(params["enabled"]))
+                await self._sync_schedule_to_devices(chat_id, target_ids)
+                if params["enabled"]:
+                    msg = "📅 Horario automático *activado*.\n\n" + scheduler.format_status()
+                else:
+                    msg = "📅 Horario automático *desactivado*."
+                await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=self._get_keyboard())
+                logger.info(f"🤖 IA → SCHEDULE toggle enabled={params['enabled']} en {target_ids}")
+                _log_action(f"schedule toggle → {target_ids} enabled={params['enabled']}")
+                return
+
             required = {"enabled", "on_hour", "on_minute", "off_hour", "off_minute"}
             if not required.issubset(params.keys()):
                 msg = (

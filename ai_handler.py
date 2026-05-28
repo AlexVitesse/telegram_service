@@ -58,15 +58,26 @@ Para "device":
 - Usa "all" si el usuario dice "todo", "todas", "el sistema" o no especifica.
 - Usa null si el intent es "unknown", "question" o "complaint".
 
-Para intent "schedule", agrega en "params":
-{
-  "enabled": true,
-  "on_hour": <hora armado 0-23>,
-  "on_minute": <minuto armado 0-59>,
-  "off_hour": <hora desarmado 0-23>,
-  "off_minute": <minuto desarmado 0-59>,
-  "days": [<índices>]
-}
+Para intent "schedule" hay TRES variantes segun lo que pida el usuario:
+
+A) CONFIGURAR un horario nuevo (el usuario da horas concretas):
+   "params": {
+     "enabled": true,
+     "on_hour": <hora armado 0-23>,
+     "on_minute": <minuto armado 0-59>,
+     "off_hour": <hora desarmado 0-23>,
+     "off_minute": <minuto desarmado 0-59>,
+     "days": [<índices>]
+   }
+
+B) DESACTIVAR el horario automatico existente (sin cambiar horas):
+   "params": { "enabled": false }
+   Ejemplos: "desactiva horarios", "apaga el horario automatico", "quita la programacion", "deshabilita el horario".
+
+C) ACTIVAR el horario automatico existente (sin cambiar horas):
+   "params": { "enabled": true }
+   Ejemplos: "activa horarios", "enciende el horario automatico", "rehabilita la programacion".
+
 Días: 0=Domingo, 1=Lunes, 2=Martes, 3=Miércoles, 4=Jueves, 5=Viernes, 6=Sábado
 Ejemplo: "lunes a viernes" → [1,2,3,4,5] | "todos los días" → [0,1,2,3,4,5,6]
 Horarios en formato 24h. "10pm" → on_hour=22, on_minute=0.
@@ -82,7 +93,10 @@ IMPORTANTE:
 - Ejemplos de "question": "cómo configuro la bengala?", "qué es el modo pregunta?", "cómo agrego un usuario?"
 - Ejemplos de "complaint": "tengo una queja", "esto no me sirve", "quiero hablar con una persona", "necesito un humano", "esto es pesimo".
 - Ejemplos de comando: "activa la alarma", "apaga el sistema", "arma todo"
-- Si la pregunta es sobre HORARIOS / agenda / programacion (contiene "horario", "horarios", "agenda", "programacion"), usa intent "query_schedule" aunque mencione un dispositivo. Ejemplos: "Horarios?", "que horario tiene Estudio?", "horario de Oficina", "Horario que se encuentra Estudio?".
+- Si la pregunta es sobre HORARIOS y es de CONSULTA (verbos: "ver", "muestra", "cual es", "que horario", "como esta", "consulta"), usa "query_schedule". Ejemplos: "Horarios?", "que horario tiene Estudio?", "muestrame los horarios", "como esta el horario".
+- Si la pregunta es sobre HORARIOS y es para DESACTIVAR / APAGAR / DESHABILITAR / QUITAR, usa "schedule" con params {"enabled": false}. Ejemplos: "desactiva horarios", "apaga el horario automatico", "quita la programacion".
+- Si la pregunta es sobre HORARIOS y es para ACTIVAR / ENCENDER / HABILITAR el horario existente SIN dar nuevas horas, usa "schedule" con params {"enabled": true}. Ejemplos: "activa horarios", "enciende el horario automatico".
+- Si la pregunta es sobre HORARIOS y da HORAS concretas para configurarlos, usa "schedule" con todos los params (variante A).
 - Si la pregunta es sobre ESTADO de armado (contiene "esta armada", "esta activa", "cual es el estado", "como esta"), usa intent "status". Ejemplos: "como esta la alarma?", "esta armada la casa?", "que alarma esta activada?".
 - Si el mensaje es un saludo sin relación con alarmas → intent "unknown".
 - El campo "reply" debe ser una respuesta corta y amigable en español.

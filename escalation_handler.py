@@ -11,11 +11,14 @@ los medios para contactar a una persona.
 """
 from __future__ import annotations
 
+import logging
 import unicodedata
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from config import SupportConfig
+
+logger = logging.getLogger(__name__)
 
 
 # Sentinel que el LLM emite cuando no encuentra info en la KB.
@@ -91,10 +94,17 @@ def build_escalation_message(reason: str, support: "SupportConfig") -> str:
     header = _REASON_HEADERS.get(reason, _REASON_HEADERS["manual"])
 
     if not has_any_contact(support):
+        # Aviso tecnico para el admin/dev en el log — no se le muestra al usuario.
+        logger.warning(
+            "⚠️ Escalacion solicitada (reason=%s) pero no hay SUPPORT_EMAIL ni "
+            "SUPPORT_PHONE configurados en .env. El usuario recibe un mensaje "
+            "generico. Configurá los datos de contacto para escalar correctamente.",
+            reason,
+        )
         return (
             f"{header}\n\n"
-            "(El equipo de soporte aún no configuró los datos de contacto. "
-            "Pedile al administrador que complete SUPPORT_EMAIL en el .env.)"
+            "Por el momento no hay un canal de contacto disponible. "
+            "Volvé a intentarlo más tarde o usá /help para ver lo que puedo resolver."
         )
 
     lines = [header, ""]

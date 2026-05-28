@@ -6,7 +6,7 @@ El sistema de horarios permite programar el armado y desarmado automatico de la 
 
 ## Configurar horarios desde Telegram
 
-Los siguientes comandos estan disponibles para gestionar horarios desde el bot de Telegram:
+Para configurar, programar, activar o desactivar los horarios automaticos desde el bot de Telegram, usa los siguientes comandos:
 
 - **/horarios** - Ver el estado actual de la programacion (habilitada/deshabilitada, horas y dias configurados).
 - **/horarios on** - Habilitar la programacion automatica.

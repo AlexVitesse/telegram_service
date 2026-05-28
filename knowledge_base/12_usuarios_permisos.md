@@ -1,8 +1,8 @@
 # Usuarios y Permisos
 
-## Como se configuran los permisos del sistema
+## Como se configuran o programan los permisos del sistema
 
-Los permisos de usuario se configuran desde Telegram. Configurar un permiso significa dar acceso a un nuevo usuario para que pueda controlar los dispositivos. Los permisos se configuran paso a paso con los comandos del bot y no requieren la app ni hardware adicional. Solo los administradores pueden configurar permisos.
+Los permisos de usuario se configuran (o programan) desde Telegram. Configurar o programar un permiso significa dar acceso a un nuevo usuario para que pueda controlar los dispositivos. Los permisos se configuran y programan paso a paso con los comandos del bot y no requieren la app ni hardware adicional. Solo los administradores pueden configurar o programar permisos.
 
 ### Pasos para configurar un nuevo permiso
 

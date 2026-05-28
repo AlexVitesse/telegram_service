@@ -2,7 +2,7 @@
 
 ## Que es Sentinel Guard
 
-Sentinel Guard es un sistema de alarma IoT profesional diseñado para proteger hogares y negocios. Combina hardware propio (sensores, sirena, bengala de humo, teclado) con conectividad en la nube, permitiendo control y monitoreo desde una app movil, Telegram o un teclado fisico.
+Sentinel Guard (tambien escrito SentinelGuard) es un sistema de alarma IoT profesional diseñado para proteger hogares y negocios. Como producto, Sentinel Guard es un sistema de seguridad integral. Combina hardware propio (sensores, sirena, bengala de humo, teclado) con conectividad en la nube, permitiendo control y monitoreo desde una app movil, Telegram o un teclado fisico.
 
 ## Componentes del sistema
 
