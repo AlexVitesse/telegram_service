@@ -1,12 +1,12 @@
 # Configuracion Inicial - Sentinel Guard
 
-## Video tutorial de configuracion inicial
+## Como configurar Sentinel Guard por primera vez (video tutorial paso a paso)
 
-Para la primera configuracion del sistema hay un video tutorial paso a paso disponible en:
+Para configurar Sentinel Guard por primera vez, la forma mas rapida es seguir este video tutorial paso a paso. El video cubre el proceso completo del primer uso e instalacion inicial del sistema:
 
 https://youtu.be/SpDamcPJXHs
 
-Se recomienda verlo antes de iniciar el primer uso. Cubre el proceso completo de configuracion inicial, instalacion, vinculacion del Master con WiFi y vinculacion con Telegram. Este video tutorial es la guia mas rapida para usuarios nuevos que recien reciben el equipo y quieren ponerlo en marcha.
+Se recomienda ver el video antes de comenzar la configuracion. Muestra como empezar desde cero: como configurar el Modulo Master, como vincularlo con la red WiFi, como vincularlo con Telegram y como dejar el equipo listo para operar. Este video es la guia rapida recomendada para todo usuario nuevo que recien recibe el kit y necesita empezar a usarlo.
 
 ## Requisitos previos
 
