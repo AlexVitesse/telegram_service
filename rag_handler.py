@@ -85,13 +85,36 @@ def _normalize_for_match(text: str) -> str:
 
 
 def _stem_es(token: str) -> str:
-    """Quita plurales en espanol (-es/-s) para unir usuario/usuarios,
-    permiso/permisos. Heuristico simple; no es un stemmer completo."""
-    if len(token) > 5 and token.endswith("es"):
-        return token[:-2]
-    if len(token) > 4 and token.endswith("s"):
-        return token[:-1]
-    return token
+    """Stemmer minimo de espanol para unir formas relacionadas:
+    plurales (usuario/usuarios), nombres derivados (-cion/-ciones), y
+    vocal final atona (configuro/configuracion -> mismo stem).
+
+    No es un stemmer completo (no toca -ar/-er/-ir, no maneja diptongos),
+    pero alcanza para que el matching de filename tokens funcione con
+    queries reales en lugar de exigir el lemma exacto.
+
+    Ejemplos:
+        configuro      -> 'configur'
+        configuracion  -> 'configura' -> 'configur'  (cion + vocal final)
+        permisos       -> 'permiso'  -> 'permis'     (-s + vocal final)
+        horarios       -> 'horario'  -> 'horari'     (-s + vocal final)
+        primera        -> 'primer'                    (-a)
+    """
+    stripped = token
+    # Sufijos de nombre derivado primero (mas especificos).
+    if len(stripped) > 7 and stripped.endswith("ciones"):
+        stripped = stripped[:-6]
+    elif len(stripped) > 6 and stripped.endswith("cion"):
+        stripped = stripped[:-4]
+    # Plurales.
+    elif len(stripped) > 5 and stripped.endswith("es"):
+        stripped = stripped[:-2]
+    elif len(stripped) > 4 and stripped.endswith("s"):
+        stripped = stripped[:-1]
+    # Vocal final atona (despues del paso anterior, encadenado).
+    if len(stripped) > 4 and stripped.endswith(("a", "o", "e")):
+        stripped = stripped[:-1]
+    return stripped
 
 
 def _clean_doc_title(filename: str) -> str:

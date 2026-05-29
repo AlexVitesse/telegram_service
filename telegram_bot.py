@@ -1884,21 +1884,37 @@ class TelegramBot:
 
         elif intent == "schedule":
             params = result.get("params", {})
+
+            # Coerce: el LLM a veces emite enabled como string ("true"/"false")
+            # en lugar de bool JSON. bool("false") == True en Python, asi que
+            # tratar el campo crudo como bool puede invertir la accion.
+            def _coerce_enabled(val):
+                if isinstance(val, bool):
+                    return val
+                if isinstance(val, str):
+                    return val.strip().lower() in ("true", "1", "yes", "si", "sí")
+                return bool(val)
+
+            raw_enabled = params.get("enabled")
+            enabled = _coerce_enabled(raw_enabled) if raw_enabled is not None else None
+
             time_keys = {"on_hour", "on_minute", "off_hour", "off_minute"}
             has_times = any(k in params for k in time_keys)
 
-            # Toggle puro: solo viene "enabled" → reusar el flow de /horarios on/off
-            # (set_enabled + _sync_schedule_to_devices), conservando horas/dias previos.
-            if "enabled" in params and not has_times:
-                scheduler.set_enabled(bool(params["enabled"]))
+            # Toggle puro (sin horas) O desactivacion (en una desactivacion las
+            # horas no aportan — y si el LLM siguio el shape viejo emitiendo
+            # ceros, dejarlas pasar pisaria las horas configuradas con 0:00).
+            # Reusamos el flow de /horarios on/off para conservar horas/dias.
+            if enabled is not None and (not has_times or enabled is False):
+                scheduler.set_enabled(enabled)
                 await self._sync_schedule_to_devices(chat_id, target_ids)
-                if params["enabled"]:
+                if enabled:
                     msg = "📅 Horario automático *activado*.\n\n" + scheduler.format_status()
                 else:
                     msg = "📅 Horario automático *desactivado*."
                 await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=self._get_keyboard())
-                logger.info(f"🤖 IA → SCHEDULE toggle enabled={params['enabled']} en {target_ids}")
-                _log_action(f"schedule toggle → {target_ids} enabled={params['enabled']}")
+                logger.info(f"🤖 IA → SCHEDULE toggle enabled={enabled} en {target_ids}")
+                _log_action(f"schedule toggle → {target_ids} enabled={enabled}")
                 return
 
             required = {"enabled", "on_hour", "on_minute", "off_hour", "off_minute"}
@@ -1913,7 +1929,7 @@ class TelegramBot:
             days = params.get("days", [0, 1, 2, 3, 4, 5, 6])
             for dev_id in target_ids:
                 self.mqtt_handler.send_set_schedule(
-                    enabled=params["enabled"],
+                    enabled=enabled,
                     on_hour=params["on_hour"],
                     on_minute=params["on_minute"],
                     off_hour=params["off_hour"],
