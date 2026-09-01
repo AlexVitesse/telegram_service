@@ -9,7 +9,7 @@ import logging
 import time
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from mqtt_protocol import Command # Importar el Enum de Comandos
-from scheduler import scheduler  # Para sincronizar horarios
+from scheduler import scheduler, DAY_NAMES  # Para sincronizar horarios
 
 from config import config # Asegurarse que config tenga la databaseURL
 from chat_id_utils import normalize_chat_id, looks_like_stripped_supergroup
@@ -395,16 +395,60 @@ class FirebaseManager:
                     else:
                         logger.debug(f"BengalaHab sin cambio para {device_id}: {habilitada}")
 
+    @staticmethod
+    def _parse_schedule_time(time_str: str) -> tuple:
+        """Parsea hora en formato HH:MM o YYYY-MM-DDTHH:MM"""
+        if not time_str or ':' not in time_str:
+            return 0, 0
+        if 'T' in time_str:
+            time_str = time_str.split('T')[1]
+        try:
+            parts = time_str.split(':')
+            return int(parts[0]), int(parts[1])
+        except (ValueError, IndexError):
+            return 0, 0
+
+    def _apply_schedule_to_scheduler(self, device_id: str, schedule_data: dict) -> bool:
+        """
+        Escribe el horario de Firebase en el scheduler local DE ESE dispositivo.
+        Devuelve True si hubo cambios.
+        """
+        cfg = scheduler.cfg(device_id)
+        enabled = bool(schedule_data.get('enabled', False))
+        on_hour, on_minute = self._parse_schedule_time(schedule_data.get('activationTime', ''))
+        off_hour, off_minute = self._parse_schedule_time(schedule_data.get('deactivationTime', ''))
+        days = list(schedule_data.get('days') or DAY_NAMES)
+
+        actual = (cfg.enabled, cfg.on_hour, cfg.on_minute, cfg.off_hour, cfg.off_minute, cfg.days)
+        nuevo = (enabled, on_hour, on_minute, off_hour, off_minute, days)
+        if actual == nuevo:
+            # Sin cambios: no tocar los flags o el horario se re-ejecutaria hoy
+            return False
+
+        cfg.enabled = enabled
+        cfg.on_hour, cfg.on_minute = on_hour, on_minute
+        cfg.off_hour, cfg.off_minute = off_hour, off_minute
+        cfg.days = days
+        # Horario nuevo: limpiar flags para que pueda dispararse hoy
+        cfg.last_on_reminder_sent = ""
+        cfg.last_off_reminder_sent = ""
+        cfg.last_on_executed = ""
+        cfg.last_off_executed = ""
+        scheduler._save_configs()
+        logger.info(
+            f"Scheduler [{device_id}] sincronizado desde Firebase: enabled={enabled}, "
+            f"on={cfg.format_on_time()}, off={cfg.format_off_time()}, dias={cfg.format_days()}"
+        )
+        return True
+
     def _sync_scheduler_from_initial_data(self, all_schedules: dict) -> None:
         """
         Sincroniza el scheduler local con los datos iniciales de Firebase.
-        Busca el horario habilitado más reciente para sincronizar.
+        Cada dispositivo conserva SU horario: no hay horario global compartido.
         Estructura: {userId: {devices: {deviceId: {schedule_data}}}}
         """
         try:
-            best_schedule = None
-            best_updated = ""
-
+            cambios = 0
             for user_id, user_data in all_schedules.items():
                 if not isinstance(user_data, dict):
                     continue
@@ -415,66 +459,19 @@ class FirebaseManager:
                 for device_id, schedule_data in devices.items():
                     if not isinstance(schedule_data, dict):
                         continue
-                    if not schedule_data.get('enabled', False):
-                        continue
                     if 'activationTime' not in schedule_data or 'deactivationTime' not in schedule_data:
                         continue
 
-                    # Preferir el horario más reciente
-                    updated = schedule_data.get('lastUpdated', '')
-                    if updated > best_updated:
-                        best_updated = updated
-                        best_schedule = schedule_data
+                    # "system" = el horario aplica a todos los dispositivos del usuario
+                    targets = self.get_authorized_devices(user_id) if device_id == "system" else [device_id]
+                    for dev_id in targets:
+                        if self._apply_schedule_to_scheduler(dev_id, schedule_data):
+                            cambios += 1
 
-            if best_schedule:
-                activation_time = best_schedule.get('activationTime', '')
-                deactivation_time = best_schedule.get('deactivationTime', '')
-                days = best_schedule.get('days', [])
-
-                def parse_time_init(time_str: str) -> tuple:
-                    if not time_str or ':' not in time_str:
-                        return 0, 0
-                    if 'T' in time_str:
-                        time_str = time_str.split('T')[1]
-                    parts = time_str.split(':')
-                    try:
-                        return int(parts[0]), int(parts[1])
-                    except (ValueError, IndexError):
-                        return 0, 0
-
-                on_hour, on_minute = parse_time_init(activation_time)
-                off_hour, off_minute = parse_time_init(deactivation_time)
-
-                # Solo sincronizar si el horario de Firebase difiere del local
-                cfg = scheduler.config
-                if (cfg.enabled != True or
-                    cfg.on_hour != on_hour or cfg.on_minute != on_minute or
-                    cfg.off_hour != off_hour or cfg.off_minute != off_minute):
-
-                    scheduler.config.enabled = True
-                    scheduler.config.on_hour = on_hour
-                    scheduler.config.on_minute = on_minute
-                    scheduler.config.off_hour = off_hour
-                    scheduler.config.off_minute = off_minute
-                    if days:
-                        scheduler.config.days = days
-                    else:
-                        scheduler.config.days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
-                    # Limpiar todos los flags para el nuevo horario
-                    scheduler.config.last_on_reminder_sent = ""
-                    scheduler.config.last_off_reminder_sent = ""
-                    scheduler.config.last_on_executed = ""
-                    scheduler.config.last_off_executed = ""
-                    scheduler._save_config()
-                    logger.info(
-                        f"Scheduler sincronizado desde Firebase inicial: "
-                        f"on={on_hour:02d}:{on_minute:02d}, off={off_hour:02d}:{off_minute:02d}, "
-                        f"días={scheduler.format_days()}"
-                    )
-                else:
-                    logger.debug("Scheduler local ya está sincronizado con Firebase")
+            if cambios:
+                logger.info(f"Scheduler sincronizado desde Firebase: {cambios} horario(s) actualizado(s)")
             else:
-                logger.debug("No se encontró horario habilitado en datos iniciales de Firebase")
+                logger.debug("Scheduler local ya esta sincronizado con Firebase")
 
         except Exception as e:
             logger.error(f"Error sincronizando scheduler desde datos iniciales: {e}")
@@ -512,7 +509,7 @@ class FirebaseManager:
 
         # Si es "system", obtener todos los dispositivos del usuario
         if device_id == "system":
-            device_ids = self.get_authorized_devices(user_telegram_id)
+            device_ids = self._devices_for_schedule_key(user_telegram_id)
             if not device_ids:
                 logger.warning(f"No se encontraron dispositivos para el usuario {user_telegram_id}")
                 return
@@ -531,10 +528,7 @@ class FirebaseManager:
                     off_minute=0,
                     device_id=dev_id
                 )
-            # Deshabilitar scheduler local
-            scheduler.config.enabled = False
-            scheduler._save_config()
-            logger.info("Scheduler local deshabilitado (horario eliminado)")
+                scheduler.remove(dev_id)
             return
 
         # Determinar si es un cambio completo o parcial
@@ -607,27 +601,11 @@ class FirebaseManager:
                         device_id=dev_id
                     )
 
-                # Sincronizar con scheduler local de Python (solo si no viene de Telegram)
+                # Sincronizar con scheduler local de Python (solo si no viene de Telegram;
+                # si viene de Telegram el bot ya escribio el horario del dispositivo)
                 if updated_by != "telegram":
-                    scheduler.config.enabled = enabled
-                    scheduler.config.on_hour = on_hour
-                    scheduler.config.on_minute = on_minute
-                    scheduler.config.off_hour = off_hour
-                    scheduler.config.off_minute = off_minute
-                    # Sincronizar días
-                    if days:
-                        scheduler.config.days = days
-                    else:
-                        scheduler.config.days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
-                    # Limpiar TODOS los flags para permitir que el nuevo horario se ejecute
-                    # Sin esto, si un horario anterior ya ejecutó hoy, el nuevo horario
-                    # no se ejecutaría porque last_on_executed/last_off_executed ya tienen la fecha de hoy
-                    scheduler.config.last_on_reminder_sent = ""
-                    scheduler.config.last_off_reminder_sent = ""
-                    scheduler.config.last_on_executed = ""
-                    scheduler.config.last_off_executed = ""
-                    scheduler._save_config()
-                    logger.info(f"Scheduler local sincronizado desde App (días: {scheduler.format_days()}, flags limpiados)")
+                    for dev_id in device_ids:
+                        self._apply_schedule_to_scheduler(dev_id, schedule_data)
 
             except Exception as e:
                 logger.error(f"Error procesando horario: {e}")
@@ -739,6 +717,51 @@ class FirebaseManager:
         except Exception as e:
             logger.error(f"Error obteniendo todos los dispositivos de RTDB: {e}")
             return None
+
+    def _devices_for_schedule_key(self, key: str) -> List[str]:
+        """
+        Dispositivos a los que aplica un horario "system".
+
+        La clave de /Horarios era siempre un chat_id de Telegram. Desde que el
+        Chat ID es opcional en la app, un usuario sin Telegram indexa sus
+        horarios por su **uid** de Firebase Auth, y ese uid no coincide con
+        ningun Telegram_ID: get_authorized_devices() devolveria lista vacia y
+        el horario "system" no se aplicaria a nada, en silencio.
+
+        Se intenta primero por Telegram, que es el caso comun, y solo si no hay
+        nada se mira /Usuarios/{uid}/Dispositivos.
+
+        NO sustituye a get_authorized_devices() para autorizar: esto solo
+        resuelve a que equipos aplica un horario que el dueno ya escribio.
+        """
+        por_telegram = self.get_authorized_devices(key)
+        if por_telegram:
+            return por_telegram
+
+        # Un chat_id es entero (los grupos, negativo). Si lo es, no es un uid y
+        # no hay nada mas que mirar.
+        if key.lstrip("-").isdigit():
+            return []
+
+        try:
+            datos = self.db.reference(f"Usuarios/{key}/Dispositivos").get()
+        except Exception as e:
+            logger.error(f"No se pudieron leer los dispositivos de {key}: {e}")
+            return []
+
+        if isinstance(datos, list):
+            macs = [str(m).strip() for m in datos if m]
+        elif isinstance(datos, str):
+            # Cuentas viejas guardan la lista como string separado por comas.
+            macs = [m.strip() for m in datos.split(",") if m.strip()]
+        elif isinstance(datos, dict):
+            macs = [str(m).strip() for m in datos.values() if m]
+        else:
+            return []
+
+        if macs:
+            logger.info(f"Horario 'system' de {key} resuelto por uid: {len(macs)} equipo(s)")
+        return macs
 
     def get_authorized_devices(self, chat_id: str) -> List[str]:
         """

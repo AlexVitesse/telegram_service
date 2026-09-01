@@ -72,10 +72,10 @@ class AlarmBridgeService:
         self._connection_monitor_task = None
         self._alarm_reminder_task = None
         self._firebase_monitor_task = None
-        # Flag para indicar que la última acción arm/disarm fue por horario
+        # Marca por dispositivo de la última acción arm/disarm lanzada por horario.
         # Cuando el ESP32 responde con source="remote", lo reemplazamos por "schedule"
-        self._pending_scheduled_action: str = ""  # "arm" o "disarm" o ""
-        self._pending_scheduled_time: float = 0.0  # timestamp del último scheduled action
+        # {device_id: ("arm"|"disarm", timestamp)}
+        self._pending_scheduled: dict = {}
 
         # Registrar callbacks de MQTT
         self._setup_mqtt_callbacks()
@@ -98,78 +98,78 @@ class AlarmBridgeService:
         scheduler.on_disarm(self._scheduled_disarm)
         scheduler.on_reminder(self._scheduled_reminder)
 
-    async def _scheduled_arm(self):
+    def _state_is_fresh(self, device_id: str, max_age: float = 90.0) -> bool:
+        """
+        ¿El estado armado/desarmado que tenemos de este dispositivo es reciente?
+        Solo sirve para omitir comandos redundantes: ante la duda se manda el
+        comando, perder un armado por un dato viejo es peor que duplicar un aviso.
+        """
+        # ponytail: ventana fija de 90s (telemetria llega cada ~20-30s).
+        # Si cambia la cadencia de telemetria, derivarla de ahi.
+        info = self.device_manager.get_device_info(device_id) if self.device_manager else None
+        if not info:
+            return False
+        return (_time.time() - info.get("last_telemetry_time", 0)) < max_age
+
+    async def _scheduled_arm(self, device_id: str):
         """Callback para activacion automatica programada"""
-        logger.info("Activacion automatica programada")
+        # El ESP32 tiene su propio horario en NVS y puede haberse armado solo en
+        # este mismo minuto: repetir el comando duplicaria el evento y el aviso.
+        if self._state_is_fresh(device_id) and self.device_manager.is_armed(device_id):
+            logger.info(f"Activacion automatica omitida: {device_id} ya está armado")
+            return
+
+        logger.info(f"Activacion automatica programada para {device_id}")
 
         # Marcar que esta acción es por horario para que el event handler
-        # use source="schedule" en vez de "remote" y no duplique push
-        self._pending_scheduled_action = "arm"
-        self._pending_scheduled_time = _time.time()
+        # use source="schedule" en vez de "remote" y no duplique push.
+        # El ESP32 responderá con SYSTEM_ARMED (source="remote").
+        self._pending_scheduled[device_id] = ("arm", _time.time())
+        self.mqtt.send_arm(device_id)
 
-        # Enviar comando al ESP32
-        # El ESP32 responderá con SYSTEM_ARMED (source="remote")
-        # _handle_event detectará el flag y lo tratará como "schedule"
-        self.mqtt.send_arm()
-
-    async def _scheduled_disarm(self):
+    async def _scheduled_disarm(self, device_id: str):
         """Callback para desactivacion automatica programada"""
-        logger.info("Desactivacion automatica programada")
+        if self._state_is_fresh(device_id) and not self.device_manager.is_armed(device_id):
+            logger.info(f"Desactivacion automatica omitida: {device_id} ya está desarmado")
+            return
 
-        # Marcar que esta acción es por horario
-        self._pending_scheduled_action = "disarm"
-        self._pending_scheduled_time = _time.time()
+        logger.info(f"Desactivacion automatica programada para {device_id}")
 
-        # Enviar comando al ESP32
-        self.mqtt.send_disarm()
+        self._pending_scheduled[device_id] = ("disarm", _time.time())
+        self.mqtt.send_disarm(device_id)
 
-    async def _scheduled_reminder(self, action: str, minutes: int):
+    async def _scheduled_reminder(self, device_id: str, action: str, minutes: int):
         """
         Callback para recordatorio de accion programada.
-        Envía a TODOS los dispositivos conocidos (a sus chats privados).
+        Solo notifica a los chats privados del dispositivo dueño del horario.
         """
-        logger.info(f"⏰ Callback de recordatorio recibido: action={action}, minutes={minutes}")
-
+        cfg = scheduler.cfg(device_id)
         if action == "on":
             msg = (
                 f"⏰ *RECORDATORIO*\n\n"
                 f"🔒 El sistema se *activará* en {minutes} minutos\n"
-                f"Hora: {scheduler.config.format_on_time()}"
+                f"Hora: {cfg.format_on_time()}"
             )
         else:
             msg = (
                 f"⏰ *RECORDATORIO*\n\n"
                 f"🔓 El sistema se *desactivará* en {minutes} minutos\n"
-                f"Hora: {scheduler.config.format_off_time()}"
+                f"Hora: {cfg.format_off_time()}"
             )
 
-        # Obtener todos los dispositivos conocidos
-        all_device_ids = self.device_manager.get_all_device_ids() if self.device_manager else []
-        logger.info(f"⏰ Dispositivos conocidos: {all_device_ids}")
+        enviados = 0
+        for chat_id in self._get_authorized_chats(device_id):
+            # Solo chats privados (ID positivo); los grupos no reciben recordatorio
+            if int(chat_id) < 0:
+                continue
+            if self._loop and self.telegram.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self.telegram.send_message(chat_id, msg, "Markdown", has_keyboard=True),
+                    self._loop
+                )
+                enviados += 1
 
-        if not all_device_ids:
-            # Fallback al device_id del mqtt si no hay dispositivos en el manager
-            device_id = self.mqtt.device_id if self.mqtt else None
-            if device_id:
-                all_device_ids = [device_id]
-                logger.info(f"⏰ Usando fallback a mqtt.device_id: {device_id}")
-
-        # Enviar recordatorio a todos los dispositivos (chats privados)
-        chats_notificados = set()  # Evitar duplicados
-        for device_id in all_device_ids:
-            chat_ids = self._get_authorized_chats(device_id)
-            for chat_id in chat_ids:
-                # Solo chats privados (ID positivo) y evitar duplicados
-                is_group = int(chat_id) < 0
-                if not is_group and chat_id not in chats_notificados:
-                    chats_notificados.add(chat_id)
-                    if self._loop and self.telegram.is_running():
-                        asyncio.run_coroutine_threadsafe(
-                            self.telegram.send_message(chat_id, msg, "Markdown", has_keyboard=True),
-                            self._loop
-                        )
-
-        logger.info(f"⏰ Recordatorio enviado a {len(chats_notificados)} chat(s) privado(s)")
+        logger.info(f"⏰ [{device_id}] recordatorio enviado a {enviados} chat(s) privado(s)")
 
     def _handle_event(self, event: MqttEvent):
         """
@@ -186,13 +186,13 @@ class AlarmBridgeService:
 
         # Detectar si este evento arm/disarm fue originado por el scheduler
         # El ESP32 reporta source="remote" pero nosotros sabemos que fue por horario
-        if self._pending_scheduled_action and (_time.time() - self._pending_scheduled_time) < 30:
-            if (event.event_type == EventType.SYSTEM_ARMED and self._pending_scheduled_action == "arm") or \
-               (event.event_type == EventType.SYSTEM_DISARMED and self._pending_scheduled_action == "disarm"):
+        pending = self._pending_scheduled.get(event.device_id)
+        if pending and (_time.time() - pending[1]) < 30:
+            if (event.event_type == EventType.SYSTEM_ARMED and pending[0] == "arm") or \
+               (event.event_type == EventType.SYSTEM_DISARMED and pending[0] == "disarm"):
                 logger.info(f"⏰ Evento {event.event_type} detectado como acción de HORARIO (reemplazando source)")
                 event.data["source"] = "schedule"
-                self._pending_scheduled_action = ""
-                self._pending_scheduled_time = 0.0
+                del self._pending_scheduled[event.device_id]
 
         # Delegar al TelegramBot que tiene la lógica de confirmación de bengala
         if self._loop and self.telegram.is_running():
@@ -702,7 +702,8 @@ class AlarmBridgeService:
         logger.info(f"Device ID: {config.device_id or 'Auto-detectar'}")
         logger.info(f"Firebase: {'Conectado' if self.firebase_available else 'No disponible'}")
         logger.info(f"Bot Token: {config.telegram.bot_token[:20]}...")
-        logger.info(f"Scheduler: {'Habilitado' if scheduler.is_enabled() else 'Deshabilitado'}")
+        activos = sum(1 for c in scheduler.configs.values() if c.enabled)
+        logger.info(f"Scheduler: {activos} horario(s) activo(s) de {len(scheduler.configs)} dispositivo(s)")
 
         return True
 

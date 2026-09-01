@@ -281,7 +281,7 @@ class FCMHandler:
                 "action": "view_status",
             },
             notification_type=NotificationType.SYSTEM_ARMED,
-            priority="normal"
+            priority="high"
         )
 
     def create_disarmed_notification(
@@ -301,7 +301,7 @@ class FCMHandler:
                 "action": "view_status",
             },
             notification_type=NotificationType.SYSTEM_DISARMED,
-            priority="normal"
+            priority="high"
         )
 
     def create_bengala_notification(
@@ -339,7 +339,7 @@ class FCMHandler:
                 "action": "view_sensors",
             },
             notification_type=NotificationType.SENSOR_OFFLINE,
-            priority="normal"
+            priority="high"
         )
 
     def create_device_offline_notification(
@@ -378,7 +378,7 @@ class FCMHandler:
                 "action": "view_activity",
             },
             notification_type=NotificationType.MOVEMENT_DETECTED,
-            priority="normal"
+            priority="high"
         )
 
     def create_door_notification(

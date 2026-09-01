@@ -2,6 +2,8 @@
 Programador automático para el Sistema de Alarma
 ================================================
 Maneja la activación/desactivación automática por horarios.
+
+Un horario POR DISPOSITIVO: cada device_id tiene su propia ScheduleConfig.
 """
 import asyncio
 import json
@@ -9,7 +11,7 @@ import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime, time
 from pathlib import Path
-from typing import Optional, Callable, Awaitable
+from typing import Optional, Callable, Awaitable, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +23,21 @@ SCHEDULE_FILE = "schedule_config.json"
 DAY_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
 DAY_ABBREV = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 
+# Mapeo de abreviaturas a nombres completos (entrada de `/horarios dias`)
+DAY_ABBREV_MAP = {
+    'D': 'Domingo', 'DOM': 'Domingo',
+    'L': 'Lunes', 'LUN': 'Lunes',
+    'M': 'Martes', 'MAR': 'Martes',
+    'X': 'Miércoles', 'MIE': 'Miércoles', 'MIÉ': 'Miércoles',
+    'J': 'Jueves', 'JUE': 'Jueves',
+    'V': 'Viernes', 'VIE': 'Viernes',
+    'S': 'Sábado', 'SAB': 'Sábado', 'SÁB': 'Sábado',
+}
+
 
 @dataclass
 class ScheduleConfig:
-    """Configuración de programación automática"""
+    """Configuración de programación automática de UN dispositivo"""
     enabled: bool = False
     on_hour: int = 22      # Hora de activación (22:00)
     on_minute: int = 0
@@ -96,47 +109,107 @@ class ScheduleConfig:
             hour -= 12
         return f"{hour}:{self.off_minute:02d} {period}"
 
+    def days_indices(self) -> list:
+        """Índices de los días activos (para enviar al ESP32)"""
+        return sorted(DAY_NAMES.index(d) for d in self.days if d in DAY_NAMES)
+
+    def format_days(self) -> str:
+        """Formatea los días para mostrar (abreviado)"""
+        if len(self.days) == 7:
+            return "Todos los días"
+        if len(self.days) == 0:
+            return "Ningún día"
+
+        # Verificar si es L-V (entre semana)
+        weekdays = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes']
+        if sorted(self.days) == sorted(weekdays):
+            return "Lun-Vie"
+
+        # Verificar si es fin de semana
+        weekend = ['Sábado', 'Domingo']
+        if sorted(self.days) == sorted(weekend):
+            return "Fin de semana"
+
+        # Lista de abreviaturas, en orden Dom-Sáb
+        return ", ".join(DAY_ABBREV[i] for i in self.days_indices())
+
+    def format_status(self) -> str:
+        """Formatea el estado del horario para mostrar"""
+        lines = ["⏰ *PROGRAMACIÓN AUTOMÁTICA*\n"]
+
+        if self.enabled:
+            lines.append("🟢 Estado: *HABILITADA*\n")
+            lines.append(f"🔒 Activación: {self.format_on_time()} ({self.format_on_time_12h()})")
+            lines.append(f"🔓 Desactivación: {self.format_off_time()} ({self.format_off_time_12h()})")
+            lines.append(f"📅 Días: {self.format_days()}")
+
+            if self.notify_before_minutes > 0:
+                lines.append(f"\n📢 Recordatorio: {self.notify_before_minutes} min antes")
+        else:
+            lines.append("🔴 Estado: *DESHABILITADA*")
+
+        return "\n".join(lines)
+
 
 class Scheduler:
-    """Programador automático de activación/desactivación"""
+    """Programador automático de activación/desactivación, por dispositivo"""
 
     def __init__(self, data_dir: str = "."):
         self.config_file = Path(data_dir) / SCHEDULE_FILE
-        self.config = ScheduleConfig()
+        self.configs: Dict[str, ScheduleConfig] = {}
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
-        # Callbacks
-        self._on_arm_callback: Optional[Callable[[], Awaitable[None]]] = None
-        self._on_disarm_callback: Optional[Callable[[], Awaitable[None]]] = None
-        self._on_reminder_callback: Optional[Callable[[str, int], Awaitable[None]]] = None
+        # Callbacks (todos reciben device_id)
+        self._on_arm_callback: Optional[Callable[[str], Awaitable[None]]] = None
+        self._on_disarm_callback: Optional[Callable[[str], Awaitable[None]]] = None
+        self._on_reminder_callback: Optional[Callable[[str, str, int], Awaitable[None]]] = None
 
-        # Cargar configuración
-        self._load_config()
+        self._load_configs()
 
-    def _load_config(self):
-        """Carga la configuración desde archivo"""
+    # ========================================
+    # Persistencia
+    # ========================================
+
+    def _load_configs(self):
+        """Carga los horarios desde archivo: {"devices": {device_id: {...}}}"""
         if not self.config_file.exists():
-            logger.info("No existe archivo de schedule, usando valores por defecto")
-            self._save_config()
+            logger.info("No existe archivo de schedule, se creará al configurar el primer horario")
             return
 
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            self.config = ScheduleConfig.from_dict(data)
-            logger.info(
-                f"Schedule cargado: enabled={self.config.enabled}, "
-                f"on={self.config.format_on_time()}, off={self.config.format_off_time()}"
-            )
+
+            devices = data.get('devices') if isinstance(data, dict) else None
+            if devices is None:
+                # Formato antiguo: un unico horario global compartido por todos los
+                # dispositivos. No sabemos de que dispositivo era, asi que se descarta;
+                # el listener de Firebase resincroniza por dispositivo al arrancar.
+                logger.warning(
+                    "schedule_config.json en formato global antiguo: descartado, "
+                    "se resincroniza desde Firebase por dispositivo"
+                )
+                return
+
+            self.configs = {
+                dev_id: ScheduleConfig.from_dict(cfg)
+                for dev_id, cfg in devices.items() if isinstance(cfg, dict)
+            }
+            for dev_id, cfg in self.configs.items():
+                logger.info(
+                    f"Schedule cargado [{dev_id}]: enabled={cfg.enabled}, "
+                    f"on={cfg.format_on_time()}, off={cfg.format_off_time()}"
+                )
         except Exception as e:
             logger.error(f"Error cargando schedule: {e}")
 
-    def _save_config(self):
-        """Guarda la configuración a archivo"""
+    def _save_configs(self):
+        """Guarda los horarios a archivo"""
         try:
+            payload = {"devices": {d: c.to_dict() for d, c in self.configs.items()}}
             with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.config.to_dict(), f, indent=2)
+                json.dump(payload, f, indent=2, ensure_ascii=False)
             logger.debug("Configuración de schedule guardada")
         except Exception as e:
             logger.error(f"Error guardando schedule: {e}")
@@ -145,40 +218,47 @@ class Scheduler:
     # Configuración
     # ========================================
 
-    def set_enabled(self, enabled: bool):
-        """Habilita o deshabilita la programación"""
-        self.config.enabled = enabled
-        # Limpiar flags de recordatorio para permitir nuevos envíos
-        self.config.last_on_reminder_sent = ""
-        self.config.last_off_reminder_sent = ""
-        self._save_config()
-        logger.info(f"Schedule {'habilitado' if enabled else 'deshabilitado'}")
+    def cfg(self, device_id: str) -> ScheduleConfig:
+        """Horario de un dispositivo (crea uno deshabilitado si no existe)"""
+        if device_id not in self.configs:
+            self.configs[device_id] = ScheduleConfig()
+        return self.configs[device_id]
 
-    def set_on_time(self, hour: int, minute: int) -> bool:
+    def set_enabled(self, device_id: str, enabled: bool):
+        """Habilita o deshabilita la programación de un dispositivo"""
+        cfg = self.cfg(device_id)
+        cfg.enabled = enabled
+        # Limpiar flags de recordatorio para permitir nuevos envíos
+        cfg.last_on_reminder_sent = ""
+        cfg.last_off_reminder_sent = ""
+        self._save_configs()
+        logger.info(f"Schedule [{device_id}] {'habilitado' if enabled else 'deshabilitado'}")
+
+    def set_on_time(self, device_id: str, hour: int, minute: int) -> bool:
         """Establece la hora de activación"""
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             return False
-        self.config.on_hour = hour
-        self.config.on_minute = minute
-        # Limpiar flag de recordatorio de activación
-        self.config.last_on_reminder_sent = ""
-        self._save_config()
-        logger.info(f"Hora de activación: {self.config.format_on_time()}")
+        cfg = self.cfg(device_id)
+        cfg.on_hour = hour
+        cfg.on_minute = minute
+        cfg.last_on_reminder_sent = ""
+        self._save_configs()
+        logger.info(f"Hora de activación [{device_id}]: {cfg.format_on_time()}")
         return True
 
-    def set_off_time(self, hour: int, minute: int) -> bool:
+    def set_off_time(self, device_id: str, hour: int, minute: int) -> bool:
         """Establece la hora de desactivación"""
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             return False
-        self.config.off_hour = hour
-        self.config.off_minute = minute
-        # Limpiar flag de recordatorio de desactivación
-        self.config.last_off_reminder_sent = ""
-        self._save_config()
-        logger.info(f"Hora de desactivación: {self.config.format_off_time()}")
+        cfg = self.cfg(device_id)
+        cfg.off_hour = hour
+        cfg.off_minute = minute
+        cfg.last_off_reminder_sent = ""
+        self._save_configs()
+        logger.info(f"Hora de desactivación [{device_id}]: {cfg.format_off_time()}")
         return True
 
-    def set_days(self, days: list) -> bool:
+    def set_days(self, device_id: str, days: list) -> bool:
         """
         Establece los días activos.
         Acepta lista de nombres: ['Lunes', 'Martes', ...] o ['L', 'M', ...]
@@ -186,22 +266,11 @@ class Scheduler:
         if not days:
             return False
 
-        # Mapeo de abreviaturas a nombres completos
-        abbrev_map = {
-            'D': 'Domingo', 'DOM': 'Domingo',
-            'L': 'Lunes', 'LUN': 'Lunes',
-            'M': 'Martes', 'MAR': 'Martes',
-            'X': 'Miércoles', 'MIE': 'Miércoles', 'MIÉ': 'Miércoles',
-            'J': 'Jueves', 'JUE': 'Jueves',
-            'V': 'Viernes', 'VIE': 'Viernes',
-            'S': 'Sábado', 'SAB': 'Sábado', 'SÁB': 'Sábado',
-        }
-
         normalized_days = []
         for day in days:
             day_upper = day.upper().strip()
-            if day_upper in abbrev_map:
-                normalized_days.append(abbrev_map[day_upper])
+            if day_upper in DAY_ABBREV_MAP:
+                normalized_days.append(DAY_ABBREV_MAP[day_upper])
             elif day in DAY_NAMES:
                 normalized_days.append(day)
             else:
@@ -210,92 +279,47 @@ class Scheduler:
         if not normalized_days:
             return False
 
-        self.config.days = normalized_days
-        self._save_config()
-        logger.info(f"Días configurados: {self.format_days()}")
+        cfg = self.cfg(device_id)
+        cfg.days = normalized_days
+        self._save_configs()
+        logger.info(f"Días configurados [{device_id}]: {cfg.format_days()}")
         return True
 
-    def set_days_from_indices(self, indices: list) -> bool:
+    def set_days_from_indices(self, device_id: str, indices: list) -> bool:
         """
         Establece los días activos desde índices.
         indices: [0, 1, 2, ...] donde 0=Domingo, 1=Lunes, etc.
         """
-        if not indices:
-            return False
-
-        days = []
-        for idx in indices:
-            if 0 <= idx <= 6:
-                days.append(DAY_NAMES[idx])
-
+        days = [DAY_NAMES[i] for i in indices if 0 <= i <= 6]
         if not days:
             return False
 
-        self.config.days = days
-        self._save_config()
-        logger.info(f"Días configurados: {self.format_days()}")
+        cfg = self.cfg(device_id)
+        cfg.days = days
+        self._save_configs()
+        logger.info(f"Días configurados [{device_id}]: {cfg.format_days()}")
         return True
 
-    def get_days(self) -> list:
-        """Obtiene la lista de días activos"""
-        return self.config.days.copy()
-
-    def get_days_indices(self) -> list:
-        """Obtiene los índices de los días activos (para enviar a ESP32)"""
-        indices = []
-        for day in self.config.days:
-            if day in DAY_NAMES:
-                indices.append(DAY_NAMES.index(day))
-        return sorted(indices)
-
-    def format_days(self) -> str:
-        """Formatea los días para mostrar (abreviado)"""
-        if len(self.config.days) == 7:
-            return "Todos los días"
-        if len(self.config.days) == 0:
-            return "Ningún día"
-
-        # Verificar si es L-V (entre semana)
-        weekdays = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes']
-        if sorted(self.config.days) == sorted(weekdays):
-            return "Lun-Vie"
-
-        # Verificar si es fin de semana
-        weekend = ['Sábado', 'Domingo']
-        if sorted(self.config.days) == sorted(weekend):
-            return "Fin de semana"
-
-        # Lista de abreviaturas
-        abbrevs = []
-        for day in DAY_NAMES:  # Mantener orden Dom-Sáb
-            if day in self.config.days:
-                idx = DAY_NAMES.index(day)
-                abbrevs.append(DAY_ABBREV[idx])
-
-        return ", ".join(abbrevs)
-
-    def is_enabled(self) -> bool:
-        """Verifica si la programación está habilitada"""
-        return self.config.enabled
-
-    def get_config(self) -> ScheduleConfig:
-        """Obtiene la configuración actual"""
-        return self.config
+    def remove(self, device_id: str):
+        """Elimina el horario de un dispositivo"""
+        if self.configs.pop(device_id, None) is not None:
+            self._save_configs()
+            logger.info(f"Schedule [{device_id}] eliminado")
 
     # ========================================
     # Callbacks
     # ========================================
 
-    def on_arm(self, callback: Callable[[], Awaitable[None]]):
-        """Registra callback para activación automática"""
+    def on_arm(self, callback: Callable[[str], Awaitable[None]]):
+        """Registra callback para activación automática: cb(device_id)"""
         self._on_arm_callback = callback
 
-    def on_disarm(self, callback: Callable[[], Awaitable[None]]):
-        """Registra callback para desactivación automática"""
+    def on_disarm(self, callback: Callable[[str], Awaitable[None]]):
+        """Registra callback para desactivación automática: cb(device_id)"""
         self._on_disarm_callback = callback
 
-    def on_reminder(self, callback: Callable[[str, int], Awaitable[None]]):
-        """Registra callback para recordatorio (action, minutes)"""
+    def on_reminder(self, callback: Callable[[str, str, int], Awaitable[None]]):
+        """Registra callback para recordatorio: cb(device_id, action, minutes)"""
         self._on_reminder_callback = callback
 
     # ========================================
@@ -306,158 +330,71 @@ class Scheduler:
         """Obtiene la clave del día actual"""
         return datetime.now().strftime("%Y-%m-%d")
 
-    def _is_today_active(self) -> bool:
+    def _is_today_active(self, cfg: ScheduleConfig) -> bool:
         """Verifica si hoy es un día activo para el horario"""
-        now = datetime.now()
         # weekday() retorna 0=Lunes, pero necesitamos 0=Domingo
-        # Convertir: Python weekday (0=Lun) -> Nuestro índice (0=Dom)
-        python_weekday = now.weekday()  # 0=Lunes, 6=Domingo
-        our_day_index = (python_weekday + 1) % 7  # 0=Domingo, 1=Lunes, ...
-        today_name = DAY_NAMES[our_day_index]
+        our_day_index = (datetime.now().weekday() + 1) % 7
+        return DAY_NAMES[our_day_index] in cfg.days
 
-        is_active = today_name in self.config.days
-        logger.debug(f"Hoy es {today_name} (índice {our_day_index}), activo: {is_active}")
-        return is_active
-
-    def _should_execute_on(self) -> bool:
-        """Verifica si debe ejecutar activación"""
-        if not self.config.enabled:
+    def _is_due(self, cfg: ScheduleConfig, kind: str, reminder: bool) -> bool:
+        """¿Toca disparar ahora? kind='on'|'off', reminder=True para el aviso previo."""
+        if not cfg.enabled:
+            return False
+        if reminder and cfg.notify_before_minutes <= 0:
+            return False
+        if not self._is_today_active(cfg):
             return False
 
-        # Verificar si hoy es un día activo
-        if not self._is_today_active():
+        # Ya se disparó hoy
+        field_name = f"last_{kind}_{'reminder_sent' if reminder else 'executed'}"
+        if getattr(cfg, field_name) == self._get_today_key():
             return False
+
+        if kind == "on":
+            target = cfg.on_hour * 60 + cfg.on_minute
+        else:
+            target = cfg.off_hour * 60 + cfg.off_minute
+        if reminder:
+            # % 1440: el aviso de un horario a las 00:02 cae en el dia anterior
+            target = (target - cfg.notify_before_minutes) % (24 * 60)
 
         now = datetime.now()
-        current_time = now.time()
-        target_time = self.config.get_on_time()
-        today_key = self._get_today_key()
-
-        # Ya se ejecutó hoy
-        if self.config.last_on_executed == today_key:
-            return False
-
-        # Verificar si es la hora exacta (con margen de 1 minuto)
-        current_minutes = current_time.hour * 60 + current_time.minute
-        target_minutes = target_time.hour * 60 + target_time.minute
-
-        return current_minutes == target_minutes
-
-    def _should_execute_off(self) -> bool:
-        """Verifica si debe ejecutar desactivación"""
-        if not self.config.enabled:
-            return False
-
-        # Verificar si hoy es un día activo
-        if not self._is_today_active():
-            return False
-
-        now = datetime.now()
-        current_time = now.time()
-        target_time = self.config.get_off_time()
-        today_key = self._get_today_key()
-
-        # Ya se ejecutó hoy
-        if self.config.last_off_executed == today_key:
-            return False
-
-        # Verificar si es la hora exacta
-        current_minutes = current_time.hour * 60 + current_time.minute
-        target_minutes = target_time.hour * 60 + target_time.minute
-
-        return current_minutes == target_minutes
-
-    def _should_send_on_reminder(self) -> bool:
-        """Verifica si debe enviar recordatorio de activación"""
-        if not self.config.enabled or self.config.notify_before_minutes <= 0:
-            return False
-
-        # Verificar si hoy es un día activo
-        if not self._is_today_active():
-            return False
-
-        today_key = self._get_today_key()
-
-        # Ya se envió el recordatorio hoy
-        if self.config.last_on_reminder_sent == today_key:
-            return False
-
-        now = datetime.now()
-        current_minutes = now.hour * 60 + now.minute
-        target_minutes = self.config.on_hour * 60 + self.config.on_minute
-        reminder_minutes = target_minutes - self.config.notify_before_minutes
-
-        return current_minutes == reminder_minutes
-
-    def _should_send_off_reminder(self) -> bool:
-        """Verifica si debe enviar recordatorio de desactivación"""
-        if not self.config.enabled or self.config.notify_before_minutes <= 0:
-            return False
-
-        # Verificar si hoy es un día activo
-        if not self._is_today_active():
-            return False
-
-        today_key = self._get_today_key()
-
-        # Ya se envió el recordatorio hoy
-        if self.config.last_off_reminder_sent == today_key:
-            return False
-
-        now = datetime.now()
-        current_minutes = now.hour * 60 + now.minute
-        target_minutes = self.config.off_hour * 60 + self.config.off_minute
-        reminder_minutes = target_minutes - self.config.notify_before_minutes
-
-        return current_minutes == reminder_minutes
+        return now.hour * 60 + now.minute == target
 
     # ========================================
     # Loop principal
     # ========================================
 
     async def _check_schedule(self):
-        """Verifica y ejecuta las acciones programadas"""
-        # Recordatorios
-        if self._should_send_on_reminder():
-            if self._on_reminder_callback:
-                logger.info(f"⏰ Enviando recordatorio de ACTIVACIÓN ({self.config.notify_before_minutes} min antes)")
-                # Marcar como enviado ANTES de enviar para evitar duplicados
-                self.config.last_on_reminder_sent = self._get_today_key()
-                self._save_config()
-                await self._on_reminder_callback("on", self.config.notify_before_minutes)
-            else:
-                logger.warning("⏰ Recordatorio de activación pendiente pero no hay callback registrado")
+        """Verifica y ejecuta las acciones programadas de cada dispositivo"""
+        for device_id, cfg in list(self.configs.items()):
+            for kind in ("on", "off"):
+                # Recordatorio
+                if self._is_due(cfg, kind, reminder=True):
+                    # Marcar como enviado ANTES de enviar para evitar duplicados
+                    setattr(cfg, f"last_{kind}_reminder_sent", self._get_today_key())
+                    self._save_configs()
+                    if self._on_reminder_callback:
+                        logger.info(
+                            f"⏰ [{device_id}] recordatorio de {kind.upper()} "
+                            f"({cfg.notify_before_minutes} min antes)"
+                        )
+                        await self._on_reminder_callback(device_id, kind, cfg.notify_before_minutes)
+                    else:
+                        logger.warning("⏰ Recordatorio pendiente pero no hay callback registrado")
 
-        if self._should_send_off_reminder():
-            if self._on_reminder_callback:
-                logger.info(f"⏰ Enviando recordatorio de DESACTIVACIÓN ({self.config.notify_before_minutes} min antes)")
-                # Marcar como enviado ANTES de enviar para evitar duplicados
-                self.config.last_off_reminder_sent = self._get_today_key()
-                self._save_config()
-                await self._on_reminder_callback("off", self.config.notify_before_minutes)
-            else:
-                logger.warning("⏰ Recordatorio de desactivación pendiente pero no hay callback registrado")
-
-        # Activación
-        if self._should_execute_on():
-            logger.info("⏰ Ejecutando activación automática")
-            self.config.last_on_executed = self._get_today_key()
-            self._save_config()
-            if self._on_arm_callback:
-                await self._on_arm_callback()
-
-        # Desactivación
-        if self._should_execute_off():
-            logger.info("⏰ Ejecutando desactivación automática")
-            self.config.last_off_executed = self._get_today_key()
-            self._save_config()
-            if self._on_disarm_callback:
-                await self._on_disarm_callback()
+                # Ejecución
+                if self._is_due(cfg, kind, reminder=False):
+                    accion = "activación" if kind == "on" else "desactivación"
+                    logger.info(f"⏰ [{device_id}] ejecutando {accion} automática")
+                    setattr(cfg, f"last_{kind}_executed", self._get_today_key())
+                    self._save_configs()
+                    callback = self._on_arm_callback if kind == "on" else self._on_disarm_callback
+                    if callback:
+                        await callback(device_id)
 
     async def _scheduler_loop(self):
         """Loop principal del scheduler"""
-        logger.info("Scheduler iniciado")
-
         while self._running:
             try:
                 await self._check_schedule()
@@ -465,9 +402,7 @@ class Scheduler:
                 logger.error(f"Error en scheduler: {e}")
 
             # Esperar hasta el próximo minuto
-            now = datetime.now()
-            seconds_to_next_minute = 60 - now.second
-            await asyncio.sleep(seconds_to_next_minute)
+            await asyncio.sleep(60 - datetime.now().second)
 
         logger.info("Scheduler detenido")
 
@@ -499,42 +434,16 @@ class Scheduler:
     # Utilidades
     # ========================================
 
-    def format_status(self) -> str:
-        """Formatea el estado del scheduler para mostrar"""
-        lines = ["⏰ *PROGRAMACIÓN AUTOMÁTICA*\n"]
-
-        if self.config.enabled:
-            lines.append("🟢 Estado: *HABILITADA*\n")
-            lines.append(f"🔒 Activación: {self.config.format_on_time()} ({self.config.format_on_time_12h()})")
-            lines.append(f"🔓 Desactivación: {self.config.format_off_time()} ({self.config.format_off_time_12h()})")
-            lines.append(f"📅 Días: {self.format_days()}")
-
-            if self.config.notify_before_minutes > 0:
-                lines.append(f"\n📢 Recordatorio: {self.config.notify_before_minutes} min antes")
-        else:
-            lines.append("🔴 Estado: *DESHABILITADA*")
-
-        return "\n".join(lines)
-
     def parse_time_string(self, time_str: str) -> Optional[tuple]:
         """Parsea una cadena de tiempo HH:MM y retorna (hour, minute)"""
         try:
-            if ':' not in time_str:
-                return None
-
-            parts = time_str.split(':')
-            if len(parts) != 2:
-                return None
-
-            hour = int(parts[0])
-            minute = int(parts[1])
-
-            if not (0 <= hour <= 23 and 0 <= minute <= 59):
-                return None
-
-            return (hour, minute)
+            hour, minute = (int(p) for p in time_str.split(':'))
         except ValueError:
             return None
+
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+        return (hour, minute)
 
 
 # Instancia global

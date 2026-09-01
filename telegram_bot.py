@@ -354,6 +354,7 @@ class TelegramBot:
 
         # Comandos basicos
         app.add_handler(CommandHandler("start", self._cmd_start))
+        app.add_handler(CommandHandler("id", self._cmd_id))
         app.add_handler(CommandHandler("help", self._cmd_help))
         app.add_handler(CommandHandler("status", self._cmd_status))
 
@@ -470,9 +471,13 @@ class TelegramBot:
         # Verificar si el usuario tiene dispositivos autorizados
         authorized_devices = self.firebase_manager.get_authorized_devices(chat_id)
         if authorized_devices:
+            # El ID va tambien aqui: las otras dos ramas de /start ya lo daban,
+            # y justo el usuario que entra al perfil de la app a consultarlo
+            # era el unico que no lo recibia.
             welcome = (
                 f"👋 *¡Hola de nuevo, {user.first_name}!*\n\n"
                 f"📱 Tienes acceso a {len(authorized_devices)} dispositivo(s).\n"
+                f"🆔 Tu ID: `{chat_id}`\n\n"
                 "📋 Usa /help para ver tus comandos."
             )
             await update.message.reply_text(
@@ -511,6 +516,20 @@ class TelegramBot:
             "que use /adduser y te envie el codigo de invitacion."
         )
         await update.message.reply_text(deny_msg, parse_mode=ParseMode.MARKDOWN)
+
+    async def _cmd_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handler para /id - Devuelve el chat_id.
+
+        Sin @require_auth a proposito: el usuario que todavia NO esta dado de
+        alta es justo el que necesita saber su ID para escribirlo en la app.
+        No expone nada: Telegram ya le da su propio chat_id a quien pregunta.
+        """
+        chat_id = str(update.effective_chat.id)
+        await update.message.reply_text(
+            f"🆔 Tu Chat ID es: `{chat_id}`\n\n"
+            "Cópialo en la app: Configuración → Chat ID de Telegram.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
     @require_auth
     async def _cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1225,7 +1244,7 @@ class TelegramBot:
             if selected:
                 location = self.firebase_manager.get_device_location(selected) or selected if selected != "all" else "TODOS"
                 status = f"📍 *Dispositivo:* {location}\n\n"
-                status += scheduler.format_status()
+                status += self._schedule_status_text(devices if selected == "all" else [selected])
                 status += "\n\n📝 *Comandos:*\n"
                 status += "`/horarios on` - Habilitar\n"
                 status += "`/horarios off` - Deshabilitar\n"
@@ -1281,17 +1300,19 @@ class TelegramBot:
 
         # Habilitar/Deshabilitar
         if subcommand == "on":
-            scheduler.set_enabled(True)
+            for dev_id in target_devices:
+                scheduler.set_enabled(dev_id, True)
             await self._sync_schedule_to_devices(chat_id, target_devices)
             await update.message.reply_text(
                 f"✅ *Programacion habilitada*\n"
-                f"📍 {location_text}\n\n" + scheduler.format_status(),
+                f"📍 {location_text}\n\n" + self._schedule_status_text(target_devices),
                 parse_mode=ParseMode.MARKDOWN
             )
             return
 
         if subcommand == "off":
-            scheduler.set_enabled(False)
+            for dev_id in target_devices:
+                scheduler.set_enabled(dev_id, False)
             await self._sync_schedule_to_devices(chat_id, target_devices)
             await update.message.reply_text(
                 f"🔴 *Programacion deshabilitada*\n"
@@ -1305,12 +1326,14 @@ class TelegramBot:
             time_result = scheduler.parse_time_string(args[1])
             if time_result:
                 hour, minute = time_result
-                scheduler.set_on_time(hour, minute)
+                for dev_id in target_devices:
+                    scheduler.set_on_time(dev_id, hour, minute)
+                cfg = scheduler.cfg(target_devices[0])
                 await self._sync_schedule_to_devices(chat_id, target_devices)
                 await update.message.reply_text(
                     f"✅ *Hora de activacion configurada*\n"
                     f"📍 {location_text}\n\n"
-                    f"🔒 {scheduler.config.format_on_time()} ({scheduler.config.format_on_time_12h()})",
+                    f"🔒 {cfg.format_on_time()} ({cfg.format_on_time_12h()})",
                     parse_mode=ParseMode.MARKDOWN
                 )
             else:
@@ -1325,12 +1348,14 @@ class TelegramBot:
             time_result = scheduler.parse_time_string(args[1])
             if time_result:
                 hour, minute = time_result
-                scheduler.set_off_time(hour, minute)
+                for dev_id in target_devices:
+                    scheduler.set_off_time(dev_id, hour, minute)
+                cfg = scheduler.cfg(target_devices[0])
                 await self._sync_schedule_to_devices(chat_id, target_devices)
                 await update.message.reply_text(
                     f"✅ *Hora de desactivacion configurada*\n"
                     f"📍 {location_text}\n\n"
-                    f"🔓 {scheduler.config.format_off_time()} ({scheduler.config.format_off_time_12h()})",
+                    f"🔓 {cfg.format_off_time()} ({cfg.format_off_time_12h()})",
                     parse_mode=ParseMode.MARKDOWN
                 )
             else:
@@ -1355,12 +1380,12 @@ class TelegramBot:
                 # Parsear días separados por coma: L,M,X,J,V
                 days = [d.strip() for d in args[1].split(',')]
 
-            if scheduler.set_days(days):
+            if all(scheduler.set_days(dev_id, days) for dev_id in target_devices):
                 await self._sync_schedule_to_devices(chat_id, target_devices)
                 await update.message.reply_text(
                     f"✅ *Días configurados*\n"
                     f"📍 {location_text}\n\n"
-                    f"📅 {scheduler.format_days()}",
+                    f"📅 {scheduler.cfg(target_devices[0]).format_days()}",
                     parse_mode=ParseMode.MARKDOWN
                 )
             else:
@@ -1523,7 +1548,8 @@ class TelegramBot:
 
             # Horario
             if telemetry and telemetry.auto_schedule_enabled:
-                schedule_info = scheduler.format_status() if scheduler.config.enabled else "Activo"
+                cfg = scheduler.cfg(device_id)
+                schedule_info = cfg.format_status() if cfg.enabled else "Activo"
                 response += f"└─ 📅 Horario: {schedule_info}\n"
             else:
                 response += f"└─ 📅 Horario: Desactivado\n"
@@ -1531,6 +1557,24 @@ class TelegramBot:
             response += f"\n🆔 `{device_id}`"
 
             await self.send_message(chat_id, response, "Markdown")
+
+    def _schedule_status_text(self, device_ids: list) -> str:
+        """Estado del horario de uno o varios dispositivos"""
+        if len(device_ids) == 1:
+            return scheduler.cfg(device_ids[0]).format_status()
+
+        lineas = ["⏰ *PROGRAMACIÓN AUTOMÁTICA*", ""]
+        for dev_id in device_ids:
+            cfg = scheduler.cfg(dev_id)
+            nombre = self.firebase_manager.get_device_location(dev_id) or dev_id
+            if cfg.enabled:
+                lineas.append(
+                    f"• *{nombre}*: 🔒 {cfg.format_on_time()} / "
+                    f"🔓 {cfg.format_off_time()} — {cfg.format_days()}"
+                )
+            else:
+                lineas.append(f"• *{nombre}*: 🔴 deshabilitada")
+        return "\n".join(lineas)
 
     async def _sync_schedule_to_devices(self, chat_id: str, target_devices: list = None):
         """Sincroniza los horarios del scheduler con ESP32 y Firebase
@@ -1546,19 +1590,18 @@ class TelegramBot:
         else:
             devices = target_devices
 
-        # Obtener índices de días para enviar al ESP32
-        days_indices = scheduler.get_days_indices()
-
         for device_id in devices:
+            cfg = scheduler.cfg(device_id)
+
             # 1. Enviar al ESP32
             if self.mqtt_handler:
                 self.mqtt_handler.send_set_schedule(
-                    scheduler.config.enabled,
-                    scheduler.config.on_hour,
-                    scheduler.config.on_minute,
-                    scheduler.config.off_hour,
-                    scheduler.config.off_minute,
-                    days=days_indices,
+                    cfg.enabled,
+                    cfg.on_hour,
+                    cfg.on_minute,
+                    cfg.off_hour,
+                    cfg.off_minute,
+                    days=cfg.days_indices(),
                     device_id=device_id
                 )
 
@@ -1576,14 +1619,14 @@ class TelegramBot:
 
                     schedule_path = f"Horarios/{owner_id}/devices/{device_id}"
                     schedule_data = {
-                        "activationTime": scheduler.config.format_on_time(),
-                        "deactivationTime": scheduler.config.format_off_time(),
-                        "enabled": scheduler.config.enabled,
-                        "days": scheduler.get_days(),  # Lista de nombres: ['Lunes', 'Martes', ...]
+                        "activationTime": cfg.format_on_time(),
+                        "deactivationTime": cfg.format_off_time(),
+                        "enabled": cfg.enabled,
+                        "days": cfg.days,  # Lista de nombres: ['Lunes', 'Martes', ...]
                         "lastUpdatedBy": "telegram"
                     }
                     self.firebase_manager.db.reference(schedule_path).set(schedule_data)
-                    logger.info(f"Horario sincronizado a Firebase: {schedule_path} (días: {scheduler.format_days()})")
+                    logger.info(f"Horario sincronizado a Firebase: {schedule_path} (días: {cfg.format_days()})")
                 except Exception as e:
                     logger.error(f"Error sincronizando horario a Firebase: {e}")
 
@@ -1799,20 +1842,25 @@ class TelegramBot:
             return
 
         if intent == "query_schedule":
-            cfg = scheduler.config
-            if not cfg.enabled:
+            lineas = []
+            for d in devices_context:
+                cfg = scheduler.cfg(d["id"])
+                nombre = d.get("name") or d["id"]
+                if not cfg.enabled:
+                    lineas.append(f"• *{nombre}*: deshabilitado")
+                else:
+                    dias = ", ".join(cfg.days) if cfg.days else "Todos los días"
+                    lineas.append(
+                        f"• *{nombre}*: 🔴 arma {cfg.format_on_time_12h()} / "
+                        f"🟢 desarma {cfg.format_off_time_12h()} — {dias}"
+                    )
+            if lineas:
+                msg = "📅 *Horario automático:*\n\n" + "\n".join(lineas)
+            else:
                 msg = (
                     "📅 *Horario automático:* Deshabilitado\n\n"
                     "Puedes configurarlo escribiendo algo como:\n"
                     "_\"arma lunes a viernes de 10pm a 6am\"_"
-                )
-            else:
-                dias = ", ".join(cfg.days) if cfg.days else "Todos los días"
-                msg = (
-                    "📅 *Horario automático configurado:*\n\n"
-                    f"🔴 Arma a las: *{cfg.format_on_time_12h()}*\n"
-                    f"🟢 Desarma a las: *{cfg.format_off_time_12h()}*\n"
-                    f"📆 Días: *{dias}*"
                 )
             await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=self._get_keyboard())
             logger.info(f"🤖 IA → QUERY_SCHEDULE para {chat_id}")
@@ -1906,10 +1954,11 @@ class TelegramBot:
             # ceros, dejarlas pasar pisaria las horas configuradas con 0:00).
             # Reusamos el flow de /horarios on/off para conservar horas/dias.
             if enabled is not None and (not has_times or enabled is False):
-                scheduler.set_enabled(enabled)
+                for dev_id in target_ids:
+                    scheduler.set_enabled(dev_id, enabled)
                 await self._sync_schedule_to_devices(chat_id, target_ids)
                 if enabled:
-                    msg = "📅 Horario automático *activado*.\n\n" + scheduler.format_status()
+                    msg = "📅 Horario automático *activado*.\n\n" + self._schedule_status_text(target_ids)
                 else:
                     msg = "📅 Horario automático *desactivado*."
                 await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=self._get_keyboard())
@@ -1928,6 +1977,12 @@ class TelegramBot:
                 return
             days = params.get("days", [0, 1, 2, 3, 4, 5, 6])
             for dev_id in target_ids:
+                # El scheduler local tambien debe conocerlo: es quien manda los
+                # recordatorios y arma si el ESP32 no lo hace por su cuenta.
+                scheduler.set_days_from_indices(dev_id, days)
+                scheduler.set_on_time(dev_id, params["on_hour"], params["on_minute"])
+                scheduler.set_off_time(dev_id, params["off_hour"], params["off_minute"])
+                scheduler.set_enabled(dev_id, enabled)
                 self.mqtt_handler.send_set_schedule(
                     enabled=enabled,
                     on_hour=params["on_hour"],
@@ -3005,7 +3060,7 @@ class TelegramBot:
 
                 status = f"⏰ *PROGRAMACIÓN AUTOMÁTICA*\n\n"
                 status += f"📍 *Dispositivo:* {location}\n\n"
-                status += scheduler.format_status()
+                status += self._schedule_status_text([target_device])
                 status += "\n\n📝 *Comandos:*\n"
                 status += "`/horarios on` - Habilitar\n"
                 status += "`/horarios off` - Deshabilitar\n"
@@ -3027,7 +3082,7 @@ class TelegramBot:
 
             status = f"⏰ *PROGRAMACIÓN AUTOMÁTICA*\n\n"
             status += f"📍 *Dispositivo:* TODOS los dispositivos\n\n"
-            status += scheduler.format_status()
+            status += self._schedule_status_text(devices)
             status += "\n\n📝 *Comandos:*\n"
             status += "`/horarios on` - Habilitar\n"
             status += "`/horarios off` - Deshabilitar\n"
