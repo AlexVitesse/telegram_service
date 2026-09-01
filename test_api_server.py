@@ -106,8 +106,10 @@ async def con_api(firebase, uid_valido, prueba):
         await api.stop()
 
 
-async def pedir(url, token=None, cuerpo=None, metodo="POST", ruta="/preguntar"):
+async def pedir(url, token=None, cuerpo=None, metodo="POST", ruta="/preguntar",
+                extra=None):
     cab = {"Authorization": f"Bearer {token}"} if token else {}
+    cab.update(extra or {})
     async with aiohttp.ClientSession() as s:
         m = s.post if metodo == "POST" else s.get
         kw = {"json": cuerpo} if metodo == "POST" and cuerpo is not None else {}
@@ -243,6 +245,31 @@ async def caso_modo_abierto_deja_pasar_y_sigue_contando():
     await con_api(FirebaseFalso(None), "u1", p)
 
 
+async def caso_cabecera_falsificada_no_estrena_cuota():
+    """
+    El tope por IP se lleva por el ULTIMO valor de X-Forwarded-For.
+
+    Se simula lo que hace ngrok: el cliente manda la cabecera que quiere y el
+    proxy añade al final la IP desde la que se conecto de verdad. Tomando el
+    primer valor -el del cliente- bastaba con inventarse una IP distinta en
+    cada peticion para tener cuota infinita.
+    """
+    async def p(url, api):
+        config.api.auth = "abierto"
+        api._limitador.espera_min_seg = 30
+        estado, _ = await pedir(
+            url, cuerpo={"pregunta": "hola"},
+            extra={"X-Forwarded-For": "1.1.1.1, 9.9.9.9"},
+        )
+        assert estado == 200, estado
+        estado2, _ = await pedir(
+            url, cuerpo={"pregunta": "otra"},
+            extra={"X-Forwarded-For": "2.2.2.2, 9.9.9.9"},
+        )
+        assert estado2 == 429, f"estreno cuota cambiando la cabecera: {estado2}"
+    await con_api(FirebaseFalso(None), "u1", p)
+
+
 CASOS = [
     caso_salud_no_pide_token,
     caso_sin_cabecera_401,
@@ -255,6 +282,7 @@ CASOS = [
     caso_modo_clave_exige_la_cabecera,
     caso_modo_clave_sin_clave_configurada_no_abre,
     caso_modo_abierto_deja_pasar_y_sigue_contando,
+    caso_cabecera_falsificada_no_estrena_cuota,
 ]
 
 

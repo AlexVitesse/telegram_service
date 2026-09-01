@@ -44,12 +44,15 @@ class ApiSenti:
             config.api.max_por_hora, config.api.espera_min_seg
         )
         self._runner: Optional[web.AppRunner] = None
+        # Guardada a proposito: asyncio solo tiene una referencia debil a las
+        # tareas, y una que nadie sujeta puede irsele al recolector a medias.
+        self._tarea_url: Optional[asyncio.Task] = None
 
     # ------------------------------------------------------------------
     # Autenticación y autorización
     # ------------------------------------------------------------------
 
-    def _identificar(self, request: web.Request) -> Tuple[Optional[str], Optional[web.Response]]:
+    async def _identificar(self, request: web.Request) -> Tuple[Optional[str], Optional[web.Response]]:
         """
         Quién pregunta. Devuelve `(uid, None)` si pasa, o `(None, respuesta)`
         con el error si no.
@@ -84,12 +87,12 @@ class ApiSenti:
                 {"error": "Falta la cabecera Authorization: Bearer <token>."},
                 status=401,
             )
-        uid = self._uid_del_token(token)
+        uid = await asyncio.to_thread(self._uid_del_token, token)
         if not uid:
             return None, web.json_response(
                 {"error": "Sesión no válida. Vuelve a iniciar sesión."}, status=401
             )
-        if not self._esta_habilitado(uid):
+        if not await self._esta_habilitado(uid):
             return None, web.json_response(
                 {"error": "Tu cuenta todavía no tiene ningún equipo vinculado."},
                 status=403,
@@ -98,10 +101,17 @@ class ApiSenti:
 
     @staticmethod
     def _ip(request: web.Request) -> str:
-        """Detrás de ngrok la IP real llega en X-Forwarded-For."""
+        """
+        Detrás de ngrok la IP real llega en X-Forwarded-For.
+
+        Se toma el **último** de la cadena, no el primero. Cada proxy añade al
+        final la IP de quien le habló, así que el primer valor es el que mandó
+        el cliente: falsificarlo es escribir una cabecera. Tomándolo, cualquiera
+        estrenaba cuota en cada petición y el tope no existía.
+        """
         reenviada = request.headers.get("X-Forwarded-For", "")
         if reenviada:
-            return reenviada.split(",")[0].strip()
+            return reenviada.split(",")[-1].strip()
         return request.remote or "desconocida"
 
     @staticmethod
@@ -127,7 +137,7 @@ class ApiSenti:
             logger.debug("Token rechazado: %s", e)
             return None
 
-    def _esta_habilitado(self, uid: str) -> bool:
+    async def _esta_habilitado(self, uid: str) -> bool:
         """
         Solo gente habilitada: que el uid tenga al menos un equipo dado de alta.
 
@@ -136,7 +146,12 @@ class ApiSenti:
         mantener a mano y que se desincronizaría el primer día.
         """
         try:
-            datos = self._firebase.db.reference(f"Usuarios/{uid}/Dispositivos").get()
+            # to_thread: firebase_admin.db es sincrono y esto corre en el
+            # mismo event loop que el bot. Sin esto, cada pregunta de la app
+            # congela Telegram y el MQTT lo que tarde Firebase en contestar.
+            datos = await asyncio.to_thread(
+                self._firebase.db.reference(f"Usuarios/{uid}/Dispositivos").get
+            )
         except Exception as e:
             # Si Firebase no contesta NO se deja pasar. Un fallo de lectura no
             # puede convertirse en una puerta abierta.
@@ -164,7 +179,7 @@ class ApiSenti:
     async def preguntar(self, request: web.Request) -> web.Response:
         t0 = time.monotonic()
 
-        uid, error = self._identificar(request)
+        uid, error = await self._identificar(request)
         if error is not None:
             return error
 
@@ -252,9 +267,12 @@ class ApiSenti:
                 "ngrok, cualquiera que de con la URL gasta tu cuota de LLM."
             )
 
-        asyncio.create_task(self.publicar_url())
+        self._tarea_url = asyncio.create_task(self.publicar_url())
 
     async def stop(self) -> None:
+        if self._tarea_url:
+            self._tarea_url.cancel()
+            self._tarea_url = None
         if self._runner:
             await self._runner.cleanup()
             self._runner = None
@@ -296,8 +314,9 @@ class ApiSenti:
                 logger.warning("ngrok esta corriendo pero sin tunel https")
                 return
 
-            self._firebase.db.reference(config.api.ruta_url).set(
-                {"url": url, "actualizado": int(time.time())}
+            await asyncio.to_thread(
+                self._firebase.db.reference(config.api.ruta_url).set,
+                {"url": url, "actualizado": int(time.time())},
             )
             logger.info("URL de la API publicada en %s: %s", config.api.ruta_url, url)
 
