@@ -27,6 +27,7 @@ from config import config
 from device_manager import DeviceManager
 from mqtt_handler import MqttHandler
 from telegram_bot import TelegramBot
+from api_server import ApiSenti
 from scheduler import scheduler
 from fcm_handler import FCMHandler
 
@@ -66,6 +67,7 @@ class AlarmBridgeService:
         self.mqtt = MqttHandler(self.device_manager, firebase_manager)
         self.telegram = TelegramBot(self.device_manager, firebase_manager)
         self.fcm = FCMHandler(firebase_manager)  # Push notifications
+        self.api = None
         self.running = False
         self._loop = None
         self.firebase_available = False
@@ -688,6 +690,13 @@ class AlarmBridgeService:
                 self._monitor_firebase_listener()
             )
 
+        # Endpoint HTTP de Senti. En este mismo proceso a proposito: la
+        # KnowledgeBase construye sus embeddings al cargar y no tiene sentido
+        # pagarlos dos veces ni tener dos copias en memoria.
+        if config.api.enabled:
+            self.api = ApiSenti(self.telegram, firebase_manager)
+            await self.api.start()
+
         # Escribir PID file para admin_bot
         try:
             with open(PID_FILE, "w") as f:
@@ -711,6 +720,9 @@ class AlarmBridgeService:
         """Detiene el servicio de forma asincrona"""
         logger.info("Deteniendo servicio...")
         self.running = False
+
+        if getattr(self, "api", None):
+            await self.api.stop()
 
         # Cancelar tarea de monitoreo de conexiones
         if self._connection_monitor_task:

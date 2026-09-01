@@ -18,3 +18,6 @@ scikit-learn>=1.3.0
 
 # IA - Groq (fallback opcional, solo si LLM_BACKEND=groq)
 # groq>=0.9.0
+
+# API HTTP para la app (endpoint de Senti)
+aiohttp>=3.9.0

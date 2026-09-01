@@ -107,12 +107,34 @@ class SupportConfig:
 
 
 @dataclass
+class ApiConfig:
+    """Endpoint HTTP para que la app pregunte a Senti sin pasar por Telegram."""
+
+    enabled: bool = _get_env_bool("API_ENABLED", False)
+    # 127.0.0.1 a proposito: quien lo publica es ngrok o un proxy inverso, no
+    # este proceso. Escuchar en 0.0.0.0 lo dejaria abierto a la red del VPS.
+    host: str = _get_env("API_HOST", "127.0.0.1")
+    port: int = _get_env_int("API_PORT", 8765)
+    # Preguntas por hora y por usuario. Cada una gasta LLM: sin tope, un token
+    # valido basta para vaciar la cuota.
+    max_por_hora: int = _get_env_int("API_MAX_POR_HORA", 20)
+    # Segundos minimos entre dos preguntas del mismo usuario.
+    espera_min_seg: float = float(_get_env("API_ESPERA_MIN_SEG", "3"))
+    # La API local del agente de ngrok, para publicar la URL publica en RTDB.
+    # Vacio = no se publica.
+    ngrok_api: str = _get_env("NGROK_API", "http://127.0.0.1:4040/api/tunnels")
+    # Donde se publica esa URL para que la app la lea.
+    ruta_url: str = _get_env("API_RUTA_URL", "Config/ai_endpoint")
+
+
+@dataclass
 class Config:
     mqtt: MqttConfig
     telegram: TelegramConfig
     firebase: FirebaseConfig
     ai: AIConfig
     support: SupportConfig
+    api: ApiConfig
     device_id: str = _get_env("DEVICE_ID", "")
     debug: bool = _get_env_bool("DEBUG", True)
     log_file: str = _get_env("LOG_FILE", "alarm_service.log")
@@ -130,6 +152,7 @@ config = Config(
     firebase=FirebaseConfig(),
     ai=AIConfig(),
     support=SupportConfig(),
+    api=ApiConfig(),
 )
 
 # Validar que las credenciales críticas estén configuradas

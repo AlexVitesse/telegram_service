@@ -1,0 +1,227 @@
+"""
+Levanta el endpoint de verdad en un puerto libre y le pega peticiones reales.
+
+Sin Firebase y sin LLM: se sustituyen por dobles. Lo que se comprueba es la
+puerta —quien pasa y quien no— que es donde un fallo se paga caro: dejar entrar
+a quien no debe, o dejar fuera a un cliente legítimo.
+
+    python test_api_server.py
+"""
+import asyncio
+import socket
+import sys
+from types import SimpleNamespace
+
+import aiohttp
+
+import api_server
+from config import config
+
+
+# --------------------------------------------------------------------------
+# Dobles
+# --------------------------------------------------------------------------
+
+class RespuestaFalsa:
+    texto = "La bengala se configura desde la ficha del equipo."
+    tipo = "rag"
+    ok = True
+    error = None
+    fuentes = ["03_bengala.md", "03_bengala.md", "01_alta.md"]
+    scores = [0.6, 0.4, 0.3]
+
+
+class RefFalsa:
+    def __init__(self, valor):
+        self._valor = valor
+
+    def get(self):
+        return self._valor
+
+    def set(self, _):
+        pass
+
+
+class FirebaseFalso:
+    """`dispositivos` None simula una cuenta sin equipos; None en la ruta,
+    un fallo de lectura."""
+
+    def __init__(self, dispositivos, revienta=False):
+        self._dispositivos = dispositivos
+        self._revienta = revienta
+        self.db = SimpleNamespace(reference=self._reference)
+
+    def _reference(self, ruta):
+        if self._revienta:
+            raise RuntimeError("firebase caido")
+        return RefFalsa(self._dispositivos)
+
+
+class RegistroFalso:
+    def __init__(self):
+        self.entradas = []
+
+    def record(self, **kw):
+        self.entradas.append(kw)
+
+
+def bot_falso():
+    return SimpleNamespace(
+        knowledge_base=object(),
+        ai_handler=SimpleNamespace(_backend="groq"),
+        interaction_logger=RegistroFalso(),
+    )
+
+
+def puerto_libre():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+# --------------------------------------------------------------------------
+# Arranque
+# --------------------------------------------------------------------------
+
+async def con_api(firebase, uid_valido, prueba):
+    """Levanta la API con un uid dado por bueno y ejecuta `prueba(url)`."""
+    config.api.host = "127.0.0.1"
+    config.api.port = puerto_libre()
+    config.api.ngrok_api = ""          # que no salga a la red
+    config.api.espera_min_seg = 0
+    config.api.max_por_hora = 100
+
+    api = api_server.ApiSenti(bot_falso(), firebase)
+    api._uid_del_token = lambda t: uid_valido if t == "bueno" else None
+    api_server.knowledge_qa = SimpleNamespace(
+        responder=lambda *a, **k: asyncio.sleep(0, result=RespuestaFalsa())
+    )
+
+    await api.start()
+    try:
+        await prueba(f"http://127.0.0.1:{config.api.port}", api)
+    finally:
+        await api.stop()
+
+
+async def pedir(url, token=None, cuerpo=None, metodo="POST", ruta="/preguntar"):
+    cab = {"Authorization": f"Bearer {token}"} if token else {}
+    async with aiohttp.ClientSession() as s:
+        m = s.post if metodo == "POST" else s.get
+        kw = {"json": cuerpo} if metodo == "POST" and cuerpo is not None else {}
+        async with m(url + ruta, headers=cab, **kw) as r:
+            try:
+                return r.status, await r.json()
+            except Exception:
+                return r.status, await r.text()
+
+
+# --------------------------------------------------------------------------
+# Pruebas
+# --------------------------------------------------------------------------
+
+async def caso_salud_no_pide_token():
+    async def p(url, api):
+        estado, cuerpo = await pedir(url, metodo="GET", ruta="/salud")
+        assert estado == 200, estado
+        assert cuerpo["ok"] is True
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p)
+
+
+async def caso_sin_cabecera_401():
+    async def p(url, api):
+        estado, cuerpo = await pedir(url, cuerpo={"pregunta": "hola"})
+        assert estado == 401, estado
+        assert "Authorization" in cuerpo["error"]
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p)
+
+
+async def caso_token_malo_401():
+    async def p(url, api):
+        estado, _ = await pedir(url, token="basura", cuerpo={"pregunta": "hola"})
+        assert estado == 401, estado
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p)
+
+
+async def caso_sin_equipos_403():
+    """Token válido pero cuenta sin equipos: no es cliente todavía."""
+    async def p(url, api):
+        estado, cuerpo = await pedir(url, token="bueno", cuerpo={"pregunta": "hola"})
+        assert estado == 403, estado
+        assert "equipo" in cuerpo["error"]
+    await con_api(FirebaseFalso(None), "u1", p)
+
+
+async def caso_firebase_caido_no_abre_la_puerta():
+    """Si no se puede comprobar, NO se deja pasar."""
+    async def p(url, api):
+        estado, _ = await pedir(url, token="bueno", cuerpo={"pregunta": "hola"})
+        assert estado == 403, estado
+    await con_api(FirebaseFalso(["AA_BB"], revienta=True), "u1", p)
+
+
+async def caso_pregunta_vacia_400():
+    async def p(url, api):
+        estado, _ = await pedir(url, token="bueno", cuerpo={"pregunta": "   "})
+        assert estado == 400, estado
+        estado, _ = await pedir(url, token="bueno", cuerpo={})
+        assert estado == 400, estado
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p)
+
+
+async def caso_feliz():
+    async def p(url, api):
+        estado, cuerpo = await pedir(
+            url, token="bueno", cuerpo={"pregunta": "¿Cómo configuro la bengala?"}
+        )
+        assert estado == 200, (estado, cuerpo)
+        assert cuerpo["texto"].startswith("La bengala se configura")
+        # Fuentes sin repetir y en orden de relevancia.
+        assert cuerpo["fuente"] == "03_bengala.md | 01_alta.md"
+        assert cuerpo["tipo"] == "rag"
+        # Y queda registrado, igual que las de Telegram.
+        assert api._bot.interaction_logger.entradas[0]["user_id"] == "app:u1"
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p)
+
+
+async def caso_rafaga_429():
+    async def p(url, api):
+        api._limitador.espera_min_seg = 30
+        e1, _ = await pedir(url, token="bueno", cuerpo={"pregunta": "una"})
+        e2, c2 = await pedir(url, token="bueno", cuerpo={"pregunta": "otra"})
+        assert e1 == 200, e1
+        assert e2 == 429, e2
+        assert "Espera" in c2["error"]
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p)
+
+
+CASOS = [
+    caso_salud_no_pide_token,
+    caso_sin_cabecera_401,
+    caso_token_malo_401,
+    caso_sin_equipos_403,
+    caso_firebase_caido_no_abre_la_puerta,
+    caso_pregunta_vacia_400,
+    caso_feliz,
+    caso_rafaga_429,
+]
+
+
+async def correr_todo():
+    fallos = 0
+    for c in CASOS:
+        try:
+            await c()
+            print(f"  ok  {c.__name__}")
+        except AssertionError as e:
+            fallos += 1
+            print(f"FALLO  {c.__name__}: {e}")
+        except Exception as e:
+            fallos += 1
+            print(f"ERROR  {c.__name__}: {type(e).__name__}: {e}")
+    print(f"\n{len(CASOS) - fallos}/{len(CASOS)} pruebas pasan")
+    return fallos
+
+
+if __name__ == "__main__":
+    sys.exit(1 if asyncio.run(correr_todo()) else 0)
