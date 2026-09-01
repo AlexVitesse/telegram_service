@@ -9,7 +9,7 @@ import logging
 import time
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from mqtt_protocol import Command # Importar el Enum de Comandos
-from scheduler import scheduler, DAY_NAMES  # Para sincronizar horarios
+from scheduler import scheduler, DAY_NAMES, elegir_por_dispositivo  # Para sincronizar horarios
 
 from config import config # Asegurarse que config tenga la databaseURL
 from chat_id_utils import normalize_chat_id, looks_like_stripped_supergroup
@@ -446,27 +446,18 @@ class FirebaseManager:
         Sincroniza el scheduler local con los datos iniciales de Firebase.
         Cada dispositivo conserva SU horario: no hay horario global compartido.
         Estructura: {userId: {devices: {deviceId: {schedule_data}}}}
+
+        Se elige UN horario por equipo antes de escribir nada. Antes se
+        aplicaban todos los que hubiera segun se iteraba, asi que un equipo
+        reclamado por dos usuarios se quedaba con el ultimo que llegara: el
+        orden lo decide Firebase y podia cambiar entre arranques.
         """
         try:
-            cambios = 0
-            for user_id, user_data in all_schedules.items():
-                if not isinstance(user_data, dict):
-                    continue
-                devices = user_data.get('devices', {})
-                if not isinstance(devices, dict):
-                    continue
-
-                for device_id, schedule_data in devices.items():
-                    if not isinstance(schedule_data, dict):
-                        continue
-                    if 'activationTime' not in schedule_data or 'deactivationTime' not in schedule_data:
-                        continue
-
-                    # "system" = el horario aplica a todos los dispositivos del usuario
-                    targets = self.get_authorized_devices(user_id) if device_id == "system" else [device_id]
-                    for dev_id in targets:
-                        if self._apply_schedule_to_scheduler(dev_id, schedule_data):
-                            cambios += 1
+            elegidos = elegir_por_dispositivo(all_schedules, self.get_authorized_devices)
+            cambios = sum(
+                1 for dev_id, schedule_data in elegidos.items()
+                if self._apply_schedule_to_scheduler(dev_id, schedule_data)
+            )
 
             if cambios:
                 logger.info(f"Scheduler sincronizado desde Firebase: {cambios} horario(s) actualizado(s)")

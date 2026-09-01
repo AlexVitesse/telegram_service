@@ -35,6 +35,60 @@ DAY_ABBREV_MAP = {
 }
 
 
+def elegir_por_dispositivo(todos: dict, dispositivos_de) -> Dict[str, dict]:
+    """
+    De todo /Horarios, qué horario le toca a cada equipo.
+
+    Un mismo equipo puede aparecer bajo varias claves: dos usuarios que lo
+    reclaman, o un "system" de su dueño además de una entrada propia.
+    Aplicándolos según se iteraba ganaba el último, y ese orden lo decide
+    Firebase: el mismo dato podía dejar el equipo armándose un día y quieto al
+    siguiente, sin que nadie hubiera tocado nada.
+
+    Criterio, de más a menos peso:
+
+    1. Lo específico gana a "system". Quien nombró el equipo fue más explícito
+       que quien configuró "todos los míos".
+    2. Habilitado gana a deshabilitado. Si dos personas configuraron el mismo
+       equipo, querer que se arme dice más que no querer nada, y evita que una
+       entrada vieja de otro deje una alarma sin armar.
+    3. El `lastUpdated` más reciente. Falta en bastantes registros, por eso no
+       puede ser el primer criterio.
+    4. La clave mayor. Arbitrario, pero siempre el mismo: es lo que hace que el
+       resultado no dependa del orden en que llegue el diccionario.
+
+    `dispositivos_de(clave)` resuelve a qué equipos alcanza un "system".
+    """
+    mejor: Dict[str, tuple] = {}
+
+    for clave, datos in (todos or {}).items():
+        if not isinstance(datos, dict):
+            continue
+        devices = datos.get('devices')
+        if not isinstance(devices, dict):
+            continue
+
+        for device_id, horario in devices.items():
+            if not isinstance(horario, dict):
+                continue
+            if 'activationTime' not in horario or 'deactivationTime' not in horario:
+                continue
+
+            es_system = device_id == "system"
+            peso = (
+                0 if es_system else 1,
+                1 if horario.get('enabled') else 0,
+                str(horario.get('lastUpdated') or ''),
+                str(clave),
+            )
+            destinos = dispositivos_de(clave) if es_system else [device_id]
+            for dev_id in destinos:
+                if dev_id not in mejor or peso > mejor[dev_id][0]:
+                    mejor[dev_id] = (peso, horario)
+
+    return {dev_id: horario for dev_id, (_, horario) in mejor.items()}
+
+
 @dataclass
 class ScheduleConfig:
     """Configuración de programación automática de UN dispositivo"""
