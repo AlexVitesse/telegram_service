@@ -37,6 +37,7 @@ from scheduler import scheduler
 from mqtt_protocol import MqttEvent, EventType
 from device_manager import DeviceManager
 from ai_handler import AIHandler
+import knowledge_qa
 from rag_handler import KnowledgeBase, looks_like_url_only
 from interaction_logger import InteractionLogger
 from escalation_handler import (
@@ -2018,93 +2019,25 @@ class TelegramBot:
         def _elapsed_ms():
             return int((_t.monotonic() - _t0) * 1000)
 
-        if not self.knowledge_base or not self.ai_handler:
-            msg = (
-                "ℹ️ La base de conocimiento no está disponible.\n"
-                "Usa /help para ver los comandos."
-            )
-            await update.message.reply_text(msg, reply_markup=self._get_keyboard())
-            self.interaction_logger.record(
-                user_id=user_id, user_name=user_name, query=text,
-                intent=intent, confidence=confidence, backend=backend,
-                response_type="fallback", response=msg,
-                elapsed_ms=_elapsed_ms(), ok=False, error="kb_not_available",
-            )
-            return
-
-        # Indicador de escritura
         await update.effective_chat.send_action("typing")
 
-        try:
-            results = self.knowledge_base.search(
-                text,
-                top_k=config.ai.rag_max_chunks,
-                min_score=config.ai.rag_min_score,
-            )
+        # El flujo -buscar, preguntar al LLM, decidir si se escala- vive en
+        # knowledge_qa para que el endpoint HTTP de la app conteste exactamente
+        # igual que el bot. Aqui solo queda enviar y registrar.
+        r = await knowledge_qa.responder(text, self.knowledge_base, self.ai_handler)
 
-            # Debug: log scores
-            for r in results:
-                logger.debug("📚 RAG match: score=%.3f | %s > %s", r.score, r.chunk.source_file, r.chunk.heading[:50])
+        await update.message.reply_text(r.texto, reply_markup=self._get_keyboard())
 
-            if not results:
-                msg = build_escalation_message("no_results", config.support)
-                await update.message.reply_text(msg, reply_markup=self._get_keyboard())
-                self.interaction_logger.record(
-                    user_id=user_id, user_name=user_name, query=text,
-                    intent=intent, confidence=confidence, backend=backend,
-                    response_type="escalation", response=msg,
-                    rag_sources=[], rag_scores=[],
-                    elapsed_ms=_elapsed_ms(), ok=False, error="rag_no_results",
-                )
-                return
-
-            context_chunks = [r.chunk.text for r in results]
-            answer = await self.ai_handler.chat_with_context(text, context_chunks)
-
-            # Si el LLM marca que no encontro info en la documentacion, escalamos.
-            if NO_INFO_SENTINEL in answer:
-                msg = build_escalation_message("no_results", config.support)
-                await update.message.reply_text(msg, reply_markup=self._get_keyboard())
-                self.interaction_logger.record(
-                    user_id=user_id, user_name=user_name, query=text,
-                    intent=intent or "question", confidence=confidence, backend=backend,
-                    response_type="escalation", response=msg,
-                    rag_sources=[r.chunk.source_file for r in results],
-                    rag_scores=[round(r.score, 3) for r in results],
-                    elapsed_ms=_elapsed_ms(), ok=False, error="llm_no_info",
-                )
-                return
-
-            sources_raw = [r.chunk.source_file for r in results]
-            scores = [round(r.score, 3) for r in results]
-            sources = set(
-                s.replace(".md", "").lstrip("0123456789_").replace("_", " ")
-                for s in sources_raw
-            )
-            source_hint = " | ".join(sources)
-
-            full_response = f"{answer}\n\n(Fuente: {source_hint})"
-            # Enviar sin Markdown para evitar errores de parsing
-            await update.message.reply_text(full_response, reply_markup=self._get_keyboard())
-            logger.info("📚 RAG respuesta para '%s' (fuentes: %s)", text[:40], sources)
-            self.interaction_logger.record(
-                user_id=user_id, user_name=user_name, query=text,
-                intent=intent or "question", confidence=confidence, backend=backend,
-                response_type="rag", response=full_response,
-                rag_sources=sources_raw, rag_scores=scores,
-                elapsed_ms=_elapsed_ms(), ok=True,
-            )
-
-        except Exception as e:
-            logger.error("📚 Error en RAG chat: %s", e)
-            msg = "Hubo un error procesando tu pregunta. Intenta de nuevo."
-            await update.message.reply_text(msg, reply_markup=self._get_keyboard())
-            self.interaction_logger.record(
-                user_id=user_id, user_name=user_name, query=text,
-                intent=intent, confidence=confidence, backend=backend,
-                response_type="error", response=msg,
-                elapsed_ms=_elapsed_ms(), ok=False, error=f"{type(e).__name__}: {e}",
-            )
+        self.interaction_logger.record(
+            user_id=user_id, user_name=user_name, query=text,
+            # Solo estas dos rutas asumian "question" cuando no habia intent
+            # detectado; las demas registraban el intent tal cual.
+            intent=(intent or "question") if (r.tipo == "rag" or r.error == "llm_no_info") else intent,
+            confidence=confidence, backend=backend,
+            response_type=r.tipo, response=r.texto,
+            rag_sources=r.fuentes, rag_scores=r.scores,
+            elapsed_ms=_elapsed_ms(), ok=r.ok, error=r.error,
+        )
 
     async def _cmd_reload_kb(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Admin: recargar la knowledge base sin reiniciar el servicio."""
