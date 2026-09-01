@@ -78,6 +78,11 @@ class AIConfig:
     # Groq (fallback opcional)
     groq_api_key: str = _get_env("GROQ_API_KEY", "")
     groq_model: str = _get_env("GROQ_MODEL", "llama-3.1-8b-instant")
+    # Cuanto se espera a UNA llamada al LLM. 60 s era el default de httpx y solo
+    # cubria Ollama; Groq iba sin techo. Para un chat, 20 s ya es mucho: por
+    # encima de eso el usuario asume que se rompio. Subelo si vuestro Ollama va
+    # justo con la carga real.
+    llm_timeout_sec: float = float(_get_env("LLM_TIMEOUT_SEC", "20"))
     # RAG
     rag_enabled: bool = _get_env_bool("RAG_ENABLED", True)
     rag_max_chunks: int = _get_env_int("RAG_MAX_CHUNKS", 4)

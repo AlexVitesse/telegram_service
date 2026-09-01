@@ -181,6 +181,7 @@ class AIHandler:
         groq_model: str = "llama-3.1-8b-instant",
         intent_model: str = "",
         chat_model: str = "",
+        timeout_sec: float = 20.0,
     ):
         self._backend = llm_backend
         self._ollama_base_url = ollama_base_url.rstrip("/")
@@ -193,6 +194,7 @@ class AIHandler:
         self._chat_model = chat_model or default_task_model
         self._groq_client = None
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._timeout_sec = timeout_sec
 
         # Detectar configuración incompatible: backend=ollama con modelos de Groq
         if llm_backend == "ollama":
@@ -212,7 +214,11 @@ class AIHandler:
         if groq_api_key:
             try:
                 from groq import Groq
-                self._groq_client = Groq(api_key=groq_api_key)
+                # El timeout aqui NO es opcional: _call_groq corre dentro de un
+                # asyncio.to_thread, y un to_thread no se puede cancelar. Sin
+                # techo en el SDK, una llamada colgada deja el hilo colgado y la
+                # peticion no vuelve nunca.
+                self._groq_client = Groq(api_key=groq_api_key, timeout=timeout_sec)
             except ImportError:
                 logger.warning("🤖 Paquete 'groq' no instalado, fallback Groq deshabilitado")
 
@@ -227,7 +233,7 @@ class AIHandler:
     async def _ensure_http_client(self):
         """Crea el cliente HTTP async si no existe."""
         if self._http_client is None:
-            self._http_client = httpx.AsyncClient(timeout=60.0)
+            self._http_client = httpx.AsyncClient(timeout=self._timeout_sec)
 
     # ------------------------------------------------------------------
     # LLM calls

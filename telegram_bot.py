@@ -298,6 +298,7 @@ class TelegramBot:
                 groq_model=config.ai.groq_model,
                 intent_model=config.ai.intent_model,
                 chat_model=config.ai.chat_model,
+                timeout_sec=config.ai.llm_timeout_sec,
             )
             # Knowledge Base para RAG
             if config.ai.rag_enabled:

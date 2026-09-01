@@ -12,14 +12,43 @@ Quien llama decide que hacer con el resultado: el bot lo manda por Telegram, el
 endpoint lo serializa a JSON. Los dos registran la interaccion con los mismos
 campos, que es para lo que estan `tipo`, `ok`, `error`, `fuentes` y `scores`.
 """
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
+
+import httpx
 
 from config import config
 from escalation_handler import NO_INFO_SENTINEL, build_escalation_message
 
 logger = logging.getLogger(__name__)
+
+#: Techo para TODA la respuesta, incluida la cadena de reserva.
+#: `_call_llm` intenta un backend y, si falla, el otro: dos timeouts en serie.
+#: Sin este techo, el peor caso son 40 s largos antes de decir nada.
+_MARGEN_CADENA = 5.0
+
+
+def _es_transitorio(e: BaseException) -> bool:
+    """
+    ¿Tiene sentido que el usuario reintente?
+
+    Un timeout o un 503 se arreglan solos; un TypeError no se va a arreglar
+    nunca por mucho que insista. Decirle "intenta de nuevo" a alguien cuyo
+    reintento no puede funcionar es mandarlo a dar vueltas.
+    """
+    if isinstance(e, (asyncio.TimeoutError, httpx.TimeoutException,
+                      httpx.ConnectError, httpx.ReadError)):
+        return True
+
+    # El SDK de Groq no se importa aqui -es opcional-, asi que se mira por pato:
+    # sus errores llevan el codigo HTTP encima.
+    codigo = getattr(e, "status_code", None) or getattr(e, "status", None)
+    if isinstance(codigo, int):
+        return codigo == 429 or 500 <= codigo <= 599
+
+    return False
 
 
 @dataclass
@@ -96,8 +125,9 @@ async def responder(
         fuentes = [r.chunk.source_file for r in resultados]
         scores = [round(r.score, 3) for r in resultados]
 
-        respuesta = await ai_handler.chat_with_context(
-            pregunta, [r.chunk.text for r in resultados]
+        respuesta = await asyncio.wait_for(
+            ai_handler.chat_with_context(pregunta, [r.chunk.text for r in resultados]),
+            timeout=config.ai.llm_timeout_sec * 2 + _MARGEN_CADENA,
         )
 
         # El LLM avisa con este centinela de que los fragmentos no contestaban
@@ -124,13 +154,28 @@ async def responder(
         )
 
     except Exception as e:
-        logger.error("📚 Error en RAG chat: %s", e)
+        transitorio = _es_transitorio(e)
+        logger.error(
+            "📚 Error en RAG chat (%s): %s",
+            "transitorio" if transitorio else "definitivo", e,
+        )
+
+        if transitorio:
+            texto = (
+                "El asistente tardó demasiado en responder. "
+                "Vuelve a intentarlo en un momento."
+            )
+        else:
+            # Reintentar no va a servir: se le da un camino que si lleva a algun
+            # sitio en vez de invitarle a repetir lo que acaba de fallar.
+            texto = build_escalation_message("llm_error", config.support)
+
         return RespuestaConocimiento(
-            texto="Hubo un error procesando tu pregunta. Intenta de nuevo.",
+            texto=texto,
             # "error" y no "fallback": son cosas distintas en el registro de
             # interacciones. "fallback" es que el servicio no estaba; "error" es
             # que estaba y reventó. Mezclarlos ensucia el analisis.
             tipo="error",
             ok=False,
-            error=f"{type(e).__name__}: {e}",
+            error=f"{'transitorio' if transitorio else 'definitivo'}: {type(e).__name__}: {e}",
         )

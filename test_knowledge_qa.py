@@ -9,7 +9,8 @@ queda esperando una respuesta de soporte que nadie va a mandar.
 """
 import asyncio
 import sys
-import types
+
+import httpx
 
 from escalation_handler import NO_INFO_SENTINEL
 import knowledge_qa
@@ -37,13 +38,24 @@ class KBFalsa:
 
 
 class IAFalsa:
-    def __init__(self, respuesta):
+    def __init__(self, respuesta, tarda=0.0):
         self._respuesta = respuesta
+        self._tarda = tarda
 
     async def chat_with_context(self, mensaje, chunks):
+        if self._tarda:
+            await asyncio.sleep(self._tarda)
         if isinstance(self._respuesta, Exception):
             raise self._respuesta
         return self._respuesta
+
+
+class ErrorHTTP(Exception):
+    """Imita un error del SDK de Groq, que lleva el codigo encima."""
+
+    def __init__(self, status_code):
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
 
 
 def correr(kb, ia, pregunta="como configuro la bengala"):
@@ -95,15 +107,52 @@ def test_las_fuentes_no_se_repiten_y_mantienen_el_orden():
     assert "(Fuente: bengala | alta)" in r.texto
 
 
-def test_un_fallo_del_llm_no_revienta():
+def test_un_fallo_definitivo_manda_a_soporte():
     kb = KBFalsa([ResultadoFalso("03_bengala.md")])
-    r = correr(kb, IAFalsa(RuntimeError("groq caido")))
-    # "error", no "fallback": el registro los distingue y el analisis depende
-    # de esa diferencia.
+    r = correr(kb, IAFalsa(TypeError("bug mio")))
     assert r.tipo == "error" and not r.ok
-    assert r.error == "RuntimeError: groq caido"
-    # Lo importante: quien llama siempre tiene algo que decirle al usuario.
+    assert r.error.startswith("definitivo: TypeError")
+    # Un TypeError no se arregla reintentando: no se le invita a repetir.
+    assert "ntenta de nuevo" not in r.texto
     assert r.texto
+
+
+def test_un_timeout_si_invita_a_reintentar():
+    kb = KBFalsa([ResultadoFalso("03_bengala.md")])
+    r = correr(kb, IAFalsa(httpx.ReadTimeout("se colgo")))
+    assert r.tipo == "error" and not r.ok
+    assert r.error.startswith("transitorio: ReadTimeout")
+    assert "ntentarlo" in r.texto
+
+
+def test_un_429_cuenta_como_transitorio():
+    kb = KBFalsa([ResultadoFalso("03_bengala.md")])
+    r = correr(kb, IAFalsa(ErrorHTTP(429)))
+    assert r.error.startswith("transitorio: ErrorHTTP")
+
+
+def test_un_400_no_es_transitorio():
+    kb = KBFalsa([ResultadoFalso("03_bengala.md")])
+    r = correr(kb, IAFalsa(ErrorHTTP(400)))
+    assert r.error.startswith("definitivo: ErrorHTTP")
+
+
+def test_un_llm_colgado_se_corta_solo():
+    """El techo total: sin el, la peticion no volveria nunca."""
+    import knowledge_qa as kq
+    from config import config
+
+    original = config.ai.llm_timeout_sec
+    config.ai.llm_timeout_sec = 0.05  # 0.05*2 + margen... bajamos el margen
+    kq._MARGEN_CADENA = 0.05
+    try:
+        kb = KBFalsa([ResultadoFalso("03_bengala.md")])
+        r = correr(kb, IAFalsa("nunca llega", tarda=5))
+        assert r.tipo == "error" and not r.ok
+        assert r.error.startswith("transitorio: TimeoutError")
+    finally:
+        config.ai.llm_timeout_sec = original
+        kq._MARGEN_CADENA = 5.0
 
 
 if __name__ == "__main__":
