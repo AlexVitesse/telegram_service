@@ -453,7 +453,12 @@ class FirebaseManager:
         orden lo decide Firebase y podia cambiar entre arranques.
         """
         try:
-            elegidos = elegir_por_dispositivo(all_schedules, self.get_authorized_devices)
+            # _devices_for_schedule_key y no get_authorized_devices: un horario
+            # "system" de un usuario sin Telegram va indexado por su uid, que no
+            # es ningun Telegram_ID. Con el resolver de solo Telegram, al
+            # arrancar se quedaba sin aplicar y el equipo perdia su horario
+            # hasta que alguien lo tocara desde la app -que sí usa este otro-.
+            elegidos = elegir_por_dispositivo(all_schedules, self._devices_for_schedule_key)
             cambios = sum(
                 1 for dev_id, schedule_data in elegidos.items()
                 if self._apply_schedule_to_scheduler(dev_id, schedule_data)

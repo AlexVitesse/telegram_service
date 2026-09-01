@@ -42,3 +42,8 @@ alarm_service.log
 test_mqtt_simulator.py
 test_components.py
 esp32_simulator.py
+
+# Estado de runtime: lo escribe el propio servicio y cada despliegue
+# lo revertia al formato viejo, forzando una migracion y una resincronizacion
+# desde Firebase que no hacian falta.
+schedule_config.json
