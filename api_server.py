@@ -32,6 +32,28 @@ from config import config
 logger = logging.getLogger(__name__)
 
 
+def elegir_tunel(datos: dict, puerto: int) -> Optional[str]:
+    """
+    De lo que responde la API local de ngrok, el tunel que apunta a NUESTRO
+    puerto. `None` si no hay ninguno.
+
+    No vale coger el primero: el agente de ngrok puede estar publicando otros
+    proyectos a la vez, y entonces se anuncia como endpoint de la app una URL
+    que lleva a otro servicio. El fallo no se ve -la URL existe y contesta-,
+    solo contesta cualquier otra cosa.
+
+    A donde reenvia cada tunel viene en `config.addr` ("http://localhost:8765").
+    Se compara contra ":puerto" para no confundir el 8765 con un 18765.
+    """
+    marca = f":{puerto}"
+    for t in (datos or {}).get("tunnels", []) or []:
+        publica = str(t.get("public_url", ""))
+        destino = str((t.get("config") or {}).get("addr", ""))
+        if publica.startswith("https://") and destino.endswith(marca):
+            return publica
+    return None
+
+
 class ApiSenti:
     def __init__(self, bot: Any, firebase: Any):
         # Se toman del bot en cada peticion y no en el constructor: el admin
@@ -302,16 +324,14 @@ class ApiSenti:
             async with httpx.AsyncClient(timeout=5.0) as cliente:
                 datos = (await cliente.get(config.api.ngrok_api)).json()
 
-            url = next(
-                (
-                    t["public_url"]
-                    for t in datos.get("tunnels", [])
-                    if t.get("public_url", "").startswith("https://")
-                ),
-                None,
-            )
+            url = elegir_tunel(datos, config.api.port)
             if not url:
-                logger.warning("ngrok esta corriendo pero sin tunel https")
+                otros = [t.get("public_url") for t in datos.get("tunnels", [])]
+                logger.warning(
+                    "ngrok no tiene ningun tunel https hacia el puerto %d. "
+                    "Tuneles vistos: %s",
+                    config.api.port, otros or "ninguno",
+                )
                 return
 
             await asyncio.to_thread(

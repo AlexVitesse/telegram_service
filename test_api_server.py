@@ -270,7 +270,34 @@ async def caso_cabecera_falsificada_no_estrena_cuota():
     await con_api(FirebaseFalso(None), "u1", p)
 
 
+async def caso_elige_el_tunel_de_su_puerto():
+    """
+    Caso real: el agente de ngrok ya estaba publicando OTRO proyecto y se
+    anuncio esa URL como endpoint de la app. La URL existia y contestaba, solo
+    que contestaba otra cosa: nadie se entera hasta que la app pregunta.
+    """
+    respuesta = {"tunnels": [
+        {"public_url": "https://otro-proyecto.ngrok-free.app",
+         "config": {"addr": "http://localhost:3000"}},
+        {"public_url": "https://el-nuestro.ngrok-free.app",
+         "config": {"addr": "http://localhost:8765"}},
+    ]}
+    assert api_server.elegir_tunel(respuesta, 8765) == "https://el-nuestro.ngrok-free.app"
+    # Sin tunel hacia nuestro puerto no se publica nada, aunque haya otros.
+    assert api_server.elegir_tunel(respuesta, 9999) is None
+    # Un 18765 no cuela como 8765.
+    casi = {"tunnels": [{"public_url": "https://x.ngrok-free.app",
+                         "config": {"addr": "http://localhost:18765"}}]}
+    assert api_server.elegir_tunel(casi, 8765) is None
+    # http a secas no vale, y una respuesta vacia tampoco revienta.
+    solo_http = {"tunnels": [{"public_url": "http://x.ngrok-free.app",
+                              "config": {"addr": "http://localhost:8765"}}]}
+    assert api_server.elegir_tunel(solo_http, 8765) is None
+    assert api_server.elegir_tunel({}, 8765) is None
+
+
 CASOS = [
+    caso_elige_el_tunel_de_su_puerto,
     caso_salud_no_pide_token,
     caso_sin_cabecera_401,
     caso_token_malo_401,
