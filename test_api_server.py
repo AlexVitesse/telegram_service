@@ -90,6 +90,8 @@ async def con_api(firebase, uid_valido, prueba):
     config.api.ngrok_api = ""          # que no salga a la red
     config.api.espera_min_seg = 0
     config.api.max_por_hora = 100
+    config.api.auth = "firebase"
+    config.api.clave = ""
 
     api = api_server.ApiSenti(bot_falso(), firebase)
     api._uid_del_token = lambda t: uid_valido if t == "bueno" else None
@@ -195,6 +197,52 @@ async def caso_rafaga_429():
     await con_api(FirebaseFalso(["AA_BB"]), "u1", p)
 
 
+async def caso_modo_clave_exige_la_cabecera():
+    async def p(url, api):
+        config.api.auth = "clave"
+        config.api.clave = "secreto-de-la-demo"
+        # Sin clave, fuera.
+        estado, cuerpo = await pedir(url, cuerpo={"pregunta": "hola"})
+        assert estado == 401, estado
+        assert "Clave" in cuerpo["error"]
+        # Con la clave equivocada, tambien.
+        async with aiohttp.ClientSession() as s2:
+            async with s2.post(url + "/preguntar",
+                               headers={"X-Api-Key": "otra"},
+                               json={"pregunta": "hola"}) as r:
+                assert r.status == 401, r.status
+        # Con la buena, pasa. Y NO hace falta tener equipos: en modo clave no
+        # hay usuario de Firebase a quien comprobarselos.
+        async with aiohttp.ClientSession() as s2:
+            async with s2.post(url + "/preguntar",
+                               headers={"X-Api-Key": "secreto-de-la-demo"},
+                               json={"pregunta": "hola"}) as r:
+                assert r.status == 200, r.status
+    await con_api(FirebaseFalso(None), "u1", p)
+
+
+async def caso_modo_clave_sin_clave_configurada_no_abre():
+    """Olvidar API_CLAVE no puede dejar el endpoint abierto de par en par."""
+    async def p(url, api):
+        config.api.auth = "clave"
+        config.api.clave = ""
+        estado, _ = await pedir(url, cuerpo={"pregunta": "hola"})
+        assert estado == 503, estado
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p)
+
+
+async def caso_modo_abierto_deja_pasar_y_sigue_contando():
+    async def p(url, api):
+        config.api.auth = "abierto"
+        estado, cuerpo = await pedir(url, cuerpo={"pregunta": "hola"})
+        assert estado == 200, estado
+        # Aunque no haya usuario, el tope sigue llevando cuenta por conexion.
+        api._limitador.espera_min_seg = 30
+        estado2, _ = await pedir(url, cuerpo={"pregunta": "otra"})
+        assert estado2 == 429, estado2
+    await con_api(FirebaseFalso(None), "u1", p)
+
+
 CASOS = [
     caso_salud_no_pide_token,
     caso_sin_cabecera_401,
@@ -204,6 +252,9 @@ CASOS = [
     caso_pregunta_vacia_400,
     caso_feliz,
     caso_rafaga_429,
+    caso_modo_clave_exige_la_cabecera,
+    caso_modo_clave_sin_clave_configurada_no_abre,
+    caso_modo_abierto_deja_pasar_y_sigue_contando,
 ]
 
 

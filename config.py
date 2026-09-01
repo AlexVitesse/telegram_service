@@ -115,6 +115,15 @@ class ApiConfig:
     # este proceso. Escuchar en 0.0.0.0 lo dejaria abierto a la red del VPS.
     host: str = _get_env("API_HOST", "127.0.0.1")
     port: int = _get_env_int("API_PORT", 8765)
+    # Como se identifica quien pregunta:
+    #   "firebase"  el ID token de la app. Lo correcto en produccion.
+    #   "clave"     una clave compartida en API_CLAVE. Para demos: no hace
+    #               falta sesion, pero tampoco queda abierto al primero que
+    #               encuentre la URL de ngrok.
+    #   "abierto"   sin autenticacion. SOLO en local, nunca detras de ngrok:
+    #               cada pregunta gasta LLM y la factura es tuya.
+    auth: str = _get_env("API_AUTH", "firebase")
+    clave: str = _get_env("API_CLAVE", "")
     # Preguntas por hora y por usuario. Cada una gasta LLM: sin tope, un token
     # valido basta para vaciar la cuota.
     max_por_hora: int = _get_env_int("API_MAX_POR_HORA", 20)

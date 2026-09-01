@@ -17,10 +17,11 @@ Quien contesta es `knowledge_qa.responder()`, el mismo que usa el bot, así que
 los dos canales dan **la misma respuesta a la misma pregunta**.
 """
 import asyncio
+import hmac
 import json
 import logging
 import time
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 from aiohttp import web
 
@@ -47,6 +48,61 @@ class ApiSenti:
     # ------------------------------------------------------------------
     # Autenticación y autorización
     # ------------------------------------------------------------------
+
+    def _identificar(self, request: web.Request) -> Tuple[Optional[str], Optional[web.Response]]:
+        """
+        Quién pregunta. Devuelve `(uid, None)` si pasa, o `(None, respuesta)`
+        con el error si no.
+
+        El `uid` sirve para dos cosas: el tope de uso y el registro. En los
+        modos que no son "firebase" no hay un usuario real, así que se usa un
+        identificador de la conexión — peor, pero mejor que no llevar cuenta.
+        """
+        modo = config.api.auth
+
+        if modo == "abierto":
+            return f"ip:{self._ip(request)}", None
+
+        if modo == "clave":
+            if not config.api.clave:
+                logger.error("API_AUTH=clave pero API_CLAVE esta vacia")
+                return None, web.json_response(
+                    {"error": "El asistente no está configurado."}, status=503
+                )
+            enviada = request.headers.get("X-Api-Key", "")
+            # compare_digest y no ==: comparar cadenas normalmente tarda mas
+            # cuanto mas coincide el principio, y eso deja adivinar la clave
+            # caracter a caracter midiendo tiempos.
+            if not hmac.compare_digest(enviada, config.api.clave):
+                return None, web.json_response({"error": "Clave no válida."}, status=401)
+            return f"ip:{self._ip(request)}", None
+
+        # modo firebase
+        token = self._token_de(request)
+        if not token:
+            return None, web.json_response(
+                {"error": "Falta la cabecera Authorization: Bearer <token>."},
+                status=401,
+            )
+        uid = self._uid_del_token(token)
+        if not uid:
+            return None, web.json_response(
+                {"error": "Sesión no válida. Vuelve a iniciar sesión."}, status=401
+            )
+        if not self._esta_habilitado(uid):
+            return None, web.json_response(
+                {"error": "Tu cuenta todavía no tiene ningún equipo vinculado."},
+                status=403,
+            )
+        return uid, None
+
+    @staticmethod
+    def _ip(request: web.Request) -> str:
+        """Detrás de ngrok la IP real llega en X-Forwarded-For."""
+        reenviada = request.headers.get("X-Forwarded-For", "")
+        if reenviada:
+            return reenviada.split(",")[0].strip()
+        return request.remote or "desconocida"
 
     @staticmethod
     def _token_de(request: web.Request) -> Optional[str]:
@@ -108,24 +164,9 @@ class ApiSenti:
     async def preguntar(self, request: web.Request) -> web.Response:
         t0 = time.monotonic()
 
-        token = self._token_de(request)
-        if not token:
-            return web.json_response(
-                {"error": "Falta la cabecera Authorization: Bearer <token>."},
-                status=401,
-            )
-
-        uid = self._uid_del_token(token)
-        if not uid:
-            return web.json_response(
-                {"error": "Sesión no válida. Vuelve a iniciar sesión."}, status=401
-            )
-
-        if not self._esta_habilitado(uid):
-            return web.json_response(
-                {"error": "Tu cuenta todavía no tiene ningún equipo vinculado."},
-                status=403,
-            )
+        uid, error = self._identificar(request)
+        if error is not None:
+            return error
 
         permitido, motivo = self._limitador.permitir(uid)
         if not permitido:
@@ -200,10 +241,16 @@ class ApiSenti:
         sitio = web.TCPSite(self._runner, config.api.host, config.api.port)
         await sitio.start()
         logger.info(
-            "API de Senti escuchando en http://%s:%d",
+            "API de Senti escuchando en http://%s:%d (auth: %s)",
             config.api.host,
             config.api.port,
+            config.api.auth,
         )
+        if config.api.auth == "abierto":
+            logger.warning(
+                "⚠️ API SIN AUTENTICACION. Solo para pruebas en local: detras de "
+                "ngrok, cualquiera que de con la URL gasta tu cuota de LLM."
+            )
 
         asyncio.create_task(self.publicar_url())
 
