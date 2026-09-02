@@ -374,7 +374,14 @@ class AIHandler:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-            return resp.choices[0].message.content.strip()
+            contenido = (resp.choices[0].message.content or "").strip()
+            if not contenido:
+                # Mismo guard que `_call_ollama`. Sin el, una respuesta vacia
+                # sube como respuesta valida y el usuario recibe un mensaje que
+                # solo dice "(Fuente: ...)": vacio con pinta de haber
+                # funcionado. Visto en produccion.
+                raise RuntimeError(f"Groq empty response (model={use_model})")
+            return contenido
 
         async with self._turno():
             return await asyncio.to_thread(_blocking_call)

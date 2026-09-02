@@ -71,22 +71,24 @@ class AIConfig:
     # Ollama (principal)
     ollama_base_url: str = _get_env("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = _get_env("OLLAMA_MODEL", "gpt-oss:20b")
-    # Modelo para intent parsing (JSON estricto, necesita ser preciso)
+    # Modelo para intent parsing (JSON estricto) y para el RAG.
     #
-    # OJO: estos dos defaults son modelos de Groq y `llm_backend` por defecto es
-    # "ollama". Con un .env que no declare INTENT_MODEL ni CHAT_MODEL y backend
-    # ollama, `AIHandler.__init__` los detecta y los sustituye por
-    # `ollama_model` -avisando en el log-, asi que el modelo que contesta NO es
-    # el que se lee aqui. Antes ademas caia en un nombre mal escrito
-    # ("gtp-oss:20b") y Ollama respondia "model not found".
+    # Vacio a proposito: `AIHandler` usa el modelo del backend configurado.
+    # Antes el default era "llama-3.1-8b-instant", un modelo concreto de Groq
+    # que **dejo de existir**: Groq devolvia 404 model_not_found en CADA
+    # clasificacion y se caia a la reserva de Ollama sin que nadie lo notara.
+    # Alli el modelo local es de razonamiento y deja `content` vacio -su salida
+    # va en `thinking`- o se queda sin tokens a mitad del JSON, asi que
+    # `parse_intent` devolvia None y las ordenes se iban al RAG: "arma la
+    # alarma" contestada con documentacion. Se vieron cuatro veces en
+    # produccion antes de encontrarlo.
     #
-    # No se cambian a "" -que dejaria a AIHandler elegir el del backend- porque
-    # en el VPS, con backend=groq, eso moveria el clasificador de
-    # llama-3.1-8b-instant a GROQ_MODEL sin que nadie lo pida. Declara los dos
-    # en el .env si quieres saber con certeza cual esta contestando.
-    intent_model: str = _get_env("INTENT_MODEL", "llama-3.1-8b-instant")
-    # Modelo para RAG chat (respuestas conversacionales)
-    chat_model: str = _get_env("CHAT_MODEL", "openai/gpt-oss-20b")
+    # Clavar aqui el nombre de un modelo de un proveedor es apostar a que ese
+    # nombre siga vivo. Seguir al backend no: si el backend contesta, este
+    # modelo existe. Declaralos en el .env solo si quieres uno distinto para
+    # cada tarea, y entonces te toca a ti mantenerlos vivos.
+    intent_model: str = _get_env("INTENT_MODEL", "")
+    chat_model: str = _get_env("CHAT_MODEL", "")
     # Groq (fallback opcional)
     groq_api_key: str = _get_env("GROQ_API_KEY", "")
     groq_model: str = _get_env("GROQ_MODEL", "llama-3.1-8b-instant")

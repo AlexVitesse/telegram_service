@@ -58,6 +58,41 @@ def test_el_default_de_ollama_no_es_un_nombre_inventado():
     assert "gtp" not in nombre, f"{nombre!r}: 'gtp' es el typo de 'gpt'"
 
 
+def test_ningun_default_clava_el_nombre_de_un_modelo():
+    """
+    El fallo que costo cuatro observaciones en produccion: el default de
+    `intent_model` era "llama-3.1-8b-instant", que dejo de existir en Groq. Cada
+    clasificacion daba 404, caia a la reserva de Ollama -un modelo de
+    razonamiento que deja `content` vacio- y las ordenes acababan contestadas
+    con documentacion.
+
+    Clavar el nombre de un modelo de un proveedor es apostar a que ese nombre
+    siga vivo. Que sigan al backend: si el backend contesta, el modelo existe.
+    """
+    c = AIConfig()
+    assert c.intent_model == "", f"intent_model default clava {c.intent_model!r}"
+    assert c.chat_model == "", f"chat_model default clava {c.chat_model!r}"
+
+    h = ai_handler.AIHandler(
+        llm_backend="groq", groq_api_key="x", groq_model=c.groq_model,
+        intent_model=c.intent_model, chat_model=c.chat_model,
+    )
+    assert h._intent_model == c.groq_model, h._intent_model
+    assert h._chat_model == c.groq_model, h._chat_model
+
+
+def test_una_respuesta_vacia_no_pasa_por_buena():
+    """
+    Groq devolviendo "" subia como respuesta valida y el usuario recibia un
+    mensaje que solo decia "(Fuente: ...)". `_call_ollama` ya lo comprobaba;
+    `_call_groq` no. Visto en produccion.
+    """
+    import inspect
+    fuente = inspect.getsource(ai_handler.AIHandler._call_groq)
+    assert "empty response" in fuente, "_call_groq no comprueba la respuesta vacia"
+    assert "empty response" in inspect.getsource(ai_handler.AIHandler._call_ollama)
+
+
 def test_con_backend_ollama_ningun_modelo_acaba_siendo_de_groq():
     """
     Los defaults de intent/chat SON modelos de Groq mientras el backend por
