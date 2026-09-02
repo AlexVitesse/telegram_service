@@ -129,6 +129,11 @@ class ApiConfig:
     max_por_hora: int = _get_env_int("API_MAX_POR_HORA", 20)
     # Segundos minimos entre dos preguntas del mismo usuario.
     espera_min_seg: float = float(_get_env("API_ESPERA_MIN_SEG", "3"))
+    # Origenes que pueden llamar al endpoint desde un navegador (CORS).
+    # La app de Capacitor es https://localhost en Android y capacitor://localhost
+    # en iOS. "*" vale porque aqui CORS no es la barrera de seguridad -lo es el
+    # token, y no se usan cookies-, pero se deja ajustable para poder cerrarlo.
+    cors: str = _get_env("API_CORS", "*")
     # La API local del agente de ngrok, para publicar la URL publica en RTDB.
     # Vacio = no se publica.
     ngrok_api: str = _get_env("NGROK_API", "http://127.0.0.1:4040/api/tunnels")

@@ -265,13 +265,55 @@ class ApiSenti:
             logger.error("No se pudo registrar la interaccion de la app: %s", e)
 
     # ------------------------------------------------------------------
+    # CORS
+    # ------------------------------------------------------------------
+
+    def _cabeceras_cors(self, request: web.Request) -> dict:
+        permitidos = [o.strip() for o in config.api.cors.split(",") if o.strip()]
+        origen = request.headers.get("Origin", "")
+        if "*" in permitidos:
+            devolver = origen or "*"
+        elif origen in permitidos:
+            devolver = origen
+        else:
+            return {}
+        return {
+            "Access-Control-Allow-Origin": devolver,
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+            # ngrok-skip-browser-warning va aqui a proposito: sin ella ngrok
+            # devuelve su pantalla de aviso en vez de la respuesta, y esa
+            # cabecera es justo la que obliga al navegador a hacer preflight.
+            "Access-Control-Allow-Headers":
+                "Content-Type, Authorization, X-Api-Key, ngrok-skip-browser-warning",
+            "Access-Control-Max-Age": "600",
+            "Vary": "Origin",
+        }
+
+    @web.middleware
+    async def _cors(self, request: web.Request, handler):
+        """
+        Sin esto la app no puede llamar al endpoint desde el WebView.
+
+        Corre en https://localhost y el endpoint esta en otro dominio, asi que
+        el navegador exige CORS. Y con una cabecera propia -la de ngrok- ni
+        siquiera el GET es una peticion "simple": manda un OPTIONS antes. Desde
+        curl no se nota nada de esto, porque curl no aplica CORS.
+        """
+        if request.method == "OPTIONS":
+            return web.Response(status=204, headers=self._cabeceras_cors(request))
+        respuesta = await handler(request)
+        respuesta.headers.update(self._cabeceras_cors(request))
+        return respuesta
+
+    # ------------------------------------------------------------------
     # Ciclo de vida
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        app = web.Application()
+        app = web.Application(middlewares=[self._cors])
         app.router.add_post("/preguntar", self.preguntar)
         app.router.add_get("/salud", self.salud)
+        app.router.add_route("OPTIONS", "/{cualquiera:.*}", self._preflight)
 
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
@@ -290,6 +332,9 @@ class ApiSenti:
             )
 
         self._tarea_url = asyncio.create_task(self.publicar_url())
+
+    async def _preflight(self, request: web.Request) -> web.Response:
+        return web.Response(status=204, headers=self._cabeceras_cors(request))
 
     async def stop(self) -> None:
         if self._tarea_url:

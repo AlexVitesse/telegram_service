@@ -92,6 +92,7 @@ async def con_api(firebase, uid_valido, prueba):
     config.api.max_por_hora = 100
     config.api.auth = "firebase"
     config.api.clave = ""
+    config.api.cors = "*"
 
     api = api_server.ApiSenti(bot_falso(), firebase)
     api._uid_del_token = lambda t: uid_valido if t == "bueno" else None
@@ -296,6 +297,52 @@ async def caso_elige_el_tunel_de_su_puerto():
     assert api_server.elegir_tunel({}, 8765) is None
 
 
+async def caso_preflight_contesta():
+    """
+    El WebView de la app corre en https://localhost y el endpoint esta en otro
+    dominio: antes de cada peticion manda un OPTIONS. Sin esta ruta, el
+    navegador bloquea TODO -incluso el GET-, y desde curl no se nota porque
+    curl no aplica CORS. Fue exactamente el fallo que se escapo.
+    """
+    async def p(url, api):
+        async with aiohttp.ClientSession() as s2:
+            async with s2.options(
+                url + "/preguntar",
+                headers={
+                    "Origin": "https://localhost",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "authorization,content-type",
+                },
+            ) as r:
+                assert r.status == 204, r.status
+                assert r.headers["Access-Control-Allow-Origin"] == "https://localhost"
+                permitidas = r.headers["Access-Control-Allow-Headers"].lower()
+                assert "authorization" in permitidas
+                # La de ngrok tambien: es la que obliga al preflight.
+                assert "ngrok-skip-browser-warning" in permitidas
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p)
+
+
+async def caso_las_respuestas_llevan_cors():
+    async def p(url, api):
+        async with aiohttp.ClientSession() as s2:
+            async with s2.get(url + "/salud",
+                              headers={"Origin": "https://localhost"}) as r:
+                assert r.status == 200
+                assert r.headers["Access-Control-Allow-Origin"] == "https://localhost"
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p)
+
+
+async def caso_cors_cerrado_no_devuelve_cabecera():
+    async def p(url, api):
+        config.api.cors = "https://solo-este.example"
+        async with aiohttp.ClientSession() as s2:
+            async with s2.get(url + "/salud",
+                              headers={"Origin": "https://otro.example"}) as r:
+                assert "Access-Control-Allow-Origin" not in r.headers
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p)
+
+
 CASOS = [
     caso_elige_el_tunel_de_su_puerto,
     caso_salud_no_pide_token,
@@ -310,6 +357,9 @@ CASOS = [
     caso_modo_clave_sin_clave_configurada_no_abre,
     caso_modo_abierto_deja_pasar_y_sigue_contando,
     caso_cabecera_falsificada_no_estrena_cuota,
+    caso_preflight_contesta,
+    caso_las_respuestas_llevan_cors,
+    caso_cors_cerrado_no_devuelve_cabecera,
 ]
 
 
