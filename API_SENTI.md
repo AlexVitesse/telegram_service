@@ -50,7 +50,29 @@ un campo sin limite es una factura sin limite.
 | `401` | Falta el token, o no es valido |
 | `403` | El uid no tiene ningun equipo vinculado |
 | `429` | Tope de uso — el mensaje dice cuanto falta |
-| `503` | `API_AUTH=clave` pero `API_CLAVE` esta vacia |
+| `503` + `reintentar_en` | El LLM no da abasto ahora mismo. **Reintentable** |
+| `503` sin `reintentar_en` | El asistente no esta configurado. NO se arregla esperando |
+
+### Ocupado: el 503 que si merece reintentarse
+
+Cuando hay demasiadas consultas en cola, el endpoint rebota en vez de dejar
+esperando a alguien que ya no va a llegar a tiempo:
+
+```json
+HTTP 503
+Retry-After: 5
+{ "error": "Estoy atendiendo otras consultas en este momento. Vuelve a preguntarme en unos segundos.",
+  "reintentar_en": 5 }
+```
+
+**Lo que distingue "ocupado" de "caido" es la presencia de `reintentar_en` en el
+cuerpo, no el codigo.** El 503 a secas ya significaba "el asistente no esta
+configurado", que es lo contrario: eso no se arregla esperando. Se manda tambien
+`Retry-After`, pero la app no necesita leer cabeceras: el campo del cuerpo basta,
+y el texto viaja en `error` como en el resto de rechazos.
+
+El `429` sigue siendo otra cosa distinta: "has preguntado demasiadas veces tu",
+no "el servidor esta lleno".
 
 ### `GET /salud`
 
@@ -153,6 +175,11 @@ solo que contesta otra cosa.
 3. Añadir siempre `ngrok-skip-browser-warning: 1`, o ngrok devuelve su pantalla
    de aviso en lugar del JSON.
 4. Tratar `403` como "cuenta sin equipos vinculados", no como error generico.
+5. Tratar un `503` **con `reintentar_en`** como reintentable y pintarlo como un
+   mensaje normal, no como "sin conexion": la conexion estaba bien.
+6. Cortar por su cuenta a los **45 s**. El endpoint se compromete a contestar
+   antes -su presupuesto son 40 s, `API_BUDGET_SEC`-, asi que ese corte es la
+   red de seguridad y no deberia dispararse nunca.
 
 ---
 

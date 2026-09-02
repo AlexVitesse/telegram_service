@@ -95,9 +95,13 @@ es el numero que decide el reparto de la fase 2.
 
 ---
 
-## Fase 1 — La pila: un semaforo en `_call_llm`
+## Fase 1 — La pila: un semaforo en las llamadas al LLM  ✅ HECHO
 
-Todo pasa por `ai_handler._call_llm` (`ai_handler.py:297`). Un solo sitio.
+Se envuelven las llamadas REALES -`_call_ollama` y `_call_groq`- y no
+`_call_llm`, para que ninguna via se escape: ni la cadena de reserva que hay
+dentro de `_call_llm`, ni el reintento contra Groq que `parse_intent` hace por
+su cuenta cuando el JSON viene invalido. Ese ultimo se habria colado si el
+semaforo estuviera solo en `_call_llm`.
 
     # ai_handler.py, en __init__
     self._pila = asyncio.Semaphore(max_concurrent)
@@ -131,9 +135,10 @@ momento", que es una respuesta honesta y ademas barata.
   `LlmOcupado` ahi cae solo en el camino de siempre. El RAG si tiene que
   contestar el texto de ocupado.
 
-**Prueba** (`test_ai_handler_pila.py`): 20 corrutinas contra un `_call_llm` falso
-que apunta el maximo de simultaneas; `assert maximo <= 2`, y que a partir de la
-10ª sale `LlmOcupado` sin haber esperado.
+**Hecho en `test_ai_handler.py`**: 20 corrutinas contra `_call_ollama` con el
+cliente HTTP sustituido, comprobando el maximo de simultaneas; y la cola llena
+rebotando sin esperar. Se prueba por `_call_ollama` y no por `_turno` a pelo
+porque lo que hay que vigilar es que la llamada real siga pasando por la pila.
 
 ### Como se contesta "ocupado" (acordado con la sesion de la app)
 
@@ -163,7 +168,7 @@ verdad — y no antes.
 
 ---
 
-## Fase 2 — Un presupuesto por peticion, no por llamada
+## Fase 2 — Un presupuesto por peticion, no por llamada  ✅ HECHO
 
 Un numero, `API_BUDGET_SEC` (40 s: los 45 del cliente menos margen), y
 `preguntar()` lo reparte:
@@ -210,7 +215,7 @@ techo, como en el endpoint.
 
 ---
 
-## Fase 3 — Que el fallback no cobre dos veces
+## Fase 3 — Que el fallback no cobre dos veces  ✅ HECHO
 
 En `_call_llm`, distinguir *no estaba* de *no llego a tiempo*:
 
@@ -296,9 +301,9 @@ sea esta.
 | ✅ 5 Bot | Desarme accidental de toda la casa | hecho | — |
 | ✅ 4 Cabos | Dos trampas menores | hecho | — |
 | ✅ 6 Defaults | Pedirle a Ollama un modelo mal escrito | hecho | — |
-| 1 Pila | Que 10 a la vez no expiren las 10 | ~15 lineas | 0 |
-| 2 Presupuesto | 55 s de peor caso -> 40 s repartidos | ~20 lineas | 1 (los 45 s de la app ya estan) |
-| 3 Fallback | Pagar el timeout dos veces | ~4 lineas | 1 |
+| ✅ 1 Pila | Que 10 a la vez no expiren las 10 | hecho | — |
+| ✅ 2 Presupuesto | 55 s de peor caso -> 40 s repartidos | hecho | — |
+| ✅ 3 Fallback | Pagar el timeout dos veces | hecho | — |
 
 Fuera de este plan, a proposito: cache de preguntas repetidas (la clave ya
 existe, `normalizar_pregunta`), *circuit breaker* por backend, metricas

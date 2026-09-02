@@ -20,6 +20,7 @@ from typing import Any, List, Optional
 
 import httpx
 
+from ai_handler import LlmOcupado
 from config import config
 from escalation_handler import NO_INFO_SENTINEL, build_escalation_message
 
@@ -58,7 +59,8 @@ class RespuestaConocimiento:
 
     texto: str
     #: "rag" contesto la documentacion · "escalation" toca soporte ·
-    #: "fallback" el servicio no estaba · "error" estaba y reventó.
+    #: "fallback" el servicio no estaba · "error" estaba y reventó ·
+    #: "ocupado" estaba y no daba abasto (reintentar SI sirve).
     tipo: str
     ok: bool
     error: Optional[str] = None
@@ -115,11 +117,17 @@ async def responder(
     pregunta: str,
     knowledge_base: Any,
     ai_handler: Any,
+    timeout: Optional[float] = None,
 ) -> RespuestaConocimiento:
     """
     Busca en la documentacion y contesta. No lanza: los fallos vuelven como una
     RespuestaConocimiento con `ok=False`, porque quien llama siempre tiene que
     tener algo que decirle al usuario.
+
+    `timeout` es el techo para la llamada al LLM. Sin el se usa el de siempre,
+    que es lo que quiere el bot de Telegram: alli no hay un cliente cortando por
+    su cuenta. El endpoint HTTP si lo pasa, porque reparte un presupuesto entre
+    el clasificador y esta llamada.
     """
     if not knowledge_base or not ai_handler:
         return RespuestaConocimiento(
@@ -158,7 +166,7 @@ async def responder(
 
         respuesta = await asyncio.wait_for(
             ai_handler.chat_with_context(pregunta, [r.chunk.text for r in resultados]),
-            timeout=config.ai.llm_timeout_sec * 2 + _MARGEN_CADENA,
+            timeout=timeout or config.ai.llm_timeout_sec * 2 + _MARGEN_CADENA,
         )
 
         # El LLM avisa con este centinela de que los fragmentos no contestaban
@@ -185,6 +193,22 @@ async def responder(
             ok=True,
             fuentes=fuentes,
             scores=scores,
+        )
+
+    except LlmOcupado as e:
+        # No es un fallo: es que ahora mismo no da abasto. Se separa del resto
+        # porque la respuesta es distinta -reintentar en unos segundos SI sirve-
+        # y porque el endpoint la convierte en un 503 con `reintentar_en`, que
+        # es lo que le permite a la app distinguir "ocupado" de "caido".
+        logger.warning("📚 RAG rebotado por la pila: %s", e)
+        return RespuestaConocimiento(
+            texto=(
+                "Estoy atendiendo otras consultas en este momento. "
+                "Vuelve a preguntarme en unos segundos."
+            ),
+            tipo="ocupado",
+            ok=False,
+            error="llm_ocupado",
         )
 
     except Exception as e:

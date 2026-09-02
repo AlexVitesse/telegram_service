@@ -9,11 +9,45 @@ import asyncio
 import json
 import logging
 import re
+from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any, List
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+#: Cuantos segundos decirle a quien rebota que espere. Un numero suelto y no
+#: configuracion: es una sugerencia para el usuario, no un parametro a ajustar.
+ESPERA_SUGERIDA_SEG = 5
+
+
+class LlmOcupado(RuntimeError):
+    """
+    La pila esta llena: hay tantas llamadas esperando turno que encolar una mas
+    solo serviria para que expirase haciendo cola.
+
+    Es distinto de un timeout y de un backend caido: aqui el servicio funciona,
+    solo que ahora mismo no da abasto, y reintentar en unos segundos si tiene
+    sentido. Quien la reciba deberia decirlo asi.
+    """
+
+
+def _no_merece_reserva(e: BaseException) -> bool:
+    """
+    ¿Es un fallo que hace inutil probar el otro backend?
+
+    Un 503 o una conexion rehusada son instantaneos y al otro backend le queda
+    todo el tiempo por delante: ahi la reserva vale. Un **timeout** no: ya te
+    gastaste el presupuesto esperando, y repetirlo entero es cobrarselo dos
+    veces al mismo usuario. Con la pila delante es ademas quitarle el sitio a
+    otro que si podia llegar.
+
+    `LlmOcupado` tampoco: la pila la comparten los dos backends, asi que si esta
+    llena para uno lo esta para el otro.
+    """
+    return isinstance(
+        e, (LlmOcupado, asyncio.TimeoutError, httpx.TimeoutException)
+    )
 
 
 def _looks_like_ollama_model(name: str) -> bool:
@@ -182,6 +216,8 @@ class AIHandler:
         intent_model: str = "",
         chat_model: str = "",
         timeout_sec: float = 20.0,
+        max_concurrent: int = 2,
+        max_cola: int = 8,
     ):
         self._backend = llm_backend
         self._ollama_base_url = ollama_base_url.rstrip("/")
@@ -195,6 +231,14 @@ class AIHandler:
         self._groq_client = None
         self._http_client: Optional[httpx.AsyncClient] = None
         self._timeout_sec = timeout_sec
+
+        # La pila. Sin esto no habia NADA que limitase cuantas llamadas al LLM
+        # hay en vuelo: con Ollama, que las serializa en su propia cola, diez a
+        # la vez significa que las diez expiran juntas mientras la maquina sigue
+        # generando texto que ya nadie va a leer.
+        self._pila = asyncio.Semaphore(max_concurrent)
+        self._max_cola = max_cola
+        self._en_cola = 0
 
         # Detectar configuración incompatible: backend=ollama con modelos de Groq
         if llm_backend == "ollama":
@@ -235,6 +279,38 @@ class AIHandler:
         if self._http_client is None:
             self._http_client = httpx.AsyncClient(timeout=self._timeout_sec)
 
+    @asynccontextmanager
+    async def _turno(self):
+        """
+        Espera sitio en la pila, o rebota si la cola ya es demasiado larga.
+
+        Envuelve las llamadas REALES -`_call_ollama` y `_call_groq`- y no
+        `_call_llm`, para que ninguna via se escape: ni la cadena de reserva de
+        `_call_llm`, ni el reintento contra Groq que `parse_intent` hace por su
+        cuenta cuando el JSON viene invalido.
+
+        El limite de cola no es un adorno. Un semaforo sin el solo mueve el
+        atasco: la peticion espera turno, se le acaba el techo mientras espera,
+        y el usuario recibe un timeout DESPUES de haber ocupado sitio. Rebotar
+        en 0 ms con un "estoy ocupado" es mas honesto y ademas mas barato.
+
+        Se espera dentro del `wait_for` que ya tiene puesto cada llamador, asi
+        que el techo sigue cubriendo la espera y no hace falta uno nuevo.
+        """
+        if self._en_cola >= self._max_cola:
+            logger.warning(
+                "🤖 Pila llena (%d esperando): rebotando la consulta",
+                self._en_cola,
+            )
+            raise LlmOcupado("hay demasiadas consultas en cola")
+
+        self._en_cola += 1
+        try:
+            async with self._pila:
+                yield
+        finally:
+            self._en_cola -= 1
+
     # ------------------------------------------------------------------
     # LLM calls
     # ------------------------------------------------------------------
@@ -243,21 +319,22 @@ class AIHandler:
         """Llama a Ollama REST API."""
         await self._ensure_http_client()
         effective_model = model or self._ollama_model
-        response = await self._http_client.post(
-            f"{self._ollama_base_url}/api/chat",
-            json={
-                "model": effective_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "stream": False,
-                "options": {
-                    "temperature": temperature,
-                    "num_predict": max_tokens,
+        async with self._turno():
+            response = await self._http_client.post(
+                f"{self._ollama_base_url}/api/chat",
+                json={
+                    "model": effective_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "stream": False,
+                    "options": {
+                        "temperature": temperature,
+                        "num_predict": max_tokens,
+                    },
                 },
-            },
-        )
+            )
         response.raise_for_status()
         body = response.json()
         if "error" in body:
@@ -292,7 +369,8 @@ class AIHandler:
             )
             return resp.choices[0].message.content.strip()
 
-        return await asyncio.to_thread(_blocking_call)
+        async with self._turno():
+            return await asyncio.to_thread(_blocking_call)
 
     async def _call_llm(self, system_prompt: str, user_prompt: str, model: str = "", temperature: float = 0.1, max_tokens: int = 512) -> str:
         """
@@ -303,6 +381,8 @@ class AIHandler:
             try:
                 return await self._call_ollama(system_prompt, user_prompt, model, temperature, max_tokens)
             except Exception as e:
+                if _no_merece_reserva(e):
+                    raise
                 logger.warning("🤖 Ollama falló (%s), intentando fallback Groq...", e)
                 if self._groq_client:
                     # Fallback: usar modelo default de Groq, no el de Ollama
@@ -313,6 +393,8 @@ class AIHandler:
             try:
                 return await self._call_groq(system_prompt, user_prompt, model, temperature, max_tokens)
             except Exception as e:
+                if _no_merece_reserva(e):
+                    raise
                 logger.warning("🤖 Groq falló (%s), intentando fallback Ollama...", e)
                 # Fallback: usar modelo default de Ollama, no el de Groq
                 return await self._call_ollama(system_prompt, user_prompt, "", temperature, max_tokens)

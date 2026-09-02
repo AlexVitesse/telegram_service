@@ -30,12 +30,28 @@ from typing import Any, Optional, Tuple
 
 from aiohttp import web
 
+import ai_handler
 import comandos_app
 import knowledge_qa
 from api_limites import Limitador, normalizar_pregunta
 from config import config
 
 logger = logging.getLogger(__name__)
+
+#: Que parte del presupuesto puede gastarse el clasificador. El resto es del
+#: RAG, que es quien de verdad tiene que redactar algo. Con los 40 s de hoy son
+#: 10 para clasificar y ~28 para contestar.
+_PARTE_CLASIFICADOR = 0.25
+
+#: Lo que se reserva para serializar y devolver la respuesta ya calculada. Sin
+#: esto, el ultimo segundo se lo lleva el LLM y el cliente corta justo cuando
+#: habia respuesta.
+_MARGEN_RESPUESTA = 2.0
+
+
+def _restante(limite: float) -> float:
+    """Segundos que quedan del presupuesto. Nunca negativo."""
+    return max(0.0, limite - time.monotonic())
 
 
 def elegir_tunel(datos: dict, puerto: int) -> Optional[str]:
@@ -226,12 +242,17 @@ class ApiSenti:
                 {"error": "Mándame una pregunta."}, status=400
             )
 
+        # Todo lo que queda -clasificar y contestar- sale de este presupuesto,
+        # en vez de que cada tramo pida el suyo como si fuera el unico. El
+        # limite es absoluto: lo que se lleve el clasificador se lo quita al RAG.
+        limite = t0 + config.api.budget_sec
+
         # Antes del RAG: si la frase era una orden, la contesta como orden y la
         # ejecuta la app. Si no viene `dispositivos` no se clasifica nada y el
         # camino de abajo es el de siempre, que es lo que mantiene funcionando
         # a las versiones de la app ya publicadas.
         orden, intento = await self._como_orden(
-            pregunta, (cuerpo or {}).get("dispositivos")
+            pregunta, (cuerpo or {}).get("dispositivos"), limite
         )
         if orden is not None:
             motivo_log = orden.pop("motivo", None)
@@ -253,11 +274,26 @@ class ApiSenti:
             pregunta,
             getattr(self._bot, "knowledge_base", None),
             getattr(self._bot, "ai_handler", None),
+            # Lo que quede del presupuesto, menos lo que cuesta serializar y
+            # contestar. Nunca menos de un segundo: pedir un techo de 0 s es
+            # garantizar el timeout en vez de intentarlo.
+            timeout=max(1.0, _restante(limite) - _MARGEN_RESPUESTA),
         )
 
         # Mismo registro que el bot: las preguntas de la app cuentan igual para
         # saber que no sabe contestar Senti.
         self._registrar(uid, pregunta, r, int((time.monotonic() - t0) * 1000))
+
+        if r.tipo == "ocupado":
+            # 503 porque el servicio no da abasto ahora mismo, pero lo que la
+            # app mira para saber que SI merece reintentar es `reintentar_en`:
+            # el 503 a secas ya lo usa "El asistente no está configurado", que
+            # es lo contrario -no se arregla esperando-. Acordado con la app.
+            return web.json_response(
+                {"error": r.texto, "reintentar_en": ai_handler.ESPERA_SUGERIDA_SEG},
+                status=503,
+                headers={"Retry-After": str(ai_handler.ESPERA_SUGERIDA_SEG)},
+            )
 
         return web.json_response(
             {
@@ -268,7 +304,7 @@ class ApiSenti:
         )
 
     async def _como_orden(
-        self, pregunta: str, dispositivos: Any
+        self, pregunta: str, dispositivos: Any, limite: float
     ) -> Tuple[Optional[dict], Optional[dict]]:
         """
         ¿Era una orden? Devuelve `(respuesta, intencion)`, o `(None, None)` para
@@ -298,14 +334,16 @@ class ApiSenti:
         ]
 
         try:
-            # Techo propio, y más corto que el de una llamada suelta:
-            # `parse_intent` puede encadenar Ollama y luego Groq -40 s en el
-            # peor caso- y detrás todavía viene el RAG con el suyo. Una orden
-            # que tarda tanto en clasificarse ya no la espera nadie; sale más a
-            # cuenta tratarla como pregunta.
+            # Un cuarto del presupuesto, y nunca más de lo que queda. Clasificar
+            # es una llamada corta: si tarda más que eso, la orden ya no la
+            # espera nadie y sale más a cuenta tratarla como pregunta -que es
+            # justo lo que pasa cuando expira-. El resto del tiempo es del RAG.
             intento = await asyncio.wait_for(
                 ia.parse_intent(pregunta, equipos),
-                timeout=config.ai.llm_timeout_sec / 2,
+                timeout=min(
+                    config.api.budget_sec * _PARTE_CLASIFICADOR,
+                    _restante(limite),
+                ),
             )
         except Exception as e:
             logger.warning(

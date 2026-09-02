@@ -95,6 +95,13 @@ class AIConfig:
     # encima de eso el usuario asume que se rompio. Subelo si vuestro Ollama va
     # justo con la carga real.
     llm_timeout_sec: float = float(_get_env("LLM_TIMEOUT_SEC", "20"))
+    # La pila: cuantas llamadas al LLM pueden estar en vuelo a la vez, y
+    # cuantas pueden estar esperando turno antes de que la siguiente rebote con
+    # "estoy ocupado" en vez de hacer cola hasta que se le acabe el techo.
+    # Con Ollama local bajalo a 1: Ollama las serializa igualmente, y encolar
+    # aqui al menos permite contestar rapido a quien no cabe.
+    llm_max_concurrent: int = _get_env_int("LLM_MAX_CONCURRENT", 2)
+    llm_max_cola: int = _get_env_int("LLM_MAX_QUEUE", 8)
     # RAG
     rag_enabled: bool = _get_env_bool("RAG_ENABLED", True)
     rag_max_chunks: int = _get_env_int("RAG_MAX_CHUNKS", 4)
@@ -141,6 +148,16 @@ class ApiConfig:
     max_por_hora: int = _get_env_int("API_MAX_POR_HORA", 20)
     # Segundos minimos entre dos preguntas del mismo usuario.
     espera_min_seg: float = float(_get_env("API_ESPERA_MIN_SEG", "3"))
+    # Techo para TODA la peticion, clasificador y RAG repartiendoselo, en vez de
+    # que cada tramo pida el suyo desde LLM_TIMEOUT_SEC como si fuera el unico
+    # (asi salian 10 + 45 = 55 s que a nadie le constaban).
+    #
+    # Tiene que ser ESTRICTAMENTE MENOR que el timeout del cliente, que hoy son
+    # 45 s en la app (AbortController en AsistenteChatService.preguntar). Si no,
+    # el cliente corta primero y el VPS se queda generando una respuesta que ya
+    # nadie va a leer: se paga el modelo y el usuario ve un error igual. Si la
+    # app sube o baja su corte, este numero va detras.
+    budget_sec: float = float(_get_env("API_BUDGET_SEC", "40"))
     # Origenes que pueden llamar al endpoint desde un navegador (CORS).
     # La app de Capacitor es https://localhost en Android y capacitor://localhost
     # en iOS. "*" vale porque aqui CORS no es la barrera de seguridad -lo es el

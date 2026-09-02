@@ -300,6 +300,8 @@ class TelegramBot:
                 intent_model=config.ai.intent_model,
                 chat_model=config.ai.chat_model,
                 timeout_sec=config.ai.llm_timeout_sec,
+                max_concurrent=config.ai.llm_max_concurrent,
+                max_cola=config.ai.llm_max_cola,
             )
             # Knowledge Base para RAG
             if config.ai.rag_enabled:

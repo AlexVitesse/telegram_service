@@ -502,6 +502,86 @@ async def caso_un_equipo_sin_id_no_llega_al_modelo():
     await con_api(FirebaseFalso(["AA_BB"]), "u1", p, ia=ia)
 
 
+async def caso_el_presupuesto_se_reparte_no_se_suma():
+    """
+    Lo que se lleva el clasificador se le descuenta al RAG. Antes cada tramo
+    pedia su techo desde LLM_TIMEOUT_SEC como si fuera el unico y salian 55 s
+    que a nadie le constaban; ahora el total no puede pasar del presupuesto.
+    """
+    visto = {}
+
+    class IALenta:
+        _backend = "ollama"
+
+        async def parse_intent(self, mensaje, equipos):
+            await asyncio.sleep(0.4)
+            return None                     # no era una orden: sigue al RAG
+
+    async def p(url, api):
+        config.api.budget_sec = 10
+
+        async def responder(*a, timeout=None, **k):
+            visto["timeout"] = timeout
+            return RespuestaFalsa()
+
+        api_server.knowledge_qa = SimpleNamespace(responder=responder)
+        await pedir(
+            url, token="bueno",
+            cuerpo={"pregunta": "¿cómo va esto?", "dispositivos": EQUIPOS},
+        )
+        # 10 de presupuesto - 0.4 del clasificador - 2 de margen ≈ 7.6
+        assert 7.0 < visto["timeout"] < 7.7, visto
+        # Y el clasificador no pudo pedir mas de su cuarta parte.
+        assert config.api.budget_sec * 0.25 == 2.5
+
+    try:
+        await con_api(FirebaseFalso(["AA_BB"]), "u1", p, ia=IALenta())
+    finally:
+        config.api.budget_sec = 40
+
+
+async def caso_la_pila_llena_es_503_con_reintentar_en():
+    """
+    De punta a punta: la excepcion sale de `ai_handler`, `knowledge_qa` la
+    convierte en tipo "ocupado" y el endpoint en un 503 con `reintentar_en`.
+    Ese campo es lo que la app mira para saber que SI merece reintentar: un 503
+    a secas ya significa "no está configurado", que es lo contrario.
+    """
+    import ai_handler
+    import knowledge_qa
+
+    class Trozo:
+        text = "documentacion"
+        source_file = "01_alta.md"
+        heading = "alta"
+
+    class Resultado:
+        score = 0.9
+        chunk = Trozo()
+
+    class IALlena:
+        _backend = "ollama"
+
+        async def chat_with_context(self, *a, **k):
+            raise ai_handler.LlmOcupado("hay demasiadas consultas en cola")
+
+    async def p(url, api):
+        api_server.knowledge_qa = knowledge_qa      # el de verdad
+        api._bot.knowledge_base = SimpleNamespace(search=lambda *a, **k: [Resultado()])
+
+        estado, cuerpo = await pedir(
+            url, token="bueno", cuerpo={"pregunta": "¿cómo configuro la bengala?"}
+        )
+        assert estado == 503, (estado, cuerpo)
+        assert cuerpo["reintentar_en"] == ai_handler.ESPERA_SUGERIDA_SEG, cuerpo
+        # El texto va en `error` porque es de donde lo saca la app.
+        assert "otras consultas" in cuerpo["error"], cuerpo
+        # Y queda registrado como ocupado, no como caido: son cosas distintas.
+        assert api._bot.interaction_logger.entradas[0]["error"] == "llm_ocupado"
+
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p, ia=IALlena())
+
+
 CASOS = [
     caso_elige_el_tunel_de_su_puerto,
     caso_salud_no_pide_token,
@@ -525,6 +605,8 @@ CASOS = [
     caso_nombre_desconocido_no_desarma_todo,
     caso_confianza_baja_no_ejecuta_nada,
     caso_un_equipo_sin_id_no_llega_al_modelo,
+    caso_el_presupuesto_se_reparte_no_se_suma,
+    caso_la_pila_llena_es_503_con_reintentar_en,
 ]
 
 
