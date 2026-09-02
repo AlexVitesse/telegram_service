@@ -20,6 +20,15 @@ logger = logging.getLogger(__name__)
 #: configuracion: es una sugerencia para el usuario, no un parametro a ajustar.
 ESPERA_SUGERIDA_SEG = 5
 
+#: Lo que `parse_intent` necesita para dar una intencion por buena.
+CLAVES_INTENT = frozenset({"intent", "device", "confidence", "reply"})
+
+#: Techo de tokens para clasificar. Eran 256, que sobran para el JSON pero NO
+#: para un modelo de razonamiento: el razonamiento sale por el mismo grifo y se
+#: comia el presupuesto antes de llegar al JSON, que llegaba cortado a mitad de
+#: una cadena. Visto en produccion con gpt-oss:20b.
+TOKENS_INTENT = 800
+
 #: Lo que se le dice a quien rebota. Vive aqui y no en cada llamador para que
 #: los dos canales -bot y endpoint- digan lo mismo.
 TEXTO_OCUPADO = (
@@ -455,7 +464,7 @@ class AIHandler:
                 user_prompt=user_prompt,
                 model=self._intent_model,
                 temperature=0.1,
-                max_tokens=256,
+                max_tokens=TOKENS_INTENT,
             )
             logger.debug("🤖 Respuesta LLM (intent) model=%s: %s", self._intent_model, raw)
 
@@ -472,7 +481,7 @@ class AIHandler:
                         user_prompt=user_prompt,
                         model="",
                         temperature=0.1,
-                        max_tokens=256,
+                        max_tokens=TOKENS_INTENT,
                     )
                     logger.debug("🤖 Respuesta LLM (intent/groq-fallback): %s", raw)
                     result = self._parse_intent_json(raw)
@@ -481,8 +490,7 @@ class AIHandler:
                 logger.warning("🤖 Respuesta LLM no es JSON valido: %r", raw[:500])
                 return None
 
-            required_keys = {"intent", "device", "confidence", "reply"}
-            if not required_keys.issubset(result.keys()):
+            if not CLAVES_INTENT.issubset(result):
                 logger.warning("🤖 Respuesta LLM incompleta: %s", result)
                 return None
 
@@ -516,15 +524,47 @@ class AIHandler:
 
     @staticmethod
     def _parse_intent_json(raw: str) -> Optional[Dict[str, Any]]:
+        """
+        El JSON de la respuesta, aunque venga rodeado de texto.
+
+        Antes esto era `re.search(r"\{.*\}", raw, re.DOTALL)`, y ese `.*` es
+        GOLOSO: captura desde la primera llave hasta la ultima de TODA la
+        respuesta. Con un modelo normal da igual porque solo hay un bloque. Con
+        uno de razonamiento que repasa el esquema en voz alta antes de
+        contestar, hay llaves en el razonamiento y en la respuesta, y el regex
+        se tragaba todo lo de en medio -> "Extra data" -> None -> "no era una
+        orden" -> al RAG. El JSON bueno estaba ahi, entero y con confidence 0.9.
+
+        Se usa `raw_decode` y no un contador de profundidad porque una llave
+        puede ir DENTRO de una cadena -`"reply": "usa {comando}"`- y ahi un
+        contador se descuadra. El decodificador de la stdlib ya sabe eso.
+
+        Se devuelve el ULTIMO objeto valido: la respuesta va despues del
+        razonamiento, no antes.
+        """
         if not raw:
             return None
-        json_match = re.search(r'\{.*\}', raw, re.DOTALL)
-        if not json_match:
+
+        decodificador = json.JSONDecoder()
+        objetos = []
+        for i, c in enumerate(raw):
+            if c != "{":
+                continue
+            try:
+                obj, _ = decodificador.raw_decode(raw, i)
+            except ValueError:
+                continue
+            if isinstance(obj, dict):
+                objetos.append(obj)
+
+        if not objetos:
             return None
-        try:
-            return json.loads(json_match.group())
-        except json.JSONDecodeError:
-            return None
+        for obj in reversed(objetos):
+            if CLAVES_INTENT.issubset(obj):
+                return obj
+        # Ninguno completo: se devuelve el ultimo para que el llamador avise de
+        # "respuesta incompleta" con algo que ensenar, en vez de un None mudo.
+        return objetos[-1]
 
     # ------------------------------------------------------------------
     # RAG chat

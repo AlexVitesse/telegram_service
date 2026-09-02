@@ -58,6 +58,47 @@ def test_el_default_de_ollama_no_es_un_nombre_inventado():
     assert "gtp" not in nombre, f"{nombre!r}: 'gtp' es el typo de 'gpt'"
 
 
+def test_el_json_se_encuentra_aunque_venga_rodeado_de_razonamiento():
+    """
+    El regex viejo era `\\{.*\\}` con DOTALL, goloso: capturaba desde la primera
+    llave hasta la ultima de toda la respuesta. Si el modelo repasa el esquema
+    en voz alta antes de contestar, hay llaves antes del JSON bueno y se
+    tragaba todo lo de en medio.
+    """
+    p = ai_handler.AIHandler._parse_intent_json
+    crudo = (
+        'The schema is {"intent": "...", "device": "..."}. The user asks how '
+        'many devices, so intent list_devices.\n'
+        '{"intent": "list_devices", "device": "all", "confidence": 0.9, '
+        '"reply": "Tienes 1 equipo."}'
+    )
+    r = p(crudo)
+    assert r is not None, "no encontro el JSON detras del razonamiento"
+    assert r["intent"] == "list_devices", r
+    assert r["confidence"] == 0.9, r
+
+
+def test_una_llave_dentro_de_una_cadena_no_descuadra_el_parser():
+    """Por esto se usa `raw_decode` y no un contador de profundidad."""
+    p = ai_handler.AIHandler._parse_intent_json
+    r = p('{"intent": "question", "device": null, "confidence": 0.9, '
+          '"reply": "Escribe {comando} para verlo."}')
+    assert r["reply"] == "Escribe {comando} para verlo.", r
+
+
+def test_un_json_cortado_a_media_cadena_no_pasa_por_bueno():
+    """
+    El fallo real de produccion: el razonamiento se comia `max_tokens` y el
+    JSON llegaba cortado. No hay forma honesta de completarlo, asi que se
+    devuelve None y quien pregunta acaba en el RAG -pero el techo de tokens
+    sube para que deje de pasar-.
+    """
+    p = ai_handler.AIHandler._parse_intent_json
+    assert p('{\n "intent": "disarm",\n "device": "garage",\n '
+             '"confidence": 0.9,\n "reply": "Entendido, desactivando la') is None
+    assert ai_handler.TOKENS_INTENT >= 512, ai_handler.TOKENS_INTENT
+
+
 def test_ningun_default_clava_el_nombre_de_un_modelo():
     """
     El fallo que costo cuatro observaciones en produccion: el default de
