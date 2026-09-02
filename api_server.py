@@ -15,6 +15,11 @@ red del VPS, y las peticiones llevan un ID token de Firebase.
 
 Quien contesta es `knowledge_qa.responder()`, el mismo que usa el bot, así que
 los dos canales dan **la misma respuesta a la misma pregunta**.
+
+Si la petición trae además `dispositivos`, la frase se clasifica antes con
+`parse_intent` y una orden vuelve como acción (`comandos_app`) en vez de como
+párrafo de documentación. **Ejecutar es cosa de la app**: aquí no se publica
+MQTT ni se escribe en RTDB. Sin `dispositivos`, todo sigue igual que antes.
 """
 import asyncio
 import hmac
@@ -25,6 +30,7 @@ from typing import Any, Optional, Tuple
 
 from aiohttp import web
 
+import comandos_app
 import knowledge_qa
 from api_limites import Limitador, normalizar_pregunta
 from config import config
@@ -220,6 +226,29 @@ class ApiSenti:
                 {"error": "Mándame una pregunta."}, status=400
             )
 
+        # Antes del RAG: si la frase era una orden, la contesta como orden y la
+        # ejecuta la app. Si no viene `dispositivos` no se clasifica nada y el
+        # camino de abajo es el de siempre, que es lo que mantiene funcionando
+        # a las versiones de la app ya publicadas.
+        orden, intento = await self._como_orden(
+            pregunta, (cuerpo or {}).get("dispositivos")
+        )
+        if orden is not None:
+            motivo_log = orden.pop("motivo", None)
+            self._anotar(
+                uid, pregunta,
+                intent=intento.get("intent"),
+                confidence=intento.get("confidence"),
+                # El mismo tipo que usa el bot en `_log_action`: las dos vias
+                # caen en el mismo analisis.
+                response_type="action",
+                response=orden["texto"],
+                elapsed_ms=int((time.monotonic() - t0) * 1000),
+                ok=orden["tipo"] == "accion",
+                error=motivo_log,
+            )
+            return web.json_response(orden)
+
         r = await knowledge_qa.responder(
             pregunta,
             getattr(self._bot, "knowledge_base", None),
@@ -238,7 +267,69 @@ class ApiSenti:
             }
         )
 
+    async def _como_orden(
+        self, pregunta: str, dispositivos: Any
+    ) -> Tuple[Optional[dict], Optional[dict]]:
+        """
+        ¿Era una orden? Devuelve `(respuesta, intencion)`, o `(None, None)` para
+        que siga al RAG exactamente como hasta ahora.
+
+        Todo lo que salga mal aquí acaba en el RAG y no en un error: quien
+        preguntaba algo normal no puede quedarse sin respuesta porque el
+        clasificador tuviera un mal día.
+        """
+        ia = getattr(self._bot, "ai_handler", None)
+        if not ia or not isinstance(dispositivos, list) or not dispositivos:
+            return None, None
+
+        # `parse_intent` espera las claves en inglés; el contrato con la app va
+        # en español como el resto del endpoint.
+        equipos = [
+            {
+                "id": d.get("id"),
+                "name": d.get("nombre"),
+                "is_armed": d.get("armado"),
+                "is_online": d.get("en_linea"),
+            }
+            for d in dispositivos if isinstance(d, dict)
+        ]
+
+        try:
+            # Techo propio, y más corto que el de una llamada suelta:
+            # `parse_intent` puede encadenar Ollama y luego Groq -40 s en el
+            # peor caso- y detrás todavía viene el RAG con el suyo. Una orden
+            # que tarda tanto en clasificarse ya no la espera nadie; sale más a
+            # cuenta tratarla como pregunta.
+            intento = await asyncio.wait_for(
+                ia.parse_intent(pregunta, equipos),
+                timeout=config.ai.llm_timeout_sec / 2,
+            )
+        except Exception as e:
+            logger.warning(
+                "No se pudo clasificar '%s' (%s): va al RAG", pregunta[:40], e
+            )
+            return None, None
+
+        if not intento:
+            return None, None
+        return comandos_app.decidir(intento, dispositivos), intento
+
     def _registrar(self, uid: str, pregunta: str, r: Any, ms: int) -> None:
+        self._anotar(
+            uid, pregunta,
+            intent="question",
+            confidence=None,
+            response_type=r.tipo,
+            response=r.texto,
+            rag_sources=r.fuentes,
+            rag_scores=r.scores,
+            elapsed_ms=ms,
+            ok=r.ok,
+            error=r.error,
+        )
+
+    def _anotar(self, uid: str, pregunta: str, **campos: Any) -> None:
+        """Lo común a las dos vías -pregunta y orden- ya puesto."""
         registro = getattr(self._bot, "interaction_logger", None)
         if not registro:
             return
@@ -247,18 +338,10 @@ class ApiSenti:
                 user_id=f"app:{uid}",
                 user_name="app",
                 query=pregunta,
-                intent="question",
-                confidence=None,
                 backend=getattr(
                     getattr(self._bot, "ai_handler", None), "_backend", None
                 ),
-                response_type=r.tipo,
-                response=r.texto,
-                rag_sources=r.fuentes,
-                rag_scores=r.scores,
-                elapsed_ms=ms,
-                ok=r.ok,
-                error=r.error,
+                **campos,
             )
         except Exception as e:
             # Que falle el registro no puede tumbar una respuesta ya calculada.

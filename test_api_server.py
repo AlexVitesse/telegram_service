@@ -65,10 +65,30 @@ class RegistroFalso:
         self.entradas.append(kw)
 
 
-def bot_falso():
+class IAFalsa:
+    """
+    El clasificador, de mentira. Lleva la cuenta de las llamadas: que NO se le
+    llame es tan importante como lo que devuelve, porque una peticion sin
+    `dispositivos` no puede clasificar nada.
+    """
+
+    _backend = "ollama"
+
+    def __init__(self, intento=None):
+        self._intento = intento
+        self.llamadas = 0
+        self.equipos = None
+
+    async def parse_intent(self, mensaje, equipos):
+        self.llamadas += 1
+        self.equipos = equipos
+        return self._intento
+
+
+def bot_falso(ia=None):
     return SimpleNamespace(
         knowledge_base=object(),
-        ai_handler=SimpleNamespace(_backend="groq"),
+        ai_handler=ia or SimpleNamespace(_backend="groq"),
         interaction_logger=RegistroFalso(),
     )
 
@@ -83,7 +103,7 @@ def puerto_libre():
 # Arranque
 # --------------------------------------------------------------------------
 
-async def con_api(firebase, uid_valido, prueba):
+async def con_api(firebase, uid_valido, prueba, ia=None):
     """Levanta la API con un uid dado por bueno y ejecuta `prueba(url)`."""
     config.api.host = "127.0.0.1"
     config.api.port = puerto_libre()
@@ -94,7 +114,7 @@ async def con_api(firebase, uid_valido, prueba):
     config.api.clave = ""
     config.api.cors = "*"
 
-    api = api_server.ApiSenti(bot_falso(), firebase)
+    api = api_server.ApiSenti(bot_falso(ia), firebase)
     api._uid_del_token = lambda t: uid_valido if t == "bueno" else None
     api_server.knowledge_qa = SimpleNamespace(
         responder=lambda *a, **k: asyncio.sleep(0, result=RespuestaFalsa())
@@ -343,6 +363,122 @@ async def caso_cors_cerrado_no_devuelve_cabecera():
     await con_api(FirebaseFalso(["AA_BB"]), "u1", p)
 
 
+# --------------------------------------------------------------------------
+# Órdenes: clasificar antes del RAG
+# --------------------------------------------------------------------------
+
+EQUIPOS = [
+    {"id": "6C_C8_40_4F_C7", "nombre": "Casa", "armado": True, "en_linea": True},
+    {"id": "A4_CF_12_9B_20", "nombre": "Bodega", "armado": False, "en_linea": False},
+]
+
+
+async def caso_sin_dispositivos_responde_como_siempre():
+    """
+    La promesa de compatibilidad: las versiones de la app ya publicadas no
+    mandan `dispositivos` y no saben que el endpoint cambio. Ni se clasifica.
+    """
+    ia = IAFalsa({"intent": "disarm", "device": "Casa", "confidence": 0.95})
+
+    async def p(url, api):
+        estado, cuerpo = await pedir(
+            url, token="bueno", cuerpo={"pregunta": "apaga la alarma"}
+        )
+        assert estado == 200, (estado, cuerpo)
+        assert cuerpo["tipo"] == "rag", cuerpo
+        assert cuerpo["texto"].startswith("La bengala se configura")
+        assert cuerpo["fuente"] == "03_bengala.md | 01_alta.md"
+        assert ia.llamadas == 0, "se clasifico sin que la app mandara equipos"
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p, ia=ia)
+
+
+async def caso_intent_none_cae_al_rag():
+    """El camino de las preguntas no puede romperse arreglando el de las ordenes."""
+    ia = IAFalsa(None)
+
+    async def p(url, api):
+        estado, cuerpo = await pedir(
+            url, token="bueno",
+            cuerpo={"pregunta": "como configuro la bengala?", "dispositivos": EQUIPOS},
+        )
+        assert estado == 200, (estado, cuerpo)
+        assert cuerpo["tipo"] == "rag", cuerpo
+        assert ia.llamadas == 1
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p, ia=ia)
+
+
+async def caso_una_orden_vuelve_como_accion():
+    ia = IAFalsa({"intent": "disarm", "device": "Casa", "confidence": 0.95,
+                  "reply": "Alarma desactivada"})
+
+    async def p(url, api):
+        estado, cuerpo = await pedir(
+            url, token="bueno",
+            cuerpo={"pregunta": "apaga la alarma de casa", "dispositivos": EQUIPOS},
+        )
+        assert estado == 200, (estado, cuerpo)
+        assert cuerpo["tipo"] == "accion", cuerpo
+        assert cuerpo["accion"] == "disarm"
+        # El id que mando la app, nunca el nombre.
+        assert cuerpo["dispositivo"] == "6C_C8_40_4F_C7"
+        assert cuerpo["confirmar"] is True
+        # Y el "motivo" del registro no se le manda a la app.
+        assert "motivo" not in cuerpo
+        # Las claves se traducen al ingles solo para el LLM.
+        assert ia.equipos[0] == {"id": "6C_C8_40_4F_C7", "name": "Casa",
+                                 "is_armed": True, "is_online": True}
+        # Registrado como el bot, para que las dos vias caigan en el mismo analisis.
+        entrada = api._bot.interaction_logger.entradas[0]
+        assert entrada["response_type"] == "action", entrada
+        assert entrada["intent"] == "disarm"
+        assert entrada["user_id"] == "app:u1"
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p, ia=ia)
+
+
+async def caso_nombre_desconocido_no_desarma_todo():
+    """El bug del bot, que aqui no se copia: sin coincidencia, aviso."""
+    ia = IAFalsa({"intent": "disarm", "device": "garage", "confidence": 0.95})
+
+    async def p(url, api):
+        estado, cuerpo = await pedir(
+            url, token="bueno",
+            cuerpo={"pregunta": "apaga la alarma del garage", "dispositivos": EQUIPOS},
+        )
+        assert estado == 200, (estado, cuerpo)
+        assert cuerpo["tipo"] == "aviso", cuerpo
+        assert "accion" not in cuerpo and "dispositivo" not in cuerpo
+        assert "Casa" in cuerpo["texto"]
+        entrada = api._bot.interaction_logger.entradas[0]
+        assert entrada["ok"] is False and entrada["error"] == "device_not_found"
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p, ia=ia)
+
+
+async def caso_confianza_baja_no_ejecuta_nada():
+    """
+    El umbral de 0.6 es la unica barrera contra una orden inventada. Se usa el
+    `AIHandler` de verdad -sin red, con la llamada al LLM sustituida- porque el
+    umbral vive ahi y una IA de mentira no lo probaria.
+    """
+    import ai_handler
+
+    ia = ai_handler.AIHandler(llm_backend="ollama", groq_api_key="")
+
+    async def responde(**kw):
+        return ('{"intent":"disarm","device":"Casa","confidence":0.59,'
+                '"reply":"ok","params":{}}')
+
+    ia._call_llm = responde
+
+    async def p(url, api):
+        estado, cuerpo = await pedir(
+            url, token="bueno",
+            cuerpo={"pregunta": "apaga eso", "dispositivos": EQUIPOS},
+        )
+        assert estado == 200, (estado, cuerpo)
+        assert cuerpo["tipo"] == "rag", f"se ejecuto con confianza 0.59: {cuerpo}"
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p, ia=ia)
+
+
 CASOS = [
     caso_elige_el_tunel_de_su_puerto,
     caso_salud_no_pide_token,
@@ -360,6 +496,11 @@ CASOS = [
     caso_preflight_contesta,
     caso_las_respuestas_llevan_cors,
     caso_cors_cerrado_no_devuelve_cabecera,
+    caso_sin_dispositivos_responde_como_siempre,
+    caso_intent_none_cae_al_rag,
+    caso_una_orden_vuelve_como_accion,
+    caso_nombre_desconocido_no_desarma_todo,
+    caso_confianza_baja_no_ejecuta_nada,
 ]
 
 
