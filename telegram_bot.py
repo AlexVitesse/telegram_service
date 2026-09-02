@@ -2027,7 +2027,13 @@ class TelegramBot:
         # igual que el bot. Aqui solo queda enviar y registrar.
         r = await knowledge_qa.responder(text, self.knowledge_base, self.ai_handler)
 
-        await update.message.reply_text(r.texto, reply_markup=self._get_keyboard())
+        # La fuente la anade quien envia, no `knowledge_qa`: la app la pinta en
+        # su propio chip y aqui no hay donde, asi que va al final del texto.
+        texto = r.texto
+        if r.tipo == "rag" and r.fuentes:
+            texto += f"\n\n(Fuente: {knowledge_qa.pista_de_fuentes(r.fuentes)})"
+
+        await update.message.reply_text(texto, reply_markup=self._get_keyboard())
 
         self.interaction_logger.record(
             user_id=user_id, user_name=user_name, query=text,

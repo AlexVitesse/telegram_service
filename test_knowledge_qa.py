@@ -92,8 +92,9 @@ def test_respuesta_buena_lleva_la_fuente():
     ])
     r = correr(kb, IAFalsa("Se configura desde la ficha del equipo."))
     assert r.tipo == "rag" and r.ok and r.error is None
-    assert r.texto.startswith("Se configura desde la ficha del equipo.")
-    assert "(Fuente: bengala config | primeros pasos)" in r.texto
+    assert r.texto == "Se configura desde la ficha del equipo."
+    # La fuente ya no va dentro del texto: viaja aparte y la pone quien envia.
+    assert knowledge_qa.pista_de_fuentes(r.fuentes) == "bengala config | primeros pasos"
     assert r.scores == [0.6, 0.4]
 
 
@@ -104,7 +105,7 @@ def test_las_fuentes_no_se_repiten_y_mantienen_el_orden():
         ResultadoFalso("03_bengala.md", 0.3),  # mismo archivo, otro fragmento
     ])
     r = correr(kb, IAFalsa("respuesta"))
-    assert "(Fuente: bengala | alta)" in r.texto
+    assert knowledge_qa.pista_de_fuentes(r.fuentes) == "bengala | alta"
 
 
 def test_un_fallo_definitivo_manda_a_soporte():
@@ -153,6 +154,47 @@ def test_un_llm_colgado_se_corta_solo():
     finally:
         config.ai.llm_timeout_sec = original
         kq._MARGEN_CADENA = 5.0
+
+
+def test_el_markdown_no_llega_al_usuario():
+    """
+    Ninguno de los dos canales lo renderiza -el bot manda esta respuesta sin
+    parse_mode-, asi que "**/bengala**" se veia con los asteriscos en los dos.
+    """
+    kb = KBFalsa([ResultadoFalso("08_bengala.md")])
+    r = correr(kb, IAFalsa("En Telegram escribe **/bengala**.\n\n## Modos"))
+
+    assert "**" not in r.texto and "#" not in r.texto
+    assert "escribe /bengala." in r.texto
+    assert "Modos" in r.texto
+
+
+def test_los_nombres_con_guion_bajo_no_se_parten():
+    """
+    Media base habla de Tiempo_Bomba y 08_bengala.md. Tratar el guion bajo como
+    cursiva se los comeria, y son justo los datos que el usuario tiene que
+    copiar tal cual.
+    """
+    kb = KBFalsa([ResultadoFalso("08_bengala.md")])
+    r = correr(kb, IAFalsa("Ajusta Tiempo_Bomba y mira 08_bengala.md o Group_ID."))
+
+    assert "Tiempo_Bomba" in r.texto
+    assert "08_bengala.md" in r.texto
+    assert "Group_ID" in r.texto
+
+
+def test_la_fuente_no_viene_dentro_del_texto():
+    """
+    Viaja en `fuentes`, y ponerla tambien en el parrafo hacia que la app la
+    pintase dos veces: una en el texto y otra en su chip.
+    """
+    kb = KBFalsa([ResultadoFalso("08_bengala.md")])
+    r = correr(kb, IAFalsa("Pulsa el boton 3 s."))
+
+    assert "(Fuente:" not in r.texto
+    assert r.texto == "Pulsa el boton 3 s."
+    assert r.fuentes == ["08_bengala.md"]
+    assert knowledge_qa.pista_de_fuentes(r.fuentes) == "bengala"
 
 
 if __name__ == "__main__":

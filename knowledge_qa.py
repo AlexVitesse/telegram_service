@@ -14,6 +14,7 @@ campos, que es para lo que estan `tipo`, `ok`, `error`, `fuentes` y `scores`.
 """
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
@@ -65,7 +66,37 @@ class RespuestaConocimiento:
     scores: List[float] = field(default_factory=list)
 
 
-def _pista_de_fuentes(archivos: List[str]) -> str:
+#: Enfasis con asterisco, codigo en linea, titulos y enlaces. Los guiones bajos
+#: NO se tocan a proposito: la base de conocimiento habla de `Tiempo_Bomba`,
+#: `BengalaHab` o `08_bengala.md`, y tratarlos como cursiva parte los nombres.
+_MARKDOWN = (
+    (re.compile(r"```[a-zA-Z]*\n?(.*?)```", re.S), r"\1"),   # bloque de codigo
+    (re.compile(r"`([^`\n]+)`"), r"\1"),                     # codigo en linea
+    (re.compile(r"\*\*([^\n]+?)\*\*"), r"\1"),               # negrita
+    (re.compile(r"(?<![\w*])\*(?!\s)([^\n*]+?)(?<!\s)\*(?![\w*])"), r"\1"),  # cursiva
+    (re.compile(r"^\s{0,3}#{1,6}\s+", re.M), ""),            # titulo
+    (re.compile(r"\[([^\]\n]+)\]\(([^)\s]+)\)"), r"\1 (\2)"),  # enlace
+)
+
+
+def sin_markdown(texto: str) -> str:
+    """
+    Quita el marcado que no pinta nadie.
+
+    El LLM contesta en markdown, pero ninguno de los dos canales lo renderiza:
+    la app pinta texto plano, y el bot manda ESTA respuesta con `reply_text`
+    sin `parse_mode`, a diferencia del resto de sus mensajes. Asi que
+    "**/bengala**" llegaba con los asteriscos a los dos sitios.
+
+    Se limpia aqui y no en cada cliente por el mismo motivo por el que existe
+    este modulo: que los dos canales contesten exactamente lo mismo.
+    """
+    for patron, reemplazo in _MARKDOWN:
+        texto = patron.sub(reemplazo, texto)
+    return texto.strip()
+
+
+def pista_de_fuentes(archivos: List[str]) -> str:
     """
     "03_bengala_config.md" -> "bengala config"
 
@@ -142,11 +173,14 @@ async def responder(
                 scores=scores,
             )
 
-        pista = _pista_de_fuentes(fuentes)
+        pista = pista_de_fuentes(fuentes)
         logger.info("📚 RAG respuesta para '%s' (fuentes: %s)", pregunta[:40], pista)
 
         return RespuestaConocimiento(
-            texto=f"{respuesta}\n\n(Fuente: {pista})",
+            # La fuente NO se mete en el texto: ya viaja en `fuentes`, y ponerla
+            # en los dos sitios hacia que la app la pintase dos veces -dentro
+            # del parrafo y en su chip-. Quien envie decide como mostrarla.
+            texto=sin_markdown(respuesta),
             tipo="rag",
             ok=True,
             fuentes=fuentes,
