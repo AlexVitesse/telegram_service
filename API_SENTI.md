@@ -71,6 +71,14 @@ configurado", que es lo contrario: eso no se arregla esperando. Se manda tambien
 `Retry-After`, pero la app no necesita leer cabeceras: el campo del cuerpo basta,
 y el texto viaja en `error` como en el resto de rechazos.
 
+**Que nadie construya nada sobre la cabecera `Retry-After`: desde JavaScript se
+lee como `null`.** No esta en la lista blanca de CORS y haria falta mandar
+`Access-Control-Expose-Headers: Retry-After` para que el navegador la dejara
+ver. Se sigue enviando porque es lo estandar y sirve a un cliente que no sea un
+navegador, pero **el contrato es `reintentar_en` en el cuerpo**, y es
+precisamente por esto: para no depender de una cabecera que el cliente puede no
+llegar a ver. Comprobado desde el telefono el 2026-09-02.
+
 El `429` sigue siendo otra cosa distinta: "has preguntado demasiadas veces tu",
 no "el servidor esta lleno".
 

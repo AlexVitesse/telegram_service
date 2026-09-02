@@ -87,6 +87,20 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:8765/preguntar
 
 En Telegram: `/id`, `/horarios` y una pregunta libre al bot.
 
+**El `curl` a `/salud` no es opcional, y probar por Telegram NO lo sustituye.**
+El bot habla directo con la API de Telegram: no pasa por `aiohttp` ni por ngrok.
+Asi que el endpoint puede estar muerto y el bot contestar perfectamente. Paso el
+2026-09-02: dos instancias a la vez, la segunda no pudo coger el puerto 8765, se
+mato a la primera -que era la que lo tenia- y quedo un servicio con el bot
+funcionando y sin API. Cuatro preguntas por Telegram salieron bien mientras la
+app recibia `Failed to fetch`.
+
+Y **usa los bloques de este documento tal cual**. El que dejo el sistema asi fue
+un `kill <pid>` escrito a mano con el hueco sin rellenar: bash leyo el `<` como
+una redireccion, dio error de sintaxis, el proceso viejo no murio y el nuevo
+arranco encima. El bloque del paso 1 resuelve el PID solo y no tiene ese
+problema.
+
 **Volver atras:** `git reset --hard <sha anterior>` y repetir los pasos 1 y 4.
 
 ---
