@@ -291,7 +291,10 @@ class ApiSenti:
                 "is_armed": d.get("armado"),
                 "is_online": d.get("en_linea"),
             }
-            for d in dispositivos if isinstance(d, dict)
+            # Sin `id` no se puede resolver despues, asi que tampoco se le
+            # ensena al modelo: solo serviria para que nombrase un equipo que
+            # luego acaba en «no encontre ninguno que se llame asi».
+            for d in dispositivos if isinstance(d, dict) and d.get("id")
         ]
 
         try:

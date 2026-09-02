@@ -479,6 +479,29 @@ async def caso_confianza_baja_no_ejecuta_nada():
     await con_api(FirebaseFalso(["AA_BB"]), "u1", p, ia=ia)
 
 
+async def caso_un_equipo_sin_id_no_llega_al_modelo():
+    """
+    Un equipo sin `id` no se puede resolver despues, asi que ensenarselo al
+    modelo solo sirve para que lo nombre y acabe en «no encontre ninguno». Que
+    entre en el prompt y no en la resolucion es la unica forma de que pase.
+    """
+    ia = IAFalsa()
+
+    async def p(url, api):
+        await pedir(
+            url, token="bueno",
+            cuerpo={
+                "pregunta": "arma la alarma",
+                "dispositivos": EQUIPOS + [{"nombre": "Fantasma", "armado": False}],
+            },
+        )
+        assert ia.llamadas == 1
+        nombres = [e["name"] for e in ia.equipos]
+        assert "Fantasma" not in nombres, ia.equipos
+        assert len(ia.equipos) == len(EQUIPOS)
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p, ia=ia)
+
+
 CASOS = [
     caso_elige_el_tunel_de_su_puerto,
     caso_salud_no_pide_token,
@@ -501,6 +524,7 @@ CASOS = [
     caso_una_orden_vuelve_como_accion,
     caso_nombre_desconocido_no_desarma_todo,
     caso_confianza_baja_no_ejecuta_nada,
+    caso_un_equipo_sin_id_no_llega_al_modelo,
 ]
 
 

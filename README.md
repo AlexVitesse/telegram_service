@@ -101,6 +101,7 @@ python test_scheduler.py       # horarios por dispositivo
 python test_knowledge_qa.py    # respuestas, escalado, timeouts
 python test_api_server.py      # la puerta del endpoint HTTP
 python test_comandos_app.py    # que frases salen como accion y sobre que equipo
+python test_ai_handler.py      # que los defaults de modelo no se contradigan
 python test_api_limites.py     # tope de uso
 python test_chat_id_utils.py   # normalización de chat_id
 ```

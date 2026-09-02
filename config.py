@@ -70,8 +70,20 @@ class AIConfig:
     llm_backend: str = _get_env("LLM_BACKEND", "ollama")
     # Ollama (principal)
     ollama_base_url: str = _get_env("OLLAMA_BASE_URL", "http://localhost:11434")
-    ollama_model: str = _get_env("OLLAMA_MODEL", "gtp-oss:20b")
+    ollama_model: str = _get_env("OLLAMA_MODEL", "gpt-oss:20b")
     # Modelo para intent parsing (JSON estricto, necesita ser preciso)
+    #
+    # OJO: estos dos defaults son modelos de Groq y `llm_backend` por defecto es
+    # "ollama". Con un .env que no declare INTENT_MODEL ni CHAT_MODEL y backend
+    # ollama, `AIHandler.__init__` los detecta y los sustituye por
+    # `ollama_model` -avisando en el log-, asi que el modelo que contesta NO es
+    # el que se lee aqui. Antes ademas caia en un nombre mal escrito
+    # ("gtp-oss:20b") y Ollama respondia "model not found".
+    #
+    # No se cambian a "" -que dejaria a AIHandler elegir el del backend- porque
+    # en el VPS, con backend=groq, eso moveria el clasificador de
+    # llama-3.1-8b-instant a GROQ_MODEL sin que nadie lo pida. Declara los dos
+    # en el .env si quieres saber con certeza cual esta contestando.
     intent_model: str = _get_env("INTENT_MODEL", "llama-3.1-8b-instant")
     # Modelo para RAG chat (respuestas conversacionales)
     chat_model: str = _get_env("CHAT_MODEL", "openai/gpt-oss-20b")

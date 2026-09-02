@@ -148,9 +148,11 @@ def decidir(
     if intent not in CONFIRMAR:
         return _aviso(AVISOS.get(intent, _NO_SOPORTADO), f"no_soportado:{intent}")
 
-    # `list_devices` no habla de ningun equipo en concreto.
+    # `list_devices` no habla de ningun equipo en concreto, pero sin ninguno
+    # tampoco hay nada que listar: cae al mismo aviso que el resto en vez de
+    # devolver una accion sobre "all" que no toca nada.
     objetivo = (
-        "all" if intent == "list_devices"
+        "all" if intent == "list_devices" and _equipos(dispositivos)
         else resolver(intento.get("device"), dispositivos)
     )
     if objetivo is None:

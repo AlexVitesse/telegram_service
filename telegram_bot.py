@@ -37,6 +37,7 @@ from scheduler import scheduler
 from mqtt_protocol import MqttEvent, EventType
 from device_manager import DeviceManager
 from ai_handler import AIHandler
+import comandos_app
 import knowledge_qa
 from rag_handler import KnowledgeBase, looks_like_url_only
 from interaction_logger import InteractionLogger
@@ -1895,9 +1896,16 @@ class TelegramBot:
         target_ids = self._resolve_device_ids_by_name(device_name, authorized_device_ids, devices_context)
 
         if not target_ids:
+            # Ya no es solo "no existe": tambien se llega aqui cuando el nombre
+            # encaja con dos equipos. En los dos casos la salida es la misma
+            # -no tocar nada- y lo util es decir cuales hay.
+            nombres = ", ".join(d.get("name") or d["id"] for d in devices_context)
             msg = (
-                f"⚠️ No encontré el dispositivo *{device_name}*.\n"
-                "Verifica el nombre o usa /status para ver los dispositivos disponibles."
+                f"⚠️ No tengo claro a qué equipo te refieres con *{device_name}*.\n"
+                + (
+                    f"Tienes: {nombres}."
+                    if nombres else "No veo ningún equipo vinculado a este chat."
+                )
             )
             await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
             _log_action(msg, ok=False, error="device_not_found")
@@ -2506,17 +2514,26 @@ class TelegramBot:
         authorized_ids: List[str],
         devices_context: List[Dict[str, Any]],
     ) -> List[str]:
-        """Convierte el nombre de dispositivo que devuelve la IA en IDs reales."""
-        if not device_name or device_name == "all":
-            return authorized_ids
+        """
+        El nombre que devuelve la IA -> los IDs sobre los que actuar.
 
-        name_lower = device_name.lower()
-        matched = [
-            d["id"] for d in devices_context
-            if name_lower in (d.get("name") or "").lower()
-            or name_lower in d["id"].lower()
-        ]
-        return matched if matched else authorized_ids
+        Lista vacia cuando no hay UNA respuesta clara -ni cero coincidencias ni
+        dos-, y el llamador avisa con la lista de equipos que si hay.
+
+        Delega en `comandos_app.resolver`: el mismo emparejamiento que usa el
+        endpoint de la app, ya probado, y asi deja de haber dos. Hasta hoy esto
+        acababa en `return matched if matched else authorized_ids`, y un nombre
+        que no coincidia con nada actuaba sobre TODOS los equipos: «apaga la
+        alarma del garage», sin ningun equipo llamado garage, desarmaba la casa
+        entera.
+        """
+        objetivo = comandos_app.resolver(
+            device_name,
+            [{"id": d["id"], "nombre": d.get("name")} for d in devices_context],
+        )
+        if objetivo is None:
+            return []
+        return authorized_ids if objetivo == "all" else [objetivo]
 
     async def _handle_unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler para comandos no reconocidos"""

@@ -176,7 +176,7 @@ class AIHandler:
         self,
         llm_backend: str = "ollama",
         ollama_base_url: str = "http://localhost:11434",
-        ollama_model: str = "gtp-oss:20b",
+        ollama_model: str = "gpt-oss:20b",
         groq_api_key: str = "",
         groq_model: str = "llama-3.1-8b-instant",
         intent_model: str = "",

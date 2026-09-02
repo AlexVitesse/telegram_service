@@ -145,6 +145,40 @@ def test_list_devices_no_necesita_resolver_ningun_equipo():
     assert r["tipo"] == "accion" and r["dispositivo"] == "all"
 
 
+def test_list_devices_sin_equipos_no_devuelve_accion():
+    """Listar cero equipos no es una accion: es un aviso. Si no, la app recibe
+    `dispositivo: "all"` sobre una lista vacia y no tiene nada que hacer."""
+    r = _decidir("list_devices", dispositivos=[])
+    assert r["tipo"] == "aviso", r
+    assert r["motivo"] == "device_not_found"
+
+
+# --------------------------------------------------------------------------
+# El bot usa este mismo resolver (telegram_bot._resolve_device_ids_by_name)
+# --------------------------------------------------------------------------
+
+def test_el_bot_ya_no_desarma_todo_con_un_nombre_que_no_existe():
+    """El mismo fallo de arriba, pero por la via de Telegram. Se prueba el
+    metodo sin instanciar el bot: no usa `self`."""
+    from telegram_bot import TelegramBot
+
+    contexto = [
+        {"id": "6C_C8_40_4F_C7", "name": "Casa"},
+        {"id": "A4_CF_12_9B_20", "name": "Bodega"},
+    ]
+    ids = [d["id"] for d in contexto]
+    resolver = TelegramBot._resolve_device_ids_by_name
+
+    # El fallo caro: antes esto devolvia los DOS equipos.
+    assert resolver(None, "garage", ids, contexto) == []
+    # Dos candidatos tampoco son una coincidencia.
+    assert resolver(None, "a", ids, contexto) == []
+    # Lo que si funciona sigue funcionando.
+    assert resolver(None, "Bodega", ids, contexto) == ["A4_CF_12_9B_20"]
+    assert resolver(None, "all", ids, contexto) == ids
+    assert resolver(None, None, ids, contexto) == ids
+
+
 if __name__ == "__main__":
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0
