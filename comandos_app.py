@@ -31,6 +31,10 @@ CONFIRMAR = {
     "list_devices": False,
 }
 
+#: OJO: de aqui para abajo, los strings los LEE UN USUARIO. El codigo va sin
+#: tildes por convencion; estos no, que se pintan junto a mensajes que si las
+#: llevan y se nota.
+#:
 #: Lo que todavia no se puede, y a donde mandar a quien lo pide. Un "no puedo"
 #: explicito ya es mejor respuesta que un parrafo de documentacion que no hizo
 #: nada.
@@ -38,22 +42,22 @@ AVISOS = {
     # La bengala tiene dos rutas con nombres parecidos y una de ellas acaba en
     # sirena sonando. Hasta aclarar cual toca, desde el chat no se toca.
     "trigger_bengala": (
-        "La bengala todavia no se maneja desde el chat. Puedes habilitarla en "
+        "La bengala todavía no se maneja desde el chat. Puedes habilitarla en "
         "la ficha del equipo o desde el bot de Telegram."
     ),
     "stop_alarm": (
-        "Para silenciar una sirena que esta sonando, usa el bot de Telegram: "
-        "desde la app todavia no se puede."
+        "Para silenciar una sirena que está sonando, usa el bot de Telegram: "
+        "desde la app todavía no se puede."
     ),
     "last_event": (
-        "El historial de eventos todavia no esta en la app. El bot de Telegram "
-        "si te lo puede decir."
+        "El historial de eventos todavía no está en la app. El bot de Telegram "
+        "sí te lo puede decir."
     ),
     "schedule": "Los horarios se configuran desde la pantalla de Horarios.",
     "query_schedule": "Puedes ver los horarios en la pantalla de Horarios.",
 }
 
-_NO_SOPORTADO = "Eso todavia no lo puedo hacer desde el chat."
+_NO_SOPORTADO = "Eso todavía no lo puedo hacer desde el chat."
 
 
 def _equipos(dispositivos: Optional[List[Any]]) -> List[Dict[str, Any]]:
@@ -125,7 +129,10 @@ def _texto(intent: str, objetivo: str, dispositivos: Optional[List[Any]]) -> str
     return {
         "arm": f"Armo {nombre}.",
         "disarm": f"Desarmo {nombre}. ¿Confirmas?",
-        "status": f"Miro como esta {nombre}.",
+        # "el estado de" y no "cómo está": el mismo molde sirve para un nombre
+        # y para "todos los equipos", y "cómo está todos los equipos" no es
+        # castellano.
+        "status": f"Miro el estado de {nombre}.",
         "list_devices": "Estos son tus equipos.",
     }[intent]
 
@@ -158,9 +165,9 @@ def decidir(
     if objetivo is None:
         nombres = [str(d.get("nombre") or d["id"]) for d in _equipos(dispositivos)]
         texto = (
-            f"No encontre ningun equipo que se llame «{intento.get('device')}». "
+            f"No encontré ningún equipo que se llame «{intento.get('device')}». "
             f"Tienes: {', '.join(nombres)}."
-            if nombres else "No veo ningun equipo vinculado en esta sesion."
+            if nombres else "No veo ningún equipo vinculado en esta sesión."
         )
         return _aviso(texto, "device_not_found")
 
