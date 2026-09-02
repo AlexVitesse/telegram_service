@@ -16,7 +16,9 @@ Este servicio es el núcleo de la lógica de negocio del sistema de alarmas "Sen
 - **Bridge MQTT-Telegram**: Comunicación bidireccional en tiempo real.
 - **Gestión Multi-Tenant**: Soporte para múltiples dispositivos y usuarios.
 - **Firebase Integration**: Almacenamiento de usuarios, chats autorizados y logs.
-- **Scheduler**: Armado/Desarmado automático programable.
+- **Scheduler**: Armado/Desarmado automático programable, **un horario por dispositivo**.
+- **Senti (IA + RAG)**: Responde preguntas sobre el sistema desde la base de conocimiento.
+- **API HTTP**: Endpoint para que la app pregunte a Senti sin pasar por Telegram.
 - **Lógica de Bengala**: Modos automático y manual (con pregunta de confirmación).
 - **Notificaciones Inteligentes**: Alertas con botones interactivos (Inline Keyboards).
 - **Monitorización**: Detección de dispositivos offline.
@@ -89,10 +91,31 @@ python main.py
 
 El servicio se conectará al broker MQTT y comenzará a escuchar eventos y comandos de Telegram.
 
+### Pruebas
+
+Se ejecutan directamente, sin red ni LLM. **No son de pytest**: usan sus propias
+fixtures y fallan si se lanzan con `pytest`.
+
+```bash
+python test_scheduler.py       # horarios por dispositivo
+python test_knowledge_qa.py    # respuestas, escalado, timeouts
+python test_api_server.py      # la puerta del endpoint HTTP
+python test_api_limites.py     # tope de uso
+python test_chat_id_utils.py   # normalización de chat_id
+```
+
+### Despliegue en producción
+
+El VPS no tiene `sudo` ni systemd: el procedimiento completo, con sus trampas,
+está en **[DESPLIEGUE.md](DESPLIEGUE.md)**.
+
 ## 📚 Documentación
 
-- **Comandos de Telegram:** Consulta [COMANDOS_TELEGRAM.md](COMANDOS_TELEGRAM.md) para una lista detallada de todos los comandos disponibles (`/start`, `/on`, `/off`, `/bengala`, etc.).
-- **Arquitectura:** Detalles sobre la estructura del sistema en [ARQUITECTURA_PROPUESTA.txt](ARQUITECTURA_PROPUESTA.txt).
+- **Comandos de Telegram:** [COMANDOS_TELEGRAM.md](COMANDOS_TELEGRAM.md) — lista detallada de todos los comandos (`/start`, `/id`, `/on`, `/off`, `/bengala`, etc.).
+- **Despliegue en el VPS:** [DESPLIEGUE.md](DESPLIEGUE.md) — cómo se actualiza producción, ngrok y las fragilidades conocidas.
+- **Endpoint HTTP:** [API_SENTI.md](API_SENTI.md) — contrato de la API, autenticación, topes y qué debe hacer la app.
+- **Base de conocimiento:** `knowledge_base/` — los documentos con los que Senti contesta.
+- **Historial:** los archivos `CHANGELOG_<fecha>.txt` de la raíz.
 
 ## 📄 Estructura del Proyecto
 
@@ -102,6 +125,9 @@ El servicio se conectará al broker MQTT y comenzará a escuchar eventos y coman
 - `firebase_manager.py`: Interacción con la base de datos.
 - `scheduler.py`: Sistema de tareas programadas.
 - `device_manager.py`: Gestión de estado de los dispositivos.
+- `knowledge_qa.py`: Responde una pregunta con la base de conocimiento, sin Telegram de por medio. Lo usan el bot y la API.
+- `api_server.py` / `api_limites.py`: Endpoint HTTP de Senti y su tope de uso.
+- `rag_handler.py` / `ai_handler.py`: Recuperación sobre la base de conocimiento y clientes de LLM.
 
 ## 🤝 Contribución
 

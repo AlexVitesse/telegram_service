@@ -4,6 +4,15 @@
 
 El sistema de horarios permite programar el armado y desarmado automatico de la alarma por hora y dia de la semana. Asi el sistema se activa y desactiva solo, sin intervencion manual.
 
+## Un horario para cada equipo
+
+Cada dispositivo tiene su propio horario, independiente del resto. Si tienes
+varios equipos, puedes armar uno a las 22:00 y otro a las 7:00 sin que se
+pisen entre si.
+
+Al usar /horarios con varios dispositivos vinculados, el bot pregunta primero
+sobre cual quieres actuar, o si prefieres aplicar el cambio a todos.
+
 ## Configurar horarios desde Telegram
 
 Para configurar, programar, activar o desactivar los horarios automaticos desde el bot de Telegram, usa los siguientes comandos:

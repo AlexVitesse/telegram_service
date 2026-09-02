@@ -17,6 +17,19 @@ Inicia la interaccion con el bot.
 
 ---
 
+### `/id`
+Devuelve tu Chat ID de Telegram.
+
+- **Permisos:** Ninguno (publico)
+- **Descripcion:**
+  - Responde con el Chat ID del usuario para copiarlo en la app
+    (Configuracion -> Chat ID de Telegram)
+  - Sin autorizacion a proposito: quien todavia NO esta dado de alta es
+    justo el que necesita saber su ID. No expone nada, Telegram ya le da
+    su propio chat_id a quien pregunta
+
+---
+
 ### `/help`
 Muestra la guia de comandos disponibles.
 

@@ -3,6 +3,7 @@
 ## Comandos basicos
 
 - **/start** - Inicia la interaccion con el bot. Si eres el primer usuario en escribir, quedas registrado como Administrador Principal. Si ya estas autorizado, recibiras un mensaje de bienvenida. Si no estas autorizado, el bot te indicara como solicitar acceso.
+- **/id** - Muestra tu Chat ID de Telegram para copiarlo en la app (Configuracion > Chat ID de Telegram). Funciona aunque todavia no estes dado de alta en el sistema.
 - **/help** - Muestra la guia de comandos disponibles segun tus permisos (admin o usuario regular).
 
 ## Comandos de seguridad

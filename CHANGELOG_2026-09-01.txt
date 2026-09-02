@@ -1,0 +1,257 @@
+================================================================================
+CHANGELOG - TELEGRAM SERVICE
+Fecha: 2026-09-01
+Commits: 6ad91df..e2c4cee (11 commits)
+================================================================================
+
+RESUMEN
+-------
+- Un horario por dispositivo (antes uno global compartido por todos)
+- Endpoint HTTP para que la app pregunte a Senti sin pasar por Telegram
+- Comando /id
+- Tiempos del LLM acotados y errores separados en transitorio/definitivo
+- Dos datos corregidos en Firebase
+
+Documentacion nueva: DESPLIEGUE.md, API_SENTI.md
+
+
+--------------------------------------------------------------------------------
+PROBLEMA 1: Un horario global armaba dispositivos de otros usuarios
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- El scheduler guardaba UNA sola configuracion de horario para todo el servicio
+- El horario de un usuario armaba y desarmaba equipos de otros usuarios
+- Los recordatorios se mandaban a TODOS los chats conocidos
+- Visto en el log del 2026-08-28 06:55: 7 chats notificados por un horario ajeno
+
+CAUSA RAIZ:
+- Scheduler tenia un unico atributo `self.config` (ScheduleConfig) global
+- Los callbacks arm/disarm/reminder no recibian device_id
+- `_scheduled_reminder` iteraba TODOS los dispositivos conocidos
+
+ARCHIVOS MODIFICADOS: scheduler.py, main.py, firebase_manager.py, telegram_bot.py
+
+CAMBIOS:
+- Scheduler.configs: Dict[device_id, ScheduleConfig]
+- Persistencia {"devices": {device_id: {...}}}; el formato global antiguo se
+  descarta al cargar y se resincroniza desde Firebase por dispositivo
+- Callbacks on_arm/on_disarm reciben device_id; on_reminder recibe
+  (device_id, action, minutes)
+- El recordatorio solo va a los chats privados del dispositivo dueño del horario
+- /horarios opera sobre los dispositivos seleccionados, no sobre todos
+
+MEJORA ADICIONAL - Comandos redundantes:
+- El ESP32 tiene su propio horario en NVS y puede haberse armado solo en el
+  mismo minuto. Ahora se omite el comando si la telemetria es reciente (<90 s)
+  y el estado ya es el deseado. Ante la duda se manda: perder un armado por un
+  dato viejo es peor que duplicar un aviso.
+
+COMMIT: 53bb57e
+
+
+--------------------------------------------------------------------------------
+PROBLEMA 2: El horario de un equipo cambiaba solo entre reinicios
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- En el log aparecian dos sincronizaciones seguidas del MISMO equipo con
+  enabled contradictorio (True y luego False)
+- "12 horario(s) actualizado(s)" para 10 dispositivos
+
+CAUSA RAIZ:
+- Un equipo puede aparecer en /Horarios bajo varias claves: dos usuarios que lo
+  reclaman, o un "system" del dueño ademas de una entrada propia
+- Se aplicaban TODAS segun se iteraba, asi que ganaba la ultima
+- Ese orden lo decide Firebase y no esta garantizado: el mismo dato podia dejar
+  una alarma armandose un dia y quieta al siguiente
+
+DATO DE PRODUCCION (revisado 2026-09-01):
+- 8 claves en /Horarios, 11 pares (clave, equipo) sobre 5 equipos, 6 "system"
+- Solo 6 de 11 registros traen lastUpdated
+- 6C_C8_40_4F_C7 bajo dos chat_ids con horarios opuestos, ninguno con
+  lastUpdated: no habia ni con que desempatar
+
+ARCHIVOS MODIFICADOS: scheduler.py, firebase_manager.py, test_scheduler.py
+
+CAMBIOS:
+- Nueva funcion pura scheduler.elegir_por_dispositivo(): decide UN horario por
+  equipo antes de escribir nada. Prioridad:
+    1. Lo especifico gana a "system"
+    2. Habilitado gana a deshabilitado
+    3. lastUpdated mas reciente (falta en 5 de 11, por eso no va primero)
+    4. La clave mayor (arbitrario, pero siempre igual)
+- Va en scheduler.py y no en firebase_manager para poder probarla sin Firebase:
+  importar firebase_manager construye el singleton y se conecta
+
+COMMIT: 6dcf72e
+
+
+--------------------------------------------------------------------------------
+PROBLEMA 3: schedule_config.json versionado y resolver inconsistente
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- Cada despliegue hacia `git checkout -- schedule_config.json`, el arranque
+  siguiente lo encontraba en formato viejo, lo descartaba y volvia a pedirle
+  todo a Firebase. Trabajo repetido y una ventana (7 ms) sin horarios cargados
+- Un usuario sin Telegram perdia su horario "system" en cada reinicio
+
+CAUSA RAIZ:
+- schedule_config.json es estado de runtime pero estaba en el indice de git
+- Al arrancar los "system" se expandian con get_authorized_devices() (solo
+  entiende chat_id), pero el listener usaba _devices_for_schedule_key() (ademas
+  resuelve uid de Firebase Auth). Los dos caminos no coincidian
+
+CAMBIOS:
+- git rm --cached schedule_config.json + entrada en .gitignore
+- Ambos caminos usan ahora _devices_for_schedule_key, que es un superconjunto
+
+COMMIT: 3b998f4
+
+
+--------------------------------------------------------------------------------
+PROBLEMA 4: Una llamada colgada al LLM dejaba la peticion sin volver
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- En Telegram se veia como un "escribiendo..." eterno
+- Todos los errores caian en el mismo "Hubo un error, intenta de nuevo"
+
+CAUSA RAIZ:
+- timeout=60 estaba en el cliente httpx, que solo usa _call_ollama
+- _call_groq va por el SDK dentro de un asyncio.to_thread, sin techo, y un
+  to_thread NO se puede cancelar
+- Un timeout o un 503 se arreglan solos; un TypeError no se arregla nunca, y
+  mandar a reintentar a quien no puede tener exito es mandarlo a dar vueltas
+
+ARCHIVOS MODIFICADOS: ai_handler.py, config.py, knowledge_qa.py, telegram_bot.py
+
+CAMBIOS:
+- Los dos backends comparten LLM_TIMEOUT_SEC (20 s por defecto)
+- knowledge_qa pone un techo al total con asyncio.wait_for, porque _call_llm
+  encadena los dos backends y esos timeouts van en serie
+- Lo transitorio invita a reintentar; lo definitivo escala a soporte
+
+COMMIT: 64354c4
+
+
+--------------------------------------------------------------------------------
+MEJORA 5: knowledge_qa, el flujo de respuesta fuera de Telegram
+--------------------------------------------------------------------------------
+
+MOTIVO:
+- Buscar en el RAG, preguntar al LLM y decidir si se escala vivia dentro de un
+  handler, enredado con reply_text, teclados y el registro de interacciones
+- Para que la app pudiera preguntar por HTTP hacia falta llamarlo sin Telegram
+
+CAMBIOS:
+- knowledge_qa.responder() devuelve texto mas los metadatos del registro
+- Sin cambios de comportamiento; se comparo campo a campo los cinco caminos
+- Unica diferencia deliberada: las fuentes se deduplican conservando el orden
+  de relevancia (antes era un set, el orden variaba entre llamadas)
+
+COMMIT: 70156c9
+
+
+--------------------------------------------------------------------------------
+NUEVO 6: Endpoint HTTP para la app (API de Senti)
+--------------------------------------------------------------------------------
+
+Ver API_SENTI.md para el contrato completo.
+
+ARCHIVOS NUEVOS: api_server.py, api_limites.py, test_api_server.py,
+                 test_api_limites.py
+DEPENDENCIA NUEVA: aiohttp>=3.9.0
+
+RESUMEN:
+- POST /preguntar (ID token de Firebase), GET /salud, OPTIONS *
+- En el mismo proceso que el bot: KnowledgeBase construye embeddings al cargar
+- Escucha en 127.0.0.1; quien publica es ngrok
+- Solo pasa quien tenga equipos en Usuarios/{uid}/Dispositivos. Si Firebase no
+  contesta NO se deja pasar
+- Tope: 20/hora y 3 s entre preguntas, por usuario
+- Apagado por defecto (API_ENABLED=false)
+
+COMMITS: e67db66 (endpoint), 6e88bff (tres modos de auth)
+
+--- Fallos corregidos sobre el endpoint antes de exponerlo -------------------
+
+6a. Firebase bloqueaba el event loop (3a1189b)
+    firebase_admin es sincrono y se llamaba desde un handler de aiohttp: cada
+    pregunta de la app congelaba Telegram y el procesado de MQTT lo que tardara
+    Firebase. Ahora va por asyncio.to_thread.
+
+6b. El tope por IP se saltaba (3a1189b)
+    Se leia el PRIMER valor de X-Forwarded-For, que es el que escribe el
+    cliente. Bastaba mandar una IP inventada en cada peticion para tener cuota
+    infinita. Cada proxy añade al final la IP de quien le hablo, asi que el
+    ultimo es el unico que el cliente no controla.
+
+6c. Se publicaba el tunel de OTRO proyecto (b7c47b4)
+    Se cogia el primer tunel https del agente de ngrok. Como en el VPS ya habia
+    otro proyecto publicado, en Config/ai_endpoint quedo anunciada su URL como
+    endpoint de la app. El fallo no se ve: la URL existe y contesta, solo que
+    contesta otra cosa. Ahora se filtra por config.addr contra nuestro puerto.
+
+6d. Sin CORS la app no podia llamar al endpoint (95660a5)
+    El WebView corre en https://localhost y el endpoint esta en otro dominio.
+    La cabecera ngrok-skip-browser-warning convierte hasta el GET en una
+    peticion con preflight; no habia ruta que atendiera el OPTIONS y quedaba
+    TODO bloqueado. Desde curl no se notaba porque curl no aplica CORS: habia
+    16 pruebas en verde mientras la app veia "Failed to fetch".
+
+6e. El tope decia "espera 0 s" (e2c4cee)
+    Redondeaba hacia abajo. Ahora ceil con minimo 1.
+
+
+--------------------------------------------------------------------------------
+DATOS CORREGIDOS EN FIREBASE
+--------------------------------------------------------------------------------
+
+1. /Horarios/8797397201/devices/6C_C8_40_4F_C7  -> BORRADO
+   Entrada deshabilitada (07:00-18:00, L-V, lastUpdatedBy=telegram) que
+   competia con la de 6184875785 (habilitada, 22:00-07:00) por el mismo equipo.
+   Respaldo en backups/horario_borrado_8797397201_6C_C8_40_4F_C7_1788303020.json
+
+2. /Config/ai_endpoint  -> BORRADO Y REPUBLICADO
+   Anunciaba la URL de otro proyecto del VPS (ver 6c). El servicio la
+   republico correctamente al arrancar con el filtro por puerto.
+
+PENDIENTE (no tocado):
+   /Horarios/1234 tiene un "system" habilitado del 2026-08-14, de dos minutos
+   de duracion, hecho desde la app. Hoy es inofensivo: no existe cuenta con ese
+   Telegram_ID, asi que se expande a la lista vacia. Es suciedad, no riesgo.
+
+
+--------------------------------------------------------------------------------
+PRUEBAS
+--------------------------------------------------------------------------------
+
+Todas sin red, sin Firebase y sin LLM (con dobles). Las del endpoint levantan
+el servidor de verdad en un puerto libre y le pegan peticiones reales.
+
+  test_api_server.py      16   La puerta: quien pasa, CORS, eleccion del tunel
+  test_api_limites.py      9   Tope de uso y recorte de la pregunta
+  test_scheduler.py       10   Aislamiento por equipo, medianoche, determinismo
+  test_knowledge_qa.py    10   Escalado, timeouts, transitorio vs definitivo
+  test_chat_id_utils.py   89   Normalizacion de chat_id
+
+Se ejecutan directamente: python test_scheduler.py
+(No son de pytest: usan sus propias fixtures y fallan bajo pytest.)
+
+
+--------------------------------------------------------------------------------
+FRAGILIDADES CONOCIDAS
+--------------------------------------------------------------------------------
+
+- Nada levanta los procesos: ni el bot ni ngrok tienen supervisor. Si se caen,
+  o si se reinicia el VPS, no vuelven solos
+- La URL de ngrok se publica una sola vez, al arrancar
+- El puerto 4041 del agente de ngrok depende del orden de arranque
+- El tope de uso vive en memoria (correcto con un solo proceso)
+- El token del bot aparece en alarm_service.log en cada linea de httpx
+- Los eventos de Firebase llegan por duplicado: cada telemetria se procesa dos
+  veces, con su doble escritura. Es anterior a estos cambios, sin investigar
+
+================================================================================
