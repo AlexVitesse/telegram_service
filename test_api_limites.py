@@ -23,6 +23,17 @@ def test_dos_seguidas_se_frenan():
     assert "2 s" in motivo
 
 
+def test_nunca_dice_espera_cero_segundos():
+    """Decirle a alguien que espere 0 s no le dice nada."""
+    lim = Limitador(max_por_hora=20, espera_min_seg=3)
+    lim.permitir("u1", ahora=1000.0)
+    # Faltan 0,4 s: con redondeo normal salia "0 s".
+    ok, motivo = lim.permitir("u1", ahora=1002.6)
+    assert not ok
+    assert "0 s" not in motivo
+    assert "1 s" in motivo
+
+
 def test_pasada_la_espera_vuelve_a_pasar():
     lim = Limitador(max_por_hora=20, espera_min_seg=3)
     lim.permitir("u1", ahora=1000.0)

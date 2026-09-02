@@ -13,6 +13,7 @@ Vive en memoria a proposito: el servicio es un solo proceso y el tope no tiene
 que sobrevivir a un reinicio. Si algun dia hay varias instancias, esto se cae
 —cada una llevaria su propia cuenta— y habria que moverlo a Redis o a RTDB.
 """
+import math
 import time
 from collections import deque
 from typing import Deque, Dict, Optional, Tuple
@@ -42,8 +43,11 @@ class Limitador:
             cola.popleft()
 
         if cola and t - cola[-1] < self.espera_min_seg:
-            falta = self.espera_min_seg - (t - cola[-1])
-            return False, f"Espera {falta:.0f} s antes de la siguiente pregunta."
+            # ceil y minimo 1: con .0f, esperar 0.4 s se leia como "espera 0 s",
+            # que no le dice nada a nadie. Siempre hacia arriba, para que al
+            # cumplirse el numero la peticion pase de verdad.
+            falta = max(1, math.ceil(self.espera_min_seg - (t - cola[-1])))
+            return False, f"Espera {falta} s antes de la siguiente pregunta."
 
         if len(cola) >= self.max_por_hora:
             faltan_min = int((VENTANA_SEG - (t - cola[0])) / 60) + 1
