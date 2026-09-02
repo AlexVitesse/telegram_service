@@ -315,3 +315,65 @@ Fuera de este plan, a proposito: cache de preguntas repetidas (la clave ya
 existe, `normalizar_pregunta`), *circuit breaker* por backend, metricas
 Prometheus, cola persistente. Todo eso se anade **cuando la fase 0 ensene el
 numero que lo justifique**, no antes.
+
+---
+
+## El modelo del clasificador: por que esta clavado en el .env
+
+`INTENT_MODEL=qwen/qwen3.8-27b` en el `.env` del VPS. Es un pin deliberado y hay
+que saber por que, porque contradice la regla de la fase 6 -no clavar nombres de
+modelos- y la contradice a proposito.
+
+Clasificar necesita **JSON estricto**. El modelo del backend (`GROQ_MODEL`) esta
+elegido para redactar prosa en el RAG, y ahi va bien. Para JSON no: los modelos
+de razonamiento devuelven `content` vacio -su salida va a otro campo- o gastan
+el presupuesto de tokens pensando y cierran el JSON a medias.
+
+Probados los cinco candidatos de la cuenta con el `parse_intent` real, mismo
+prompt y mismo parser, contra cuatro frases de usuario:
+
+| modelo | | «apaga la alarma del garage» |
+|---|---|---|
+| `qwen/qwen3.8-27b` | 4/4 | `device='garage'` conf 0.95 |
+| `openai/gpt-oss-120b` | 4/4 | `device='garage'` conf 0.92 |
+| `openai/gpt-oss-20b` | 2/4 | falla |
+| `qwen/qwen3.6-27b` | 0/4 | escupe `<think>` y se corta |
+| `allam-2-7b` | 4/4 | **`device='merida'`** |
+
+### Lo de `allam-2-7b` merece leerse dos veces
+
+Cuenta como 4/4 y es el peor de todos. Ante «apaga la alarma del garage», sin
+ningun equipo llamado garage, **se inventa el equipo**: devuelve el unico que
+hay, con confianza 0.8. Con ese modelo esa frase desarma la casa, y pasa el
+guard de `comandos_app.resolver` limpiamente, porque el nombre que devuelve SI
+existe.
+
+Es el fallo del que trata media este documento, entrando por la puerta que no
+estabamos mirando: no el resolvedor, sino el modelo mintiendo antes de llegar a
+el. **Un guard solo protege de lo que llega hasta el.** Al elegir modelo, contar
+aciertos no basta: hay que mirar que hace con lo que NO existe.
+
+Si este pin muere -ya paso una vez, con `llama-3.1-8b-instant`-, el default del
+codigo sigue al backend y el servicio degrada en vez de romperse. El grito esta
+en el log: "Groq empty response" y "no es JSON valido". Asi se encontro esto.
+
+---
+
+## La leccion, que vale mas que los arreglos
+
+Seis veces en un dia, el mismo patron: **cada pieza correcta por separado, el
+agregado roto.**
+
+Caer a la reserva cuando un backend falla esta bien. Tirar un JSON invalido esta
+bien. Devolver `None` cuando no hay intent esta bien. No reventar por una
+respuesta vacia esta bien. Y el resultado de las cuatro juntas era un usuario
+leyendo el telefono de soporte para preguntar cuantas alarmas tiene.
+
+El 404 de Groq llevaba **25 repeticiones en el log** sin que saltara nada,
+precisamente porque el fallback hacia su trabajo. Lo que lo destapo no fue una
+alerta: fue mirar el log crudo en vez de discutir la hipotesis que los dos
+teniamos -el umbral de 0.6- y que era falsa. Las dos frases que fallaban traian
+`confidence: 0.9`.
+
+Regla practica: **antes de tocar un umbral, mirar por que fallo de verdad.** Un
+`None` que puede significar tres cosas distintas no es un diagnostico.
