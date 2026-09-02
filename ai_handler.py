@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 #: configuracion: es una sugerencia para el usuario, no un parametro a ajustar.
 ESPERA_SUGERIDA_SEG = 5
 
+#: Lo que se le dice a quien rebota. Vive aqui y no en cada llamador para que
+#: los dos canales -bot y endpoint- digan lo mismo.
+TEXTO_OCUPADO = (
+    "Estoy atendiendo otras consultas en este momento. "
+    "Vuelve a preguntarme en unos segundos."
+)
+
 
 class LlmOcupado(RuntimeError):
     """
@@ -489,6 +496,13 @@ class AIHandler:
             )
             return result
 
+        except LlmOcupado:
+            # NO se convierte en None. Un None aqui significa "no era una
+            # orden", y el llamador sigue al RAG: bajo carga, "arma la alarma"
+            # volveria como un parrafo de documentacion en vez de como orden,
+            # que es exactamente el fallo que este endpoint vino a arreglar.
+            # Que suba y que lo conteste quien sepa decir "estoy ocupado".
+            raise
         except Exception as e:
             logger.error("🤖 Error en LLM (parse_intent): %s | raw=%r", e, raw[:500])
             return None

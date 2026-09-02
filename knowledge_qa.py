@@ -20,7 +20,7 @@ from typing import Any, List, Optional
 
 import httpx
 
-from ai_handler import LlmOcupado
+from ai_handler import TEXTO_OCUPADO, LlmOcupado
 from config import config
 from escalation_handler import NO_INFO_SENTINEL, build_escalation_message
 
@@ -202,10 +202,7 @@ async def responder(
         # es lo que le permite a la app distinguir "ocupado" de "caido".
         logger.warning("📚 RAG rebotado por la pila: %s", e)
         return RespuestaConocimiento(
-            texto=(
-                "Estoy atendiendo otras consultas en este momento. "
-                "Vuelve a preguntarme en unos segundos."
-            ),
+            texto=TEXTO_OCUPADO,
             tipo="ocupado",
             ok=False,
             error="llm_ocupado",

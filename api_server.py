@@ -251,9 +251,22 @@ class ApiSenti:
         # ejecuta la app. Si no viene `dispositivos` no se clasifica nada y el
         # camino de abajo es el de siempre, que es lo que mantiene funcionando
         # a las versiones de la app ya publicadas.
-        orden, intento = await self._como_orden(
-            pregunta, (cuerpo or {}).get("dispositivos"), limite
-        )
+        try:
+            orden, intento = await self._como_orden(
+                pregunta, (cuerpo or {}).get("dispositivos"), limite
+            )
+        except ai_handler.LlmOcupado:
+            # Una orden que no se pudo clasificar por falta de sitio NO puede
+            # seguir al RAG: volveria como parrafo de documentacion, que es el
+            # fallo que este endpoint vino a arreglar y encima parece que
+            # funciono. Se dice que estamos ocupados y se acabo.
+            self._anotar(
+                uid, pregunta, response_type="ocupado",
+                response=ai_handler.TEXTO_OCUPADO,
+                elapsed_ms=int((time.monotonic() - t0) * 1000),
+                ok=False, error="llm_ocupado",
+            )
+            return self._ocupado()
         if orden is not None:
             motivo_log = orden.pop("motivo", None)
             self._anotar(
@@ -285,15 +298,7 @@ class ApiSenti:
         self._registrar(uid, pregunta, r, int((time.monotonic() - t0) * 1000))
 
         if r.tipo == "ocupado":
-            # 503 porque el servicio no da abasto ahora mismo, pero lo que la
-            # app mira para saber que SI merece reintentar es `reintentar_en`:
-            # el 503 a secas ya lo usa "El asistente no está configurado", que
-            # es lo contrario -no se arregla esperando-. Acordado con la app.
-            return web.json_response(
-                {"error": r.texto, "reintentar_en": ai_handler.ESPERA_SUGERIDA_SEG},
-                status=503,
-                headers={"Retry-After": str(ai_handler.ESPERA_SUGERIDA_SEG)},
-            )
+            return self._ocupado(r.texto)
 
         return web.json_response(
             {
@@ -301,6 +306,19 @@ class ApiSenti:
                 "fuente": " | ".join(dict.fromkeys(r.fuentes)) or None,
                 "tipo": r.tipo,
             }
+        )
+
+    def _ocupado(self, texto: str = ai_handler.TEXTO_OCUPADO) -> web.Response:
+        """
+        503 porque el servicio no da abasto ahora mismo. Lo que la app mira para
+        saber que SI merece reintentar es `reintentar_en`: el 503 a secas ya lo
+        usa "El asistente no está configurado", que es lo contrario -eso no se
+        arregla esperando-. Acordado con la sesion de la app.
+        """
+        return web.json_response(
+            {"error": texto, "reintentar_en": ai_handler.ESPERA_SUGERIDA_SEG},
+            status=503,
+            headers={"Retry-After": str(ai_handler.ESPERA_SUGERIDA_SEG)},
         )
 
     async def _como_orden(
@@ -345,6 +363,8 @@ class ApiSenti:
                     _restante(limite),
                 ),
             )
+        except ai_handler.LlmOcupado:
+            raise               # lo contesta `preguntar` como 503, no el RAG
         except Exception as e:
             logger.warning(
                 "No se pudo clasificar '%s' (%s): va al RAG", pregunta[:40], e

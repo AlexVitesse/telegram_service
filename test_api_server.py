@@ -582,6 +582,39 @@ async def caso_la_pila_llena_es_503_con_reintentar_en():
     await con_api(FirebaseFalso(["AA_BB"]), "u1", p, ia=IALlena())
 
 
+async def caso_una_orden_con_la_pila_llena_no_degrada_en_parrafo():
+    """
+    Bajo carga, "arma la alarma" NO puede volver como documentación.
+
+    `parse_intent` lleva su propio `except Exception` que devolvia None ante
+    cualquier fallo, y un None significa "no era una orden": la frase se iba al
+    RAG y el usuario recibia un parrafo que parece que funciono, que es el fallo
+    exacto que este endpoint vino a arreglar. Con la pila llena tiene que salir
+    503, no 200.
+    """
+    import ai_handler
+
+    class IALlena:
+        _backend = "ollama"
+
+        async def parse_intent(self, *a, **k):
+            raise ai_handler.LlmOcupado("hay demasiadas consultas en cola")
+
+        async def chat_with_context(self, *a, **k):
+            raise AssertionError("no debio llegar al RAG")
+
+    async def p(url, api):
+        estado, cuerpo = await pedir(
+            url, token="bueno",
+            cuerpo={"pregunta": "arma la alarma", "dispositivos": EQUIPOS},
+        )
+        assert estado == 503, (estado, cuerpo)
+        assert cuerpo["reintentar_en"] == ai_handler.ESPERA_SUGERIDA_SEG, cuerpo
+        assert api._bot.interaction_logger.entradas[0]["error"] == "llm_ocupado"
+
+    await con_api(FirebaseFalso(["AA_BB"]), "u1", p, ia=IALlena())
+
+
 CASOS = [
     caso_elige_el_tunel_de_su_puerto,
     caso_salud_no_pide_token,
@@ -607,6 +640,7 @@ CASOS = [
     caso_un_equipo_sin_id_no_llega_al_modelo,
     caso_el_presupuesto_se_reparte_no_se_suma,
     caso_la_pila_llena_es_503_con_reintentar_en,
+    caso_una_orden_con_la_pila_llena_no_degrada_en_parrafo,
 ]
 
 

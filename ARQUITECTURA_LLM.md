@@ -131,9 +131,15 @@ momento", que es una respuesta honesta y ademas barata.
 
 - Al esperar el turno **dentro** del `wait_for` que ya esta puesto, el techo
   sigue cubriendo la espera. No hace falta un temporizador nuevo.
-- La via "orden" (`_como_orden`) ya trata cualquier excepcion como "al RAG": un
-  `LlmOcupado` ahi cae solo en el camino de siempre. El RAG si tiene que
-  contestar el texto de ocupado.
+- La via "orden" NO puede tratar `LlmOcupado` como "al RAG". Ese era el plan
+  inicial y estaba mal: bajo carga, "arma la alarma" se iria al RAG y volveria
+  como un parrafo de documentacion -el fallo exacto que este endpoint vino a
+  arreglar, y encima con la peor pinta: parece que funciono-. Asi que
+  `parse_intent` deja subir `LlmOcupado` en vez de convertirlo en `None`
+  (un `None` ahi significa "no era una orden"), `_como_orden` lo relanza y
+  `preguntar` contesta el 503. Lo encontro la sesion de la app leyendo el
+  `except Exception` de `_como_orden`; el culpable de verdad estaba un nivel mas
+  abajo, en el `except Exception` de `parse_intent`.
 
 **Hecho en `test_ai_handler.py`**: 20 corrutinas contra `_call_ollama` con el
 cliente HTTP sustituido, comprobando el maximo de simultaneas; y la cola llena
