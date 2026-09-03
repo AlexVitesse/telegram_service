@@ -1,0 +1,337 @@
+================================================================================
+CHANGELOG - TELEGRAM SERVICE
+Fecha: 2026-09-02 / 2026-09-03
+Commits: 1d60534..af338f3 (12 commits)
+================================================================================
+
+RESUMEN
+-------
+- El chat de la app ejecuta ordenes en lenguaje natural, no solo responde
+- Una orden con un nombre de equipo que no existe ya no desarma TODOS los equipos
+- El modelo del clasificador llevaba dando 404 en cada llamada sin que nadie lo
+  viera, porque la cadena de reserva funcionaba
+- Cola y presupuesto de tiempo para el LLM, medidos contra datos reales
+- Textos de usuario con tildes
+
+Documentacion nueva: ARQUITECTURA_LLM.md
+Trabajo coordinado con la sesion de la app (repo SentinelGuard-v7).
+
+VERIFICADO EN PRODUCCION por las dos vias -Telegram y endpoint- despues del
+ultimo despliegue. Lo que NO se ha visto: una orden llegando fisicamente a la
+central, que lleva todo el proceso offline.
+
+
+--------------------------------------------------------------------------------
+PROBLEMA 1: El chat de la app entendia las ordenes y no hacia nada
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- El bot de Telegram ejecuta ordenes en lenguaje natural; el chat de la app no
+- "Arma la alarma" escrito en la app devolvia un fragmento de la documentacion,
+  que es la peor respuesta posible: parece que funciono
+
+CAUSA RAIZ:
+- `preguntar()` nunca llamaba a `parse_intent`. Las tres piezas ya existian
+
+ARCHIVOS: api_server.py, comandos_app.py (nuevo)
+
+CAMBIOS:
+- Si la peticion trae `dispositivos`, la frase se clasifica ANTES del RAG y una
+  orden vuelve como {tipo: accion, accion, dispositivo, confirmar, texto}
+- Ejecutar sigue siendo cosa de la app: aqui no se publica MQTT ni se escribe en
+  RTDB, asi que no hace falta un segundo modelo de autorizacion
+- Sin `dispositivos` en el cuerpo no se clasifica nada: las versiones de la app
+  ya publicadas siguen funcionando sin enterarse
+- `confirmar` lo decide el servidor, no el cliente: disarm si, el resto no
+- El texto lo arma comandos_app y NO se coge el `reply` del LLM, que ya dice
+  "Alarma desactivada" cuando todavia no se ha ejecutado nada
+
+COMMIT: 802a01d
+
+
+--------------------------------------------------------------------------------
+PROBLEMA 2: "apaga la alarma del garage" desarmaba la casa entera
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- Sin ningun equipo llamado garage, esa frase actuaba sobre TODOS los equipos
+  autorizados del usuario
+
+CAUSA RAIZ:
+- `telegram_bot._resolve_device_ids_by_name` acababa en
+  `return matched if matched else authorized_ids`
+
+ARCHIVOS: telegram_bot.py, comandos_app.py, api_server.py
+
+CAMBIOS:
+- El bot delega en `comandos_app.resolver`, el mismo emparejamiento que usa el
+  endpoint. Deja de haber dos resolvedores que podian divergir
+- Cero coincidencias -o dos- devuelven lista vacia y el llamador avisa con la
+  lista de los que si hay. Nunca cae a "todos"
+- El aviso pasa de "No encontre el dispositivo X" a "No tengo claro a que equipo
+  te refieres con X. Tienes: ...", porque ahora cubre los dos casos
+- Un equipo sin `id` no llega al modelo: entraba en el prompt pero se descartaba
+  al resolver, asi que el LLM podia nombrar un equipo inexistente para todos
+- `list_devices` sobre una lista vacia devolvia accion sobre "all"
+
+COMMIT: 2407bb6
+
+
+--------------------------------------------------------------------------------
+PROBLEMA 3: Nada limitaba cuantas llamadas al LLM habia en vuelo
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- Ni semaforo, ni cola, ni limite. Con Ollama, que serializa en su propia cola,
+  diez peticiones a la vez significan que las diez expiran juntas mientras la
+  maquina sigue generando texto que ya nadie va a leer
+- El techo de tiempo se calculaba por llamada: 10 s de clasificador mas 45 s de
+  RAG, 55 s de peor caso que a ninguno de los dos tramos le constaban
+
+CAUSA RAIZ:
+- `asyncio.Semaphore` no aparecia en ningun sitio salvo los locks de comandos
+- Cada tramo derivaba su techo de LLM_TIMEOUT_SEC como si fuera el unico
+
+ARCHIVOS: ai_handler.py, api_server.py, knowledge_qa.py, config.py
+
+CAMBIOS:
+- Semaforo envolviendo `_call_ollama` y `_call_groq`, NO `_call_llm`: asi no se
+  escapa ni la cadena de reserva ni el reintento contra Groq que hace
+  `parse_intent` por su cuenta cuando el JSON viene invalido
+- Tope de cola (LLM_MAX_QUEUE): quien no cabe rebota en 0 ms con LlmOcupado. Sin
+  el, un semaforo solo mueve el atasco -esperas turno, se te acaba el techo
+  esperando, y recibes el timeout DESPUES de haber ocupado sitio-
+- API_BUDGET_SEC (40 s) repartido entre clasificador y RAG, descontando lo ya
+  gastado. Tiene que ser estrictamente menor que el timeout del cliente
+- Un timeout ya no reintenta con el otro backend: repetirlo entero es cobrarle
+  el presupuesto dos veces al mismo usuario. Una conexion rehusada si
+
+CONTRATO DE "OCUPADO" (acordado con la sesion de la app):
+- 503 con Retry-After y "reintentar_en" en el cuerpo
+- Lo que distingue ocupado de caido es la PRESENCIA de `reintentar_en`, no el
+  codigo: el 503 a secas ya significa "el asistente no esta configurado"
+- La cabecera Retry-After NO se ve desde JavaScript (CORS no la expone), por eso
+  el contrato va por el cuerpo
+
+COMMITS: 3298ae3, 6849a8e
+
+
+--------------------------------------------------------------------------------
+PROBLEMA 4: Bajo carga, una orden volvia como parrafo de documentacion
+--------------------------------------------------------------------------------
+
+DESCRIPCION DEL PROBLEMA:
+- Con la pila llena, "arma la alarma" se contestaba con documentacion
+
+CAUSA RAIZ:
+- `parse_intent` lleva su propio `except Exception` que devuelve None ante
+  cualquier fallo, LlmOcupado incluido. Y un None ahi no significa "fallo": para
+  `_como_orden` significa "no era una orden", asi que la frase se iba al RAG
+
+ARCHIVOS: ai_handler.py, api_server.py
+
+CAMBIOS:
+- LlmOcupado sube: parse_intent lo relanza, _como_orden lo relanza, y preguntar
+  contesta el mismo 503 que ya daba por la via del RAG
+- El 503 se arma en un solo sitio (`_ocupado`) para que las dos vias no diverjan
+- El resto de fallos del clasificador siguen yendo al RAG, que es lo correcto
+
+Lo encontro la sesion de la app revisando el `except Exception` de _como_orden.
+El culpable estaba un nivel mas abajo.
+
+COMMIT: 6849a8e
+
+
+--------------------------------------------------------------------------------
+PROBLEMA 5: El modelo del clasificador daba 404 en CADA llamada
+--------------------------------------------------------------------------------
+
+Cuatro observaciones en produccion antes de encontrarlo. Ordenes claras
+-"¿cuantos dispositivos tengo?"- contestadas con el telefono de soporte.
+
+DESCRIPCION DEL PROBLEMA:
+- "¿cuantos dispositivos tengo?" -> escalation con el email de soporte
+- "que equipos tengo vinculados"  -> RAG: "usa el comando /permisos"
+- "listame mis centrales"         -> funcionaba
+- Misma intencion, tres resultados distintos, en la misma tanda
+
+HIPOTESIS FALSAS QUE COSTARON HORAS (las dos, de las dos sesiones):
+- "Es el umbral de confianza de 0.6". FALSO: las frases que fallaban traian
+  confidence 0.9. El clasificador las entendia; no sabiamos leer su respuesta
+- "El regex del parser es goloso y se traga el razonamiento". FALSO en este
+  caso: el JSON empezaba en la posicion 0 y estaba cortado al final
+
+Lo que las cerro en cinco minutos fue mirar el log crudo en vez de discutirlas.
+
+CAUSA RAIZ (del log del VPS, 25 repeticiones sin que saltara nada):
+    Groq falló (404 - The model `llama-3.1-8b-instant` does not exist)
+                 -> fallback Ollama
+- El default de INTENT_MODEL era ese modelo, que dejo de existir en Groq
+- Se caia a Ollama sin que se notara, porque caer a la reserva es justo lo que
+  debe pasar cuando un backend falla
+- En Ollama el modelo es gpt-oss:20b, de RAZONAMIENTO: deja `content` vacio y
+  pone su salida en `thinking`, o se queda sin tokens a mitad del JSON
+- En el log se le ve razonar "so we should use intent list_devices" y acertar.
+  Se leia el campo equivocado y se tiraba una clasificacion correcta
+
+ARCHIVOS: config.py, ai_handler.py
+
+CAMBIOS:
+- intent_model y chat_model pasan a "" y siguen al backend: si el backend
+  contesta, el modelo existe. Clavar el nombre de un modelo de un proveedor es
+  apostar a que ese nombre siga vivo, y esa apuesta ya se perdio una vez
+- TOKENS_INTENT 256 -> 800: el razonamiento sale por el mismo grifo
+- El parser usa `json.JSONDecoder().raw_decode` en vez de un regex goloso, y
+  devuelve el ULTIMO objeto valido. No un contador de profundidad, porque una
+  llave puede ir DENTRO de una cadena: "reply": "usa {comando}"
+- `_call_groq` comprueba la respuesta vacia, como ya hacia `_call_ollama`. Sin
+  eso, un "" de Groq subia como valido y el usuario recibia un mensaje que solo
+  decia "(Fuente: instalacion hardware)"
+- El typo del default de OLLAMA_MODEL, "gtp-oss:20b", en config.py Y en
+  ai_handler.py. Antes de arreglarlo la reserva pedia un modelo inexistente
+
+COMMITS: ba1f066, c411250
+
+
+--------------------------------------------------------------------------------
+ELECCION DEL MODELO DEL CLASIFICADOR
+--------------------------------------------------------------------------------
+
+Probados los 5 candidatos de la cuenta con el `parse_intent` real, mismo prompt
+y mismo parser, contra cuatro frases de usuario:
+
+  qwen/qwen3.8-27b     4/4   garage -> device='garage'   conf 0.95   <- elegido
+  openai/gpt-oss-120b  4/4   garage -> device='garage'   conf 0.92
+  openai/gpt-oss-20b   2/4   content vacio (razonamiento)
+  qwen/qwen3.6-27b     0/4   escupe <think> y se corta
+  allam-2-7b           4/4   garage -> device='merida'   conf 0.80
+
+LO DE allam-2-7b MERECE LEERSE DOS VECES. Cuenta como 4/4 y es el peor: ante
+"apaga la alarma del garage", sin ningun equipo llamado garage, SE INVENTA EL
+EQUIPO y devuelve el unico que hay. Con ese modelo esa frase desarma la casa, y
+pasa el guard de comandos_app limpiamente porque el nombre que devuelve SI
+existe.
+
+Es el fallo del que trata media esta bitacora, entrando por la puerta que no
+estabamos mirando: no el resolvedor, sino el modelo mintiendo antes de llegar a
+el. UN GUARD SOLO PROTEGE DE LO QUE LLEGA HASTA EL. Al elegir modelo para esta
+tarea, contar aciertos no basta: hay que mirar que hace con lo que NO existe.
+
+Va clavado en el .env del VPS (INTENT_MODEL) y no en el codigo. El default del
+codigo sigue al backend, asi que si este nombre muere el servicio degrada en vez
+de romperse, y el log lo grita.
+
+COMMIT: 02bd3f2 (documentacion)
+
+
+--------------------------------------------------------------------------------
+MEDICION: 89 interacciones reales del VPS
+--------------------------------------------------------------------------------
+
+  rag         n=45  p50= 5.2s  p90= 7.8s  p95= 8.2s  max= 9.8s
+  action      n=33  p50= 1.2s  p90= 9.4s  p95= 9.9s  max=10.7s
+  escalation  n=10  p50= 3.3s  p90= 6.7s  p95= 6.7s  max= 6.7s
+  maximo de peticiones a la vez: 2
+
+EL REPARTO DEL PRESUPUESTO ESTABA INVERTIDO. Al clasificador se le dio un cuarto
+suponiendo que era la llamada corta -es la suposicion natural: pide 256 tokens de
+JSON frente a un parrafo entero de RAG-. Es falsa: el coste no esta en cuanto
+texto escribe sino en QUE MODELO lo escribe. p95 de 9.9 s contra un techo de 10.
+
+Y pasarse de ese techo no da error visible: expira, se lee como "no era una
+orden" y la frase se va al RAG. El fallo del PROBLEMA 1 reapareciendo por reloj
+en vez de por modelo. _PARTE_CLASIFICADOR: 0.25 -> 0.5
+
+LA PILA ESTA JUSTIFICADA Y NO SOBRA: el maximo historico de simultaneas es 2,
+exactamente LLM_MAX_CONCURRENT. Ni corta ni sobrada. No hay que subirla.
+
+EL PRESUPUESTO DE 40 s VA SOBRADISIMO: ninguna respuesta ha pasado de 11 s. Es
+un techo de seguridad, no una prevision.
+
+NO SE PUEDE CONCLUIR NADA del 24% de escalation en la app: mezcla las horas con
+el clasificador roto y las de despues. Repetir con datos limpios.
+
+Script en /tmp/p95.py del VPS.
+
+COMMITS: 1f9c672, af338f3
+
+
+--------------------------------------------------------------------------------
+OTROS CAMBIOS
+--------------------------------------------------------------------------------
+
+- Los textos que lee un usuario llevan tildes. Se pintan en el chat junto a
+  mensajes que si las llevan y se notaba. Al ponerlas salto un fallo de
+  concordancia tapado: "Miro como esta todos los equipos" -> "Miro el estado de"
+  (e803243)
+- DESPLIEGUE.md: probar por Telegram NO verifica el endpoint, y usar los bloques
+  del documento tal cual (1c2ba06)
+- API_SENTI.md: contrato de "ocupado" y por que Retry-After no llega a JS
+
+
+--------------------------------------------------------------------------------
+PRUEBAS
+--------------------------------------------------------------------------------
+
+  test_api_server.py      25   La puerta, CORS, ordenes, presupuesto, ocupado
+  test_comandos_app.py    14   Que frases salen como accion y sobre que equipo
+  test_ai_handler.py      13   Pila, cadena de reserva, parser, defaults
+  test_api_limites.py      9   Tope de uso y recorte de la pregunta
+  test_scheduler.py       10   Aislamiento por equipo, medianoche, determinismo
+  test_knowledge_qa.py    13   Escalado, timeouts, transitorio vs definitivo
+  test_chat_id_utils.py   89   Normalizacion de chat_id
+                         ---
+                         173
+
+Se ejecutan directamente: python test_comandos_app.py
+(No son de pytest: usan sus propias fixtures y fallan bajo pytest.)
+
+
+--------------------------------------------------------------------------------
+LA LECCION, QUE VALE MAS QUE LOS ARREGLOS
+--------------------------------------------------------------------------------
+
+Seis veces en dos dias, el mismo patron: CADA PIEZA CORRECTA POR SEPARADO, EL
+AGREGADO ROTO.
+
+Caer a la reserva cuando un backend falla esta bien. Tirar un JSON invalido esta
+bien. Devolver None cuando no hay intent esta bien. No reventar por una
+respuesta vacia esta bien. Y el resultado de las cuatro juntas era un usuario
+leyendo el telefono de soporte para preguntar cuantas alarmas tiene.
+
+El 404 llevaba 25 repeticiones en el log sin que saltara nada, PRECISAMENTE
+porque el fallback hacia su trabajo.
+
+Tres reglas que salen de aqui:
+
+1. Antes de tocar un umbral, mirar por que fallo de verdad. Un None que puede
+   significar tres cosas distintas no es un diagnostico.
+2. Las pruebas verdes de un canal no dicen NADA del otro. Cuatro preguntas
+   correctas por Telegram convivieron con un endpoint muerto y una app
+   recibiendo "Failed to fetch": el bot no pasa por aiohttp ni por ngrok.
+3. Marcar una hipotesis como hipotesis. Las dos que resultaron falsas se
+   cerraron en cinco minutos en vez de convertirse en dogma.
+
+
+--------------------------------------------------------------------------------
+LO QUE QUEDA ABIERTO
+--------------------------------------------------------------------------------
+
+- LA CENTRAL SIGUE OFFLINE. Toda la cadena esta verificada hasta el punto en que
+  la app escribe; de ahi al ESP32, no lo ha visto nadie
+- API_MAX_POR_HORA=60 en el .env, subido solo para poder probar. Bajarlo
+- Las Rules de RTDB siguen sin validar. El guard de rutas que puso la app evita
+  que la pantalla reviente; no impide leer datos de otro usuario
+- ESTADO OBSOLETO: `Estado` en RTDB no es lo que publica el equipo, sino lo
+  ultimo que el VPS pudo escribir. Con el VPS caido la app pinta el ultimo
+  estado conocido como si fuera actual: alguien puede leer "armada" mientras la
+  central lleva horas sin hablar con nadie. Decision de producto
+- El proceso NO sale con SIGTERM aunque complete su parada limpia ("Servicio
+  detenido" en el log y sigue en la tabla). Cada despliegue necesita kill -9.
+  Huele a hilo no-daemon que no termina
+- Repetir /tmp/p95.py en unas semanas, con datos limpios
+- El umbral de 0.6: con el modelo arreglado no se ha vuelto a ver una orden
+  colarse al RAG. Si vuelve a pasar, ESA conversacion si sera sobre el umbral,
+  pero con datos
+
+================================================================================
