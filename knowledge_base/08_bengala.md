@@ -6,7 +6,9 @@ La bengala es un dispositivo de disuasion visual que libera una cortina de humo 
 
 ## Modos de configuracion
 
-La bengala tiene 3 modos de operacion, configurables desde la app movil o desde Telegram.
+La bengala tiene 3 modos de operacion, configurables desde la app movil -en la ficha del equipo, tocando su tarjeta en la pantalla principal- o desde Telegram.
+
+Desde el chat de Senti dentro de la app la bengala todavia NO se maneja: si se lo pides, te dira que se hace en la ficha del equipo o por Telegram.
 
 ## Modo Auto
 
@@ -20,7 +22,7 @@ Selecciona "Pregunta" en la app o usa el comando /preguntar en Telegram. Al dete
 - Seguir monitoreando sin disparar
 - Desactivar bengala
 
-Este modo permite evaluar la situacion antes de actuar, por ejemplo revisando camaras de seguridad. La sirena si suena inmediatamente independientemente de la decision sobre la bengala. Se confirma con /si o /no. El sistema tiene un timeout de 2 minutos esperando respuesta, con recordatorios cada 30 segundos.
+Este modo permite evaluar la situacion antes de actuar, por ejemplo revisando camaras de seguridad. La sirena si suena inmediatamente independientemente de la decision sobre la bengala. La respuesta se da tocando uno de los botones del propio mensaje de Telegram; NO existen los comandos /si ni /no. El sistema tiene un timeout de 2 minutos esperando respuesta, con recordatorios cada 30 segundos.
 
 ## Modo Deshabilitado
 

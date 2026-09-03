@@ -23,6 +23,7 @@ Esta es la pantalla principal de la app y funciona como dashboard central:
 - **Editar nombre**: Puedes cambiar el nombre del dispositivo para identificarlo facilmente.
 - **Configurar bengala**: Tres modos disponibles: Auto (se dispara sola), Pregunta (te consulta antes de disparar) y Deshabilitada.
 - **Horarios activos**: Ver los horarios de armado/desarmado programados.
+- **Senti, el asistente**: Un boton flotante presente en todas las pantallas. Abre un chat donde puedes preguntar dudas sobre el sistema y tambien dar ordenes escritas: "arma la alarma", "esta armada?", "cuantos equipos tengo?". Arma y desarma de verdad, con el mismo camino que el toggle; antes de desarmar pregunta con dos botones y dice que equipo va a desarmar. Lo que todavia no hace desde ahi -silenciar una sirena, la bengala, los horarios, el historial- lo dice y remite a donde se hace. Se puede ocultar desde Configuracion.
 - **Gestionar IDs de Telegram**: Configurar multiples usuarios de Telegram para recibir notificaciones y controlar el dispositivo.
 - **Tiempo de salida**: Configurable de 0 a 180 segundos. Es el tiempo que tienes para salir despues de armar el sistema.
 - **Estado en tiempo real**: La informacion se actualiza en tiempo real desde Firebase.

@@ -14,7 +14,9 @@ Los permisos de usuario se configuran (o programan) desde Telegram. Configurar o
 6. Paso 6: El administrador aprueba el permiso ejecutando /approve_CHATID.
 7. Paso 7: El nuevo usuario queda registrado con permisos de acceso configurados.
 
-Asi se configura un permiso nuevo en el sistema. Como se configuran los permisos: con los comandos /adduser, /approve_CHATID, /desvincular y /permisos desde Telegram. Los permisos se configuran de forma digital, no desde la app movil. Para revisar los permisos ya configurados, el administrador usa /permisos.
+Asi se configura un permiso nuevo en el sistema. Como se configuran los permisos: con los comandos /adduser, /approve_CHATID, /desvincular y /permisos desde Telegram. Para revisar los permisos ya configurados, el administrador usa /permisos.
+
+**Que si se hace desde la app.** El alta y la aprobacion de usuarios -invitar, aceptar, revocar- son solo de Telegram. Pero los DESTINATARIOS de cada equipo si se editan en la app, en la ficha del dispositivo: hasta tres por equipo, dos usuarios y un grupo de Telegram. Son los que reciben las notificaciones de ese equipo. Es una cosa distinta del alta de usuarios, aunque las dos hablen de "quien tiene acceso".
 
 ### Configurar permisos: resumen de comandos
 

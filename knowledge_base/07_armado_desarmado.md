@@ -2,7 +2,7 @@
 
 ## Armar desde la App
 
-Para armar el sistema desde la app movil Sentinel Guard, utiliza el toggle en la pantalla principal. Cambia el estado de "Desarmado" a "Armado". El cambio se sincroniza en tiempo real con el Master via MQTT.
+Para armar el sistema desde la app movil Sentinel Guard, utiliza el toggle en la pantalla principal, o pideselo a Senti por escrito ("arma la alarma") tocando el boton flotante del asistente. Cambia el estado de "Desarmado" a "Armado". El cambio se sincroniza en tiempo real con el Master via MQTT.
 
 ## Armar desde Telegram
 
@@ -33,7 +33,7 @@ Cuando el sistema esta armado, el Master monitorea activamente todos los sensore
 
 ## Desarmar desde la App
 
-Cambia el toggle en la pantalla principal de "Armado" a "Desarmado". La accion se ejecuta en tiempo real.
+Cambia el toggle en la pantalla principal de "Armado" a "Desarmado". La accion se ejecuta en tiempo real. Tambien puedes pedirselo a Senti ("desarma la alarma"): en ese caso pregunta antes con dos botones y dice que equipo va a desarmar, y hasta que confirmas no manda nada.
 
 ## Desarmar desde Telegram
 
@@ -55,7 +55,10 @@ Al desarmar el sistema:
 
 ## Lenguaje natural para armar y desarmar
 
-El bot de Telegram entiende instrucciones en lenguaje natural. Ejemplos validos:
+Tanto el bot de Telegram como Senti -el asistente dentro de la app- entienden
+instrucciones en lenguaje natural, y los dos arman y desarman de verdad. La
+diferencia: Senti pregunta antes de desarmar, con dos botones y nombrando el
+equipo; el bot desarma directo. Ejemplos validos en los dos:
 
 - "activa la alarma"
 - "apaga el sistema"
