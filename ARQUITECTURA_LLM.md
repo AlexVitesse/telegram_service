@@ -66,7 +66,7 @@ Y un cabo suelto: `telegram_bot.py:1727` llama a `parse_intent` **sin
 
 ---
 
-## Fase 0 — Medir. Media hora, cero codigo
+## Fase 0 — Medir. Media hora, cero codigo  ✅ HECHO
 
 El registro que hace falta ya existe: `interaction_logger` guarda `elapsed_ms`,
 `backend`, `response_type` y `ok` en cada interaccion, de las dos vias, en
@@ -303,7 +303,7 @@ sea esta.
 
 | Fase | Que arregla | Tamano | Depende de |
 |---|---|---|---|
-| 0 Medir | Saber si 1 y 2 hacen falta, y el reparto de la 2 | 0, lo corre Eric | — |
+| ✅ 0 Medir | Saber si 1 y 2 hacen falta, y el reparto de la 2 | hecho | — |
 | ✅ 5 Bot | Desarme accidental de toda la casa | hecho | — |
 | ✅ 4 Cabos | Dos trampas menores | hecho | — |
 | ✅ 6 Defaults | Pedirle a Ollama un modelo mal escrito | hecho | — |
@@ -377,3 +377,40 @@ teniamos -el umbral de 0.6- y que era falsa. Las dos frases que fallaban traian
 
 Regla practica: **antes de tocar un umbral, mirar por que fallo de verdad.** Un
 `None` que puede significar tres cosas distintas no es un diagnostico.
+
+
+---
+
+## Lo que dijo la medicion (2026-09-02, 89 interacciones)
+
+El script quedo en `/tmp/p95.py` en el VPS. Repetir dentro de unas semanas.
+
+```
+  rag         n=45  p50= 5.2s  p90= 7.8s  p95= 8.2s  max= 9.8s
+  action      n=33  p50= 1.2s  p90= 9.4s  p95= 9.9s  max=10.7s
+  escalation  n=10  p50= 3.3s  p90= 6.7s  p95= 6.7s  max= 6.7s
+  maximo de peticiones a la vez: 2
+```
+
+Tres conclusiones, y una cambio codigo:
+
+**El reparto estaba al reves.** Se le dio al clasificador un cuarto del
+presupuesto suponiendo que era la llamada corta. Con `qwen3.8-27b` es la larga:
+p95 de 9.9 s contra 8.2 s del RAG, y con techo de 10 s exactos. Estaba pegado
+al limite, y pasarse no da error — expira, se lee como "no era una orden" y la
+frase se va al RAG. `_PARTE_CLASIFICADOR` pasa de 0.25 a 0.5.
+
+**La pila estaba justificada y no sobra.** El maximo historico de peticiones
+simultaneas es 2, exactamente `LLM_MAX_CONCURRENT`. Ni se ha quedado corta ni
+ha rebotado a nadie en uso normal -el unico `ocupado` del historico es la
+prueba de hoy-. No hay que subirla.
+
+**El presupuesto de 40 s va sobradisimo.** Ninguna respuesta ha pasado de 11 s.
+Los 40 vienen del corte de la app (45 s) y son un techo de seguridad, no una
+prevision. Bajar el corte del cliente a 20 s no romperia nada hoy, pero eso lo
+decide quien mantenga la app.
+
+**Lo que NO se puede leer de aqui:** el 24% de `escalation` en la app mezcla las
+horas en que el clasificador estaba roto (modelo 404) con las de despues. Hay
+que volver a medir con datos limpios antes de sacar conclusiones sobre cuantas
+preguntas normales acaban en soporte.

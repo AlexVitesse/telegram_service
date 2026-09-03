@@ -38,10 +38,20 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
-#: Que parte del presupuesto puede gastarse el clasificador. El resto es del
-#: RAG, que es quien de verdad tiene que redactar algo. Con los 40 s de hoy son
-#: 10 para clasificar y ~28 para contestar.
-_PARTE_CLASIFICADOR = 0.25
+#: Que parte del presupuesto puede gastarse el clasificador. Con los 40 s de hoy
+#: son 20 para clasificar y ~18 para contestar.
+#:
+#: Era 0.25 -"clasificar es la llamada corta"- y la medicion dijo lo contrario:
+#: sobre 89 interacciones reales, el RAG tiene p95 de 8.2 s y el camino de
+#: accion 9.9 s, con maximo en 10.7. O sea que el clasificador estaba pegado a
+#: su techo de 10 s mientras al RAG le sobraban 20. Y pasarse de ese techo no
+#: da un error: expira, se trata como "no era una orden" y la frase se va al
+#: RAG. Ordenes contestadas con documentacion, otra vez, ahora por reloj.
+#:
+#: Con 0.5 el clasificador tiene el doble de su p95 y al RAG le quedan 18 s,
+#: que siguen siendo 2.2 veces el suyo. Si algun dia se cambia el modelo del
+#: clasificador, este numero se vuelve a medir: depende de cual sea.
+_PARTE_CLASIFICADOR = 0.5
 
 #: Lo que se reserva para serializar y devolver la respuesta ya calculada. Sin
 #: esto, el ultimo segundo se lo lleva el LLM y el cliente corta justo cuando
