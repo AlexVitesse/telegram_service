@@ -23,6 +23,13 @@ se queda pidiendo embeddings uno a uno y la tanda tarda minutos. Y porque
 IMPORTA donde se ejecuta: en produccion el buscador usa embeddings, asi que una
 tanda con TF-IDF no dice nada sobre produccion. Avisa por pantalla de cual esta
 usando; si dice TF-IDF, el resultado no vale para decidir nada.
+
+LO QUE ESTE TEST NO DICE. Construye su PROPIA KnowledgeBase leyendo los .md del
+disco, asi que mide los archivos desplegados, no el indice que el bot tiene en
+memoria. Un verde aqui NO significa que el bot ya conteste con lo nuevo: para
+eso hace falta ademas /reload_kb, o reiniciar el servicio. Son dos
+comprobaciones independientes y el orden entre ellas da igual; lo que no vale es
+tomar una por la otra.
 """
 import os
 import sys
