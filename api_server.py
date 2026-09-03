@@ -41,7 +41,10 @@ logger = logging.getLogger(__name__)
 #: Que parte del presupuesto puede gastarse el clasificador. Con los 40 s de hoy
 #: son 20 para clasificar y ~18 para contestar.
 #:
-#: Era 0.25 -"clasificar es la llamada corta"- y la medicion dijo lo contrario:
+#: Era 0.25 -"clasificar es la llamada corta"-. Es la suposicion natural: el
+#: clasificador pide 256 tokens de JSON y el RAG redacta un parrafo entero. Y es
+#: falsa, porque el coste no esta en lo que escribe sino en el modelo que lo
+#: escribe. La medicion dijo lo contrario:
 #: sobre 89 interacciones reales, el RAG tiene p95 de 8.2 s y el camino de
 #: accion 9.9 s, con maximo en 10.7. O sea que el clasificador estaba pegado a
 #: su techo de 10 s mientras al RAG le sobraban 20. Y pasarse de ese techo no
