@@ -1664,11 +1664,31 @@ class TelegramBot:
 
         logger.info(f"Mensaje de texto de {user.first_name} ({chat_id}): {text[:60]}")
 
+        # Los grupos solo reciben notificaciones, igual que con los comandos con
+        # barra. Sin esto la politica tenia una ventana al lado de la puerta:
+        # /on y /off van detras de @require_auth, que bloquea grupos, pero
+        # "arma la alarma" escrito en el mismo grupo entraba por aqui y se
+        # ejecutaba, porque get_authorized_devices() SI acepta un Group_ID.
+        # Una orden en lenguaje natural es una orden.
+        if self.firebase_manager.is_group_chat(chat_id):
+            logger.info(
+                "Mensaje de texto ignorado desde grupo %s - solo notificaciones",
+                chat_id,
+            )
+            await update.message.reply_text(
+                "ℹ️ *Este grupo solo recibe notificaciones*\n\n"
+                "Los comandos deben ejecutarse en el chat privado con el bot.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
         # Verificar autorización
         authorized_devices = self.firebase_manager.get_authorized_devices(chat_id)
         if not authorized_devices:
-            # Usuario NO registrado: rutear a modo vendedor en vez de bloquear.
-            # Las funciones de control siguen detras de @require_auth, no hay riesgo.
+            # Usuario NO registrado en chat privado: rutear a modo vendedor en
+            # vez de bloquear. NO se usa @require_auth aqui a proposito: ese
+            # decorador contestaria "acceso no autorizado" y se llevaria por
+            # delante el modo vendedor, que es un camino de producto.
             await self._handle_sales_chat(update, text)
             return
 

@@ -44,7 +44,7 @@ Muestra la guia de comandos disponibles.
 Consulta el estado actual del sistema.
 
 - **Permisos:** Usuario autorizado
-- **Cooldown:** 8 segundos
+- **Cooldown:** 5 segundos
 - **Descripcion:**
   - Si tiene 1 dispositivo: consulta directamente
   - Si tiene multiples dispositivos: muestra menu de seleccion
@@ -60,7 +60,7 @@ Consulta el estado actual del sistema.
 Arma el sistema de alarma.
 
 - **Permisos:** Usuario autorizado
-- **Cooldown:** 8 segundos
+- **Cooldown:** 5 segundos
 - **Descripcion:**
   - Si tiene 1 dispositivo: arma directamente
   - Si tiene multiples dispositivos: muestra menu de seleccion
@@ -73,7 +73,7 @@ Arma el sistema de alarma.
 Desarma el sistema de alarma.
 
 - **Permisos:** Usuario autorizado
-- **Cooldown:** 8 segundos
+- **Cooldown:** 5 segundos
 - **Descripcion:**
   - Si tiene 1 dispositivo: desarma directamente
   - Si tiene multiples dispositivos: muestra menu de seleccion
@@ -125,23 +125,18 @@ Configura la bengala en modo con pregunta.
 
 ---
 
-### `/si`
-Confirma el disparo de bengala.
+### Confirmar o cancelar el disparo de bengala
 
-- **Permisos:** Usuario autorizado
-- **Descripcion:**
-  - Confirma una solicitud pendiente de bengala
-  - Si no hay solicitud pendiente, dispara bengala en dispositivos en alarma activa
+**No hay comandos `/si` ni `/no`.** Este documento los describia y no existen:
+no estan entre los `CommandHandler` del bot y nunca lo estuvieron.
 
----
+La solicitud se responde tocando los BOTONES del propio mensaje que manda el
+bot (`InlineKeyboardButton` con `callback_data`). No hay que escribir nada.
 
-### `/no`
-Cancela el disparo de bengala.
-
-- **Permisos:** Usuario autorizado
-- **Descripcion:**
-  - Cancela una solicitud pendiente de bengala
-  - La alarma continua activa pero sin disparar la bengala
+Importa mas de lo que parece: esa instruccion se daba mientras suena una
+sirena, que es el peor momento para pedirle a alguien que teclee un comando que
+no va a funcionar. La misma equivocacion estaba en la base de conocimiento, de
+donde salen las respuestas del asistente, y se corrigio ahi tambien.
 
 ---
 
@@ -161,7 +156,18 @@ Desvincula un dispositivo de tu cuenta.
 
 ## Comandos de Administracion
 
-> Estos comandos solo estan disponibles para usuarios con rol de Administrador.
+> Estos comandos van detras de `@require_admin`: `/permisos`, `/horarios` y
+> `/adduser`.
+>
+> **Ojo con lo que eso significa hoy.** `require_admin` consulta
+> `is_user_admin()`, que en `firebase_manager.py:957` es un stub: devuelve
+> cierto cuando el usuario tiene algun dispositivo autorizado, y su propio
+> comentario lo dice.
+>
+> O sea que **cualquier usuario autorizado es administrador**: quien puede armar
+> un equipo tambien puede dar de alta y aprobar a otra persona. Los dos roles
+> que describe la documentacion no existen todavia en el codigo. El filtro esta
+> puesto y funcionara el dia que se implementen; hasta entonces, no separa nada.
 
 ### `/permisos`
 Muestra la lista de usuarios registrados.
