@@ -359,6 +359,7 @@ class TelegramBot:
 
         # Comandos basicos
         app.add_handler(CommandHandler("start", self._cmd_start))
+        app.add_handler(CommandHandler("vincular", self._cmd_vincular))
         app.add_handler(CommandHandler("id", self._cmd_id))
         app.add_handler(CommandHandler("help", self._cmd_help))
         app.add_handler(CommandHandler("status", self._cmd_status))
@@ -564,6 +565,60 @@ class TelegramBot:
             "administrador que use /adduser y te mande el codigo."
         )
         await update.message.reply_text(deny_msg, parse_mode=ParseMode.MARKDOWN)
+
+    async def _cmd_vincular(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        `/vincular <uid>` - lo mismo que el enlace de la app, pero tecleado.
+
+        El camino normal es el boton "Abrir el bot", que manda `/start <uid>`
+        sin que el usuario llegue a ver el uid. Este comando existe porque el
+        enlace profundo se puede romper por el camino -un navegador que no cede
+        el control a Telegram, un copiar y pegar a medias- y entonces no habia
+        forma de vincular sin escribir el Chat ID a mano en la app.
+
+        Sin @require_auth, igual que /id y por lo mismo: quien todavia no esta
+        dado de alta es justo el que necesita esto.
+        """
+        chat_id = str(update.effective_chat.id)
+        uid = (context.args[0] if context.args else "").strip()
+
+        if not uid:
+            await update.message.reply_text(
+                "Usa `/vincular <tu identificador>`.\n\n"
+                "Lo normal es no tener que escribirlo: en la app, "
+                "Configuracion → Chat ID de Telegram → «Abrir el bot».\n\n"
+                f"🆔 Por si acaso, tu Chat ID es: `{chat_id}`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
+        resultado = self.firebase_manager.vincular_chat_id(uid, chat_id)
+        respuestas = {
+            "vinculado": (
+                "✅ *Listo, ya estas vinculado*\n\n"
+                f"🆔 Tu ID: `{chat_id}`\n\n"
+                "Vuelve a la app: se rellena solo."
+            ),
+            "ya_estaba": (
+                "✅ *Ya estabas vinculado*\n\n"
+                f"🆔 Tu ID: `{chat_id}`"
+            ),
+            "otro": (
+                "⚠️ *Esa cuenta ya tiene otro Telegram vinculado*\n\n"
+                f"🆔 Tu ID: `{chat_id}`\n\n"
+                "Si el tuyo es este, cambialo desde la app en "
+                "Configuracion → Chat ID de Telegram."
+            ),
+            "sin_cuenta": (
+                "❌ *No encuentro esa cuenta*\n\n"
+                "Revisa el identificador. Lo mas facil es volver a la app y "
+                "usar el boton «Abrir el bot», que lo pone por ti."
+            ),
+        }
+        await update.message.reply_text(
+            respuestas.get(resultado, "❌ No se pudo vincular. Intenta de nuevo."),
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
     async def _cmd_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler para /id - Devuelve el chat_id.
@@ -3125,6 +3180,24 @@ class TelegramBot:
     # Metodos para manejar eventos del ESP32
     # ========================================
 
+    def _chats_que_quieren(self, chat_ids: List[str], familia: Optional[str]) -> List[str]:
+        """
+        De los chats autorizados, los que no han apagado este aviso.
+
+        `familia` es "armado" / "conexion", o None para las alarmas. Las alarmas
+        pasan por aqui igualmente **a proposito**: no para filtrarlas por
+        categoria -eso no se puede- sino porque `alertas/telegram` apaga el
+        CANAL entero. Quien lo apaga esta diciendo "por Telegram no", y seguir
+        escribiendole ahi seria ignorarlo.
+
+        Un chat sin cuenta en la app -un grupo, o alguien que solo usa Telegram-
+        no tiene preferencias que respetar y se queda en la lista.
+        """
+        return [
+            c for c in chat_ids
+            if self.firebase_manager.quiere_aviso_telegram(c, familia)
+        ]
+
     async def handle_mqtt_event(self, event: MqttEvent):
         """Procesa un evento MQTT y notifica a los usuarios"""
         from mqtt_protocol import EventType
@@ -3188,9 +3261,8 @@ class TelegramBot:
         # Formatear mensaje
         message = self.mqtt_handler.format_event_message(event) if self.mqtt_handler else str(event)
 
-        # Familia de aviso que el usuario puede apagar desde la app. Las alarmas
-        # no llegan aqui -salen arriba, por _start_alarm_notification- asi que
-        # esto nunca puede silenciar la notificacion que importa.
+        # Familia que el usuario puede apagar por categoria. Las alarmas no
+        # llegan hasta aqui: salen arriba, por _start_alarm_notification.
         familia = (
             "armado"
             if event.event_type
@@ -3199,11 +3271,7 @@ class TelegramBot:
         )
 
         # Enviar a todos los usuarios
-        for chat_id in chat_ids:
-            if familia and not self.firebase_manager.quiere_aviso_telegram(
-                chat_id, familia
-            ):
-                continue
+        for chat_id in self._chats_que_quieren(chat_ids, familia):
             try:
                 await self.send_message(chat_id, message, "Markdown", has_keyboard=True)
             except Exception as e:
@@ -3222,6 +3290,17 @@ class TelegramBot:
     ):
         """Inicia el flujo de confirmación de bengala para un dispositivo."""
         device_location = self.firebase_manager.get_device_location(device_id) or device_id
+
+        # Se filtra AQUI y no en cada envio porque `confirmation.chat_ids` es lo
+        # que usan despues los recordatorios cada 30 s: filtrar solo el primer
+        # mensaje dejaria a quien apago el canal recibiendo los recordatorios.
+        # Solo el interruptor de canal; una alarma no se apaga por categoria.
+        chat_ids = self._chats_que_quieren(chat_ids, None)
+        if not chat_ids:
+            logger.warning(
+                f"Alarma en {device_id}: ningun chat de Telegram quiere avisos"
+            )
+            return
 
         # Crear estado de confirmación
         confirmation = BengalaConfirmation(
@@ -3296,6 +3375,16 @@ class TelegramBot:
         Solo muestra botón de Desactivar sistema (sin opción de bengala).
         """
         device_location = self.firebase_manager.get_device_location(device_id) or device_id
+
+        # Igual que en el flujo con bengala: se filtra una vez, porque de esta
+        # lista salen tambien los recordatorios cada 30 s. Solo el interruptor
+        # de canal; una alarma no se apaga por categoria.
+        chat_ids = self._chats_que_quieren(chat_ids, None)
+        if not chat_ids:
+            logger.warning(
+                f"Alarma en {device_id}: ningun chat de Telegram quiere avisos"
+            )
+            return
 
         # Guardar estado para recordatorios
         self._alarm_notifications[device_id] = {

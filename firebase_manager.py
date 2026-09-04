@@ -804,33 +804,102 @@ class FirebaseManager:
             return "vinculado"
         return "error"
 
-    def quiere_aviso_telegram(self, chat_id: str, clave: str) -> bool:
+    #: chat_id -> (uid, cuando_se_resolvio). Ver _uid_por_chat_id.
+    _cache_uid: Dict[str, tuple] = {}
+    _CACHE_UID_TTL = 300
+
+    def _uid_por_chat_id(self, chat_id: str) -> Optional[str]:
         """
-        Si este chat de Telegram quiere los avisos de la familia `clave`.
+        La cuenta de la app cuyo `telegram_id` es este chat.
 
-        Lee `Avisos/{chat_id}/{clave}`. Ausente = si, para no cambiarle nada a
-        quien ya lo tiene funcionando.
+        Consulta indexada sobre `Usuarios` en vez de descargarlo entero. La
+        regla `.indexOn: ["telegram_id"]` tiene que existir: sin ella Firebase
+        avisa por log y filtra en cliente, o sea que se trae todo el arbol de
+        usuarios en cada evento. Ver docs/SECURITY.md de la app.
 
-        POR QUE UN NODO APARTE, y no `Usuarios/{uid}/alertas` como el push: aqui
-        solo se tiene el chat_id, y para llegar al uid haria falta recorrer
-        `Usuarios` entero en cada evento. La app, que si sabe las dos cosas,
-        escribe las dos. Es una proyeccion con un unico escritor, no un segundo
-        origen de la verdad: si `Avisos` no existe, el usuario recibe todo, que
-        es el comportamiento de siempre.
+        Cachea 5 minutos porque esto corre por cada notificacion y la relacion
+        casi nunca cambia. El precio de la cache: si alguien acaba de vincular o
+        revincular su Telegram, puede tardar hasta ese rato en que se le
+        apliquen sus preferencias. Es aceptable; lo contrario -una consulta por
+        evento- no.
+        """
+        if not self.is_available():
+            return None
 
-        Las alarmas NO pasan por aqui. Solo lo opcional: armado/desarmado y
-        conexion.
+        ahora = time.time()
+        cacheado = self._cache_uid.get(str(chat_id))
+        if cacheado and ahora - cacheado[1] < self._CACHE_UID_TTL:
+            return cacheado[0]
+
+        try:
+            encontrados = (
+                self.db.reference("Usuarios")
+                .order_by_child("telegram_id")
+                .equal_to(str(chat_id))
+                .get()
+            )
+        except Exception as e:
+            logger.error(f"No se pudo resolver el uid de {chat_id}: {e}")
+            return None
+
+        uid = None
+        if isinstance(encontrados, dict) and encontrados:
+            uid = next(iter(encontrados))
+            if len(encontrados) > 1:
+                # Dos cuentas con el mismo Telegram. No deberia pasar
+                # -vincular_chat_id no pisa un valor existente- pero puede haber
+                # datos viejos, y elegir en silencio esconderia el problema.
+                logger.warning(
+                    f"{len(encontrados)} cuentas comparten el chat {chat_id}; "
+                    f"se usan las preferencias de {uid}"
+                )
+
+        self._cache_uid[str(chat_id)] = (uid, ahora)
+        return uid
+
+    def quiere_aviso_telegram(self, chat_id: str, clave: Optional[str]) -> bool:
+        """
+        Si este chat de Telegram quiere recibir este aviso.
+
+        `clave` es la familia opcional ("armado", "conexion") o None para los
+        avisos que no se pueden apagar por categoria -las alarmas-. Incluso con
+        None se consulta `alertas/telegram`, que es el interruptor del CANAL:
+        quien lo apaga esta diciendo "por Telegram no", no "de esto no".
+
+        Lee `Usuarios/{uid}/alertas`, el mismo sitio que el push. **No hay nodo
+        aparte.** Lo hubo un dia, indexado por chat_id, para ahorrarse esta
+        resolucion; era duplicar el estado para no escribir una consulta.
+
+        Todo lo que no se pueda resolver devuelve True. Un chat sin cuenta en la
+        app -un grupo, o alguien que solo usa Telegram- no tiene preferencias
+        que respetar, y quedarse callado ante la duda es justo lo que no puede
+        hacer una alarma.
         """
         if not self.is_available():
             return True
 
-        try:
-            valor = self.db.reference(f"Avisos/{chat_id}/{clave}").get()
-        except Exception as e:
-            logger.error(f"Error leyendo Avisos/{chat_id}/{clave}: {e}")
+        uid = self._uid_por_chat_id(chat_id)
+        if not uid:
             return True
 
-        return valor is not False
+        try:
+            alertas = self.db.reference(f"Usuarios/{uid}/alertas").get()
+        except Exception as e:
+            logger.error(f"Error leyendo alertas de {uid}: {e}")
+            return True
+
+        if not isinstance(alertas, dict):
+            return True
+
+        # El canal entero, alarmas incluidas. Es una eleccion explicita del
+        # usuario sobre DONDE quiere que le avisen, no sobre QUE.
+        if alertas.get("telegram") is False:
+            return False
+
+        if not clave:
+            return True
+
+        return alertas.get(clave) is not False
 
     def get_authorized_devices(self, chat_id: str) -> List[str]:
         """

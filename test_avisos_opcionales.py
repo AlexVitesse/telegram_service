@@ -1,5 +1,5 @@
 """
-Apagar los avisos de armado no apaga los de alarma.
+Que avisos quiere cada quien: por categoria en el push, y por canal en Telegram.
 
 `push_enabled` era un si/no para TODO. En la practica -reportado por los
 usuarios en la reunion del 3-sep- armar y desarmar notificaba cada vez, incluso
@@ -9,31 +9,67 @@ que importa, la gente elige quedarse sin ella. Eso es una alarma que no avisa.
 
     python test_avisos_opcionales.py
 
-Lo que se vigila: que ALARM_TRIGGERED y BENGALA_ACTIVATED no sean apagables por
-ninguna via, y que lo ausente siga significando "si" -o un usuario que nunca
-toco los ajustes se quedaria sin avisos de golpe-.
+DOS EJES, Y NO SON LO MISMO:
+
+- La CATEGORIA (`alertas/armado`, `alertas/conexion`) dice DE QUE avisar. Las
+  alarmas no estan ahi y no se pueden quitar.
+- El CANAL (`alertas/telegram`) dice DONDE avisar. Ese si se lleva las alarmas
+  por delante, a proposito: quien lo apaga esta diciendo "por Telegram no", y
+  seguir escribiendole ahi seria ignorarlo. La app avisa antes de guardarlo si
+  el usuario ademas tiene el push apagado.
+
+Todo vive en `Usuarios/{uid}/alertas`, un solo sitio. Hubo un dia un segundo
+nodo indexado por chat_id para que el bot no tuviera que resolver el uid; era
+duplicar estado para ahorrarse una consulta.
 """
 import sys
 import types
 
 
 class FirebaseFalso:
-    def __init__(self, nodos=None):
+    def __init__(self, nodos=None, usuarios=None):
         self.nodos = nodos or {}
+        #: uid -> telegram_id, lo que resuelve la consulta indexada
+        self.usuarios = usuarios or {}
+        self.consultas = 0
         self.db = self
 
     def is_available(self):
         return True
 
     def reference(self, path):
-        nodos = self.nodos
+        padre = self
 
         class Ref:
             def get(_):
-                return nodos.get(path)
+                return padre.nodos.get(path)
+
+            def order_by_child(_, campo):
+                assert path == "Usuarios", f"consulta sobre {path}"
+                assert campo == "telegram_id"
+
+                class Query:
+                    def equal_to(__, valor):
+                        padre.consultas += 1
+
+                        class Res:
+                            def get(___):
+                                return {
+                                    uid: {"telegram_id": tid}
+                                    for uid, tid in padre.usuarios.items()
+                                    if tid == valor
+                                }
+
+                        return Res()
+
+                return Query()
 
         return Ref()
 
+
+# ----------------------------------------------------------------------
+# Push: por categoria
+# ----------------------------------------------------------------------
 
 def _fcm(nodos=None):
     from fcm_handler import FCMHandler
@@ -77,29 +113,90 @@ def test_sin_ajustes_se_recibe_todo():
         assert h._quiere_aviso("U1", tipo), tipo
 
 
+def test_apagar_telegram_no_toca_el_push():
+    """Son dos canales. Silenciar uno no puede silenciar el otro."""
+    from fcm_handler import NotificationType
+
+    h = _fcm({"Usuarios/U1/alertas/telegram": False})
+    assert h._quiere_aviso("U1", NotificationType.ALARM_TRIGGERED)
+    assert h._quiere_aviso("U1", NotificationType.SYSTEM_ARMED)
+
+
 def test_push_enabled_en_falso_lo_apaga_todo():
-    """El interruptor general sigue mandando; esto solo lo afina."""
+    """El interruptor general del canal push sigue mandando."""
     from fcm_handler import NotificationType
 
     h = _fcm({"Usuarios/U1/push_enabled": False})
     assert not h._quiere_aviso("U1", NotificationType.ALARM_TRIGGERED)
 
 
-def test_telegram_lee_su_propio_nodo_por_chat_id():
-    """
-    `Avisos/{chat_id}` y no `Usuarios/{uid}/alertas`: en el camino de Telegram
-    solo se tiene el chat_id, y llegar al uid obligaria a recorrer `Usuarios`
-    entero en cada evento.
-    """
+# ----------------------------------------------------------------------
+# Telegram: por canal, resolviendo el uid desde el chat_id
+# ----------------------------------------------------------------------
+
+def _fb(nodos=None, usuarios=None):
     from firebase_manager import FirebaseManager
 
-    fb = FirebaseFalso({"Avisos/555/armado": False})
+    fb = FirebaseFalso(nodos, usuarios)
+    fb._cache_uid = {}
+    fb._CACHE_UID_TTL = FirebaseManager._CACHE_UID_TTL
+    fb._uid_por_chat_id = types.MethodType(FirebaseManager._uid_por_chat_id, fb)
     fb.quiere_aviso_telegram = types.MethodType(
         FirebaseManager.quiere_aviso_telegram, fb
     )
+    return fb
+
+
+def test_resuelve_el_uid_desde_el_chat_id():
+    """Sin nodo duplicado: una consulta indexada sobre Usuarios."""
+    fb = _fb({"Usuarios/U1/alertas": {"armado": False}}, {"U1": "555"})
     assert not fb.quiere_aviso_telegram("555", "armado")
     assert fb.quiere_aviso_telegram("555", "conexion")
-    assert fb.quiere_aviso_telegram("999", "armado"), "otro chat no queda afectado"
+
+
+def test_apagar_el_canal_calla_tambien_las_alarmas():
+    """
+    La diferencia con el push, y es deliberada. `clave=None` es una alarma: aun
+    asi se respeta el interruptor de canal, porque el usuario esta diciendo
+    DONDE quiere que le avisen, no de que.
+    """
+    fb = _fb({"Usuarios/U1/alertas": {"telegram": False}}, {"U1": "555"})
+    assert not fb.quiere_aviso_telegram("555", None)
+    assert not fb.quiere_aviso_telegram("555", "armado")
+
+
+def test_un_chat_sin_cuenta_recibe_todo():
+    """
+    Un grupo, o alguien que solo usa Telegram. No tiene preferencias que
+    respetar, y callarse ante la duda es lo que no puede hacer una alarma.
+    """
+    fb = _fb({}, {"U1": "555"})
+    assert fb.quiere_aviso_telegram("-1001", None)
+    assert fb.quiere_aviso_telegram("999", "armado")
+
+
+def test_apagar_lo_mio_no_calla_al_grupo():
+    """Las preferencias son por chat, no por dispositivo."""
+    fb = _fb({"Usuarios/U1/alertas": {"telegram": False}}, {"U1": "555"})
+    assert not fb.quiere_aviso_telegram("555", None)
+    assert fb.quiere_aviso_telegram("-1001", None), "el grupo quedo silenciado"
+
+
+def test_la_resolucion_se_cachea():
+    """Esto corre por cada notificacion y por cada destinatario."""
+    fb = _fb({"Usuarios/U1/alertas": {}}, {"U1": "555"})
+    for _ in range(5):
+        fb.quiere_aviso_telegram("555", "armado")
+    assert fb.consultas == 1, f"{fb.consultas} consultas en vez de 1"
+
+
+def test_la_cache_caduca():
+    """Si no, revincular Telegram no surtiria efecto hasta reiniciar el bot."""
+    fb = _fb({"Usuarios/U1/alertas": {}}, {"U1": "555"})
+    fb.quiere_aviso_telegram("555", "armado")
+    fb._CACHE_UID_TTL = -1
+    fb.quiere_aviso_telegram("555", "armado")
+    assert fb.consultas == 2
 
 
 if __name__ == "__main__":

@@ -39,6 +39,19 @@ Cubierto por `test_vinculacion_app.py`.
 
 ---
 
+### `/vincular <id>`
+Vincula tu Telegram con una cuenta de la app, escribiendo el identificador.
+
+- **Permisos:** Ninguno (publico), igual que `/id` y por lo mismo
+- **Descripcion:** hace lo mismo que `/start <uid>`, que es lo que manda el boton
+  "Abrir el bot" de la app sin que el usuario vea el identificador. Existe porque
+  un enlace profundo se rompe por el camino mas de lo que parece -un navegador
+  que no cede el control a Telegram, un pegado a medias-, y sin esto la unica
+  salida era escribir el Chat ID a mano en la app.
+- Sin argumento, recuerda como se usa y da el Chat ID.
+
+---
+
 ### `/id`
 Devuelve tu Chat ID de Telegram.
 
@@ -338,24 +351,41 @@ El bot muestra un teclado permanente con los comandos mas usados:
 
 ## Que avisos manda el bot, y cuales se pueden apagar
 
-El usuario elige desde la app que familias de aviso quiere. El bot lo lee de
-`Avisos/{chat_id}`; ausente = los recibe todos.
+El usuario elige desde la app. Hay DOS ejes y no son lo mismo:
 
-| Familia | Apaga | Nodo |
+| Eje | Campo | Decide |
 |---|---|---|
-| `armado` | `system_armed`, `system_disarmed` | `Avisos/{chat_id}/armado` |
-| `conexion` | dispositivo sin conexion y reconectado | `Avisos/{chat_id}/conexion` |
+| Categoria | `alertas/armado`, `alertas/conexion` | De QUE avisar |
+| Canal | `alertas/telegram` | DONDE avisar |
 
-**Las alarmas no pasan por ese filtro y no se pueden apagar.** Salen por
-`_start_alarm_notification` / `_start_bengala_confirmation`, antes de llegar al
-punto donde se consulta la preferencia.
+Por categoria, `armado` cubre `system_armed` y `system_disarmed`, y `conexion`
+los avisos de dispositivo sin conexion y reconectado. **Las alarmas no estan y no
+se pueden quitar de ahi.**
 
-Existe porque en la app habia un unico interruptor para todo: quien se hartaba
-del aviso en cada armado apagaba tambien el de alarma. Una alarma que no avisa.
+El eje de canal SI las alcanza: con `alertas/telegram` en false el bot no manda
+NADA a ese chat, alarmas incluidas. Quien lo apaga esta diciendo "por Telegram
+no", no "de esto no". La app pide confirmacion antes de guardarlo si el usuario
+tiene tambien el push apagado, porque entonces se queda sin ninguna via.
 
-`Avisos/{chat_id}` lo escribe la APP, no el bot. Es una proyeccion de
-`Usuarios/{uid}/alertas`: aqui solo se tiene el chat_id, y llegar al uid
-obligaria a recorrer `Usuarios` entero en cada evento.
+Las preferencias son POR CHAT: apagar el tuyo no calla al grupo ni al segundo
+usuario de la central.
+
+Todo vive en `Usuarios/{uid}/alertas`, el mismo sitio que lee el push. Aqui solo
+se tiene el chat_id, asi que `_uid_por_chat_id()` lo resuelve con
+`Usuarios.order_by_child("telegram_id")`, cacheado 5 minutos. **Hace falta la
+regla `.indexOn: ["telegram_id"]`**: sin ella Firebase avisa por log y filtra en
+cliente, o sea que se descarga el arbol de usuarios entero en cada evento.
+
+El filtro se aplica en `_get_authorized_chats()` (main.py) y en
+`_chats_que_quieren()` (telegram_bot.py), que son los dos sitios por los que pasa
+todo lo que se manda. En el flujo de alarma se filtra UNA vez, al crear la
+confirmacion, porque de esa lista salen tambien los recordatorios cada 30 s:
+filtrar solo el primer mensaje dejaba a quien apago el canal recibiendo los
+recordatorios.
+
+Ausente = se recibe todo. Y un chat sin cuenta en la app -un grupo, o alguien que
+solo usa Telegram- no tiene preferencias que respetar, asi que recibe todo
+tambien: callarse ante la duda es lo que no puede hacer una alarma.
 
 Cubierto por `test_avisos_opcionales.py`.
 
