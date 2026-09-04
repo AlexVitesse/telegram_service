@@ -226,7 +226,9 @@ class AlarmBridgeService:
             f"📱 ID: `{device_id}`\n\n"
             "El dispositivo ha restablecido la conexión."
         )
-        self._schedule_telegram_broadcast_for_device(device_id, message)
+        self._schedule_telegram_broadcast_for_device(
+            device_id, message, familia="conexion"
+        )
 
     async def _monitor_device_connections(self):
         """Tarea que monitorea la conexión de dispositivos periódicamente"""
@@ -253,7 +255,9 @@ class AlarmBridgeService:
                         "⚠️ El dispositivo ha dejado de responder.\n"
                         "Verifique la conexión a internet o alimentación."
                     )
-                    self._schedule_telegram_broadcast_for_device(device_id, message)
+                    self._schedule_telegram_broadcast_for_device(
+                        device_id, message, familia="conexion"
+                    )
 
                     # También enviar push notification
                     self._send_push_device_offline(device_id, location)
@@ -358,14 +362,25 @@ class AlarmBridgeService:
         logger.warning("Firebase no está disponible, no se pueden obtener los chats autorizados.")
         return []
 
-    def _schedule_telegram_broadcast_for_device(self, device_id: str, message: str):
-        """Envia un mensaje a todos los chats autorizados para un dispositivo"""
+    def _schedule_telegram_broadcast_for_device(
+        self, device_id: str, message: str, familia: str = None
+    ):
+        """
+        Envia un mensaje a todos los chats autorizados para un dispositivo.
+
+        `familia` marca los avisos que el usuario puede apagar desde la app
+        ("conexion", "armado"). Sin `familia`, el mensaje sale siempre: es lo
+        que hace falta para las alarmas, que no se apagan.
+        """
         if not self._loop or not self.telegram.is_running():
             return
 
         chat_ids = self._get_authorized_chats(device_id)
 
         for chat_id in chat_ids:
+            if familia and self.firebase_available:
+                if not firebase_manager.quiere_aviso_telegram(chat_id, familia):
+                    continue
             asyncio.run_coroutine_threadsafe(
                 self.telegram.send_message(
                     chat_id,

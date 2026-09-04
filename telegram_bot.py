@@ -472,6 +472,43 @@ class TelegramBot:
 
         logger.info(f"/start de {user.first_name} ({chat_id})")
 
+        # Enlace profundo desde la app: `?start=<uid>` llega aqui como
+        # context.args[0]. Va ANTES de todo lo demas porque el usuario que lo
+        # usa es justo el que todavia no tiene equipos, y sin esto caia en la
+        # rama de "usuario no registrado" con un texto que le pedia un codigo
+        # de invitacion al administrador. Recien registrado en la app, y el bot
+        # tratandolo de intruso.
+        payload = (context.args[0] if context.args else "").strip()
+        # "app" es el payload viejo, que no identificaba a nadie. Un chat_id es
+        # numerico; un uid de Firebase, 28 alfanumericos.
+        if payload and payload != "app" and not payload.lstrip("-").isdigit():
+            resultado = self.firebase_manager.vincular_chat_id(payload, chat_id)
+            if resultado in ("vinculado", "ya_estaba"):
+                cabecera = (
+                    "✅ *Listo, ya estas vinculado*"
+                    if resultado == "vinculado"
+                    else "✅ *Ya estabas vinculado*"
+                )
+                await update.message.reply_text(
+                    f"{cabecera}\n\n"
+                    f"🆔 Tu ID: `{chat_id}`\n\n"
+                    "Vuelve a la app y toca «Ya lo vinculé».",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+            if resultado == "otro":
+                await update.message.reply_text(
+                    "⚠️ *Esa cuenta ya tiene otro Telegram vinculado*\n\n"
+                    f"🆔 Tu ID: `{chat_id}`\n\n"
+                    "Si el tuyo es este, cámbialo desde la app en "
+                    "Configuracion → Chat ID de Telegram.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+            # "sin_cuenta" o "error": sigue el camino normal, que al menos le
+            # dice su ID para que lo escriba a mano.
+            logger.warning(f"Vinculacion desde la app no completada: {resultado}")
+
         # --- MODIFIED LOGIC ---
         # Verificar si el usuario tiene dispositivos autorizados
         authorized_devices = self.firebase_manager.get_authorized_devices(chat_id)
@@ -513,12 +550,18 @@ class TelegramBot:
             return
 
         # No autorizado
+        # Sin "pidele un codigo al administrador" de entrada: por aqui pasa
+        # tambien quien se acaba de registrar en la app y toco el boton de
+        # ayuda, y a ese el codigo de invitacion no le hace ninguna falta -su
+        # cuenta existe, lo que le falta es vincularla-. El camino de la app va
+        # arriba, con el uid en el enlace; esto es la red por si llega a pelo.
         deny_msg = (
-            "🚫 *Usuario no registrado*\n\n"
-            "No tienes autorizacion para usar este sistema.\n\n"
-            f"🆔 Tu ID: `{chat_id}`\n\n"
-            "📱 Para solicitar acceso, pidele al administrador "
-            "que use /adduser y te envie el codigo de invitacion."
+            "👋 *Hola*\n\n"
+            f"🆔 Tu Chat ID es: `{chat_id}`\n\n"
+            "Si vienes de la app, copialo en Configuracion → Chat ID de "
+            "Telegram.\n\n"
+            "Si esperas acceso a un equipo que no es tuyo, pidele al "
+            "administrador que use /adduser y te mande el codigo."
         )
         await update.message.reply_text(deny_msg, parse_mode=ParseMode.MARKDOWN)
 
@@ -3145,8 +3188,22 @@ class TelegramBot:
         # Formatear mensaje
         message = self.mqtt_handler.format_event_message(event) if self.mqtt_handler else str(event)
 
+        # Familia de aviso que el usuario puede apagar desde la app. Las alarmas
+        # no llegan aqui -salen arriba, por _start_alarm_notification- asi que
+        # esto nunca puede silenciar la notificacion que importa.
+        familia = (
+            "armado"
+            if event.event_type
+            in (EventType.SYSTEM_ARMED, EventType.SYSTEM_DISARMED)
+            else None
+        )
+
         # Enviar a todos los usuarios
         for chat_id in chat_ids:
+            if familia and not self.firebase_manager.quiere_aviso_telegram(
+                chat_id, familia
+            ):
+                continue
             try:
                 await self.send_message(chat_id, message, "Markdown", has_keyboard=True)
             except Exception as e:

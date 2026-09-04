@@ -759,6 +759,79 @@ class FirebaseManager:
             logger.info(f"Horario 'system' de {key} resuelto por uid: {len(macs)} equipo(s)")
         return macs
 
+    def vincular_chat_id(self, uid: str, chat_id: str) -> str:
+        """
+        Escribe el Chat ID de Telegram en la cuenta de la app.
+
+        Lo llama /start cuando el enlace profundo trae el uid dentro
+        (`?start=<uid>`, que la app construye en `urlBotVinculacion()`). Antes
+        el payload era la palabra "app", que no identifica a nadie: el bot solo
+        podia reconocer a quien YA tenia equipos, asi que al usuario recien
+        registrado -el unico que de verdad necesita vincularse- le contestaba
+        "Usuario no registrado, pidele al administrador un codigo".
+
+        NO pisa un valor existente. Cambiar el telegram_id de una cuenta obliga
+        a mover `Horarios/{telegram_id}`, que se indexa con el; hacerlo aqui,
+        callado y desde un /start, dejaria los horarios huerfanos.
+
+        Devuelve: "vinculado" | "ya_estaba" | "otro" | "sin_cuenta" | "error"
+        """
+        if not self.is_available():
+            return "error"
+
+        try:
+            cuenta = self.db.reference(f"Usuarios/{uid}").get()
+        except Exception as e:
+            logger.error(f"No se pudo leer la cuenta {uid}: {e}")
+            return "error"
+
+        # El uid llega de un enlace que cualquiera puede teclear. Si no hay
+        # cuenta, no se crea: se escribiria un nodo Usuarios/{loquesea} con el
+        # chat_id de quien lo mando.
+        if not isinstance(cuenta, dict):
+            logger.warning(f"/start con un uid que no tiene cuenta: {uid}")
+            return "sin_cuenta"
+
+        actual = str(cuenta.get("telegram_id") or "").strip()
+        if actual == str(chat_id):
+            return "ya_estaba"
+        if actual:
+            logger.info(f"La cuenta {uid} ya tiene otro telegram_id; no se pisa")
+            return "otro"
+
+        if self.update_data(f"Usuarios/{uid}", {"telegram_id": str(chat_id)}):
+            logger.info(f"Cuenta {uid} vinculada al chat {chat_id}")
+            return "vinculado"
+        return "error"
+
+    def quiere_aviso_telegram(self, chat_id: str, clave: str) -> bool:
+        """
+        Si este chat de Telegram quiere los avisos de la familia `clave`.
+
+        Lee `Avisos/{chat_id}/{clave}`. Ausente = si, para no cambiarle nada a
+        quien ya lo tiene funcionando.
+
+        POR QUE UN NODO APARTE, y no `Usuarios/{uid}/alertas` como el push: aqui
+        solo se tiene el chat_id, y para llegar al uid haria falta recorrer
+        `Usuarios` entero en cada evento. La app, que si sabe las dos cosas,
+        escribe las dos. Es una proyeccion con un unico escritor, no un segundo
+        origen de la verdad: si `Avisos` no existe, el usuario recibe todo, que
+        es el comportamiento de siempre.
+
+        Las alarmas NO pasan por aqui. Solo lo opcional: armado/desarmado y
+        conexion.
+        """
+        if not self.is_available():
+            return True
+
+        try:
+            valor = self.db.reference(f"Avisos/{chat_id}/{clave}").get()
+        except Exception as e:
+            logger.error(f"Error leyendo Avisos/{chat_id}/{clave}: {e}")
+            return True
+
+        return valor is not False
+
     def get_authorized_devices(self, chat_id: str) -> List[str]:
         """
         Obtiene la lista de device_ids autorizados para un chat_id de Telegram.

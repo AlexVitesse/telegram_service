@@ -7,13 +7,35 @@ Documentacion completa de todos los comandos disponibles en el bot de Telegram.
 ## Comandos Basicos
 
 ### `/start`
-Inicia la interaccion con el bot.
+Inicia la interaccion con el bot. Es tambien la puerta de la vinculacion desde
+la app movil.
 
 - **Permisos:** Ninguno (publico)
-- **Descripcion:**
-  - Si es el primer usuario, se registra como Administrador Principal
-  - Si ya esta autorizado, muestra mensaje de bienvenida
-  - Si no esta autorizado, muestra instrucciones para solicitar acceso
+- **Descripcion**, en el orden en que se comprueba:
+  1. **Con payload de la app** (`/start <uid>`, que genera el boton "Abrir el
+     bot"): escribe `Usuarios/{uid}/telegram_id` y contesta "Listo, ya estas
+     vinculado". Repetirlo contesta "Ya estabas vinculado" y no escribe nada.
+  2. Si ya esta autorizado, mensaje de bienvenida con su Chat ID
+  3. Si es el primer usuario del sistema, se registra como Administrador
+     Principal
+  4. Si no, le da su Chat ID y le explica las dos salidas: copiarlo en la app,
+     o pedir un codigo de invitacion si espera acceso a un equipo ajeno
+
+**Lo que NO hace la vinculacion, y es deliberado:**
+
+- **No pisa un `telegram_id` que ya exista.** `Horarios` se indexa por el;
+  cambiarlo en silencio desde un `/start` dejaria los horarios del usuario
+  apuntando a una clave que ya no es la suya. Contesta avisando y no toca nada.
+- **No crea cuentas.** El payload viene de un enlace que cualquiera puede
+  teclear: si el uid no tiene cuenta, se registra un warning y sigue el camino
+  normal.
+
+El payload viejo era la palabra `app`, que no identificaba a nadie, asi que la
+"vinculacion automatica" solo reconocia a quien YA tenia equipos. Al recien
+registrado -el unico que la necesita- le contestaba "Usuario no registrado".
+Se sigue aceptando `app` como payload, sin efecto, porque hay enlaces repartidos.
+
+Cubierto por `test_vinculacion_app.py`.
 
 ---
 
@@ -314,10 +336,35 @@ El bot muestra un teclado permanente con los comandos mas usados:
 
 ---
 
+## Que avisos manda el bot, y cuales se pueden apagar
+
+El usuario elige desde la app que familias de aviso quiere. El bot lo lee de
+`Avisos/{chat_id}`; ausente = los recibe todos.
+
+| Familia | Apaga | Nodo |
+|---|---|---|
+| `armado` | `system_armed`, `system_disarmed` | `Avisos/{chat_id}/armado` |
+| `conexion` | dispositivo sin conexion y reconectado | `Avisos/{chat_id}/conexion` |
+
+**Las alarmas no pasan por ese filtro y no se pueden apagar.** Salen por
+`_start_alarm_notification` / `_start_bengala_confirmation`, antes de llegar al
+punto donde se consulta la preferencia.
+
+Existe porque en la app habia un unico interruptor para todo: quien se hartaba
+del aviso en cada armado apagaba tambien el de alarma. Una alarma que no avisa.
+
+`Avisos/{chat_id}` lo escribe la APP, no el bot. Es una proyeccion de
+`Usuarios/{uid}/alertas`: aqui solo se tiene el chat_id, y llegar al uid
+obligaria a recorrer `Usuarios` entero en cada evento.
+
+Cubierto por `test_avisos_opcionales.py`.
+
+---
+
 ## Notas Tecnicas
 
 - Los comandos que esperan respuesta del dispositivo tienen timeout de 5-7 segundos
-- El cooldown de `/status`, `/on`, `/off`, `/disparo` es de 8 segundos
+- El cooldown es de **5 segundos** en `/status`, `/on` y `/off`, y de **8** en `/disparo`
 - Los cambios en horarios se sincronizan automaticamente con Firebase y ESP32
 - Las confirmaciones de bengala expiran en 2 minutos
 - Los recordatorios de bengala se envian cada 30 segundos mientras la alarma esta activa
