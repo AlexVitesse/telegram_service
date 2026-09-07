@@ -39,6 +39,13 @@ def _make_bot(authorized_devices=None, sales_answer="Demo: SentinelGuard es un s
     from telegram_bot import TelegramBot
 
     firebase_manager = MagicMock()
+    # Explicito y no por defecto: un MagicMock sin configurar devuelve otro
+    # MagicMock, que es VERDADERO. Cuando 328dc4b metio el guard de grupos en
+    # _handle_unknown_message, estos dos tests empezaron a tratar cada mensaje
+    # como si viniera de un grupo, salian por el return de arriba y fallaban sin
+    # que hubiera nada roto en el bot. Lo que un mock no sabe, se lo inventa a
+    # favor de la rama equivocada.
+    firebase_manager.is_group_chat = MagicMock(return_value=False)
     firebase_manager.get_authorized_devices = MagicMock(return_value=authorized_devices or [])
     firebase_manager.is_user_admin = MagicMock(return_value=False)
     firebase_manager.get_device_location = MagicMock(return_value="Casa")
