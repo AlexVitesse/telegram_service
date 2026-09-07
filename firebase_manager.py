@@ -759,6 +759,148 @@ class FirebaseManager:
             logger.info(f"Horario 'system' de {key} resuelto por uid: {len(macs)} equipo(s)")
         return macs
 
+    def vincular_chat_id(self, uid: str, chat_id: str) -> str:
+        """
+        Escribe el Chat ID de Telegram en la cuenta de la app.
+
+        Lo llama /start cuando el enlace profundo trae el uid dentro
+        (`?start=<uid>`, que la app construye en `urlBotVinculacion()`). Antes
+        el payload era la palabra "app", que no identifica a nadie: el bot solo
+        podia reconocer a quien YA tenia equipos, asi que al usuario recien
+        registrado -el unico que de verdad necesita vincularse- le contestaba
+        "Usuario no registrado, pidele al administrador un codigo".
+
+        NO pisa un valor existente. Cambiar el telegram_id de una cuenta obliga
+        a mover `Horarios/{telegram_id}`, que se indexa con el; hacerlo aqui,
+        callado y desde un /start, dejaria los horarios huerfanos.
+
+        Devuelve: "vinculado" | "ya_estaba" | "otro" | "sin_cuenta" | "error"
+        """
+        if not self.is_available():
+            return "error"
+
+        try:
+            cuenta = self.db.reference(f"Usuarios/{uid}").get()
+        except Exception as e:
+            logger.error(f"No se pudo leer la cuenta {uid}: {e}")
+            return "error"
+
+        # El uid llega de un enlace que cualquiera puede teclear. Si no hay
+        # cuenta, no se crea: se escribiria un nodo Usuarios/{loquesea} con el
+        # chat_id de quien lo mando.
+        if not isinstance(cuenta, dict):
+            logger.warning(f"/start con un uid que no tiene cuenta: {uid}")
+            return "sin_cuenta"
+
+        actual = str(cuenta.get("telegram_id") or "").strip()
+        if actual == str(chat_id):
+            return "ya_estaba"
+        if actual:
+            logger.info(f"La cuenta {uid} ya tiene otro telegram_id; no se pisa")
+            return "otro"
+
+        if self.update_data(f"Usuarios/{uid}", {"telegram_id": str(chat_id)}):
+            logger.info(f"Cuenta {uid} vinculada al chat {chat_id}")
+            return "vinculado"
+        return "error"
+
+    #: chat_id -> (uid, cuando_se_resolvio). Ver _uid_por_chat_id.
+    _cache_uid: Dict[str, tuple] = {}
+    _CACHE_UID_TTL = 300
+
+    def _uid_por_chat_id(self, chat_id: str) -> Optional[str]:
+        """
+        La cuenta de la app cuyo `telegram_id` es este chat.
+
+        Consulta indexada sobre `Usuarios` en vez de descargarlo entero. La
+        regla `.indexOn: ["telegram_id"]` tiene que existir: sin ella Firebase
+        avisa por log y filtra en cliente, o sea que se trae todo el arbol de
+        usuarios en cada evento. Ver docs/SECURITY.md de la app.
+
+        Cachea 5 minutos porque esto corre por cada notificacion y la relacion
+        casi nunca cambia. El precio de la cache: si alguien acaba de vincular o
+        revincular su Telegram, puede tardar hasta ese rato en que se le
+        apliquen sus preferencias. Es aceptable; lo contrario -una consulta por
+        evento- no.
+        """
+        if not self.is_available():
+            return None
+
+        ahora = time.time()
+        cacheado = self._cache_uid.get(str(chat_id))
+        if cacheado and ahora - cacheado[1] < self._CACHE_UID_TTL:
+            return cacheado[0]
+
+        try:
+            encontrados = (
+                self.db.reference("Usuarios")
+                .order_by_child("telegram_id")
+                .equal_to(str(chat_id))
+                .get()
+            )
+        except Exception as e:
+            logger.error(f"No se pudo resolver el uid de {chat_id}: {e}")
+            return None
+
+        uid = None
+        if isinstance(encontrados, dict) and encontrados:
+            uid = next(iter(encontrados))
+            if len(encontrados) > 1:
+                # Dos cuentas con el mismo Telegram. No deberia pasar
+                # -vincular_chat_id no pisa un valor existente- pero puede haber
+                # datos viejos, y elegir en silencio esconderia el problema.
+                logger.warning(
+                    f"{len(encontrados)} cuentas comparten el chat {chat_id}; "
+                    f"se usan las preferencias de {uid}"
+                )
+
+        self._cache_uid[str(chat_id)] = (uid, ahora)
+        return uid
+
+    def quiere_aviso_telegram(self, chat_id: str, clave: Optional[str]) -> bool:
+        """
+        Si este chat de Telegram quiere recibir este aviso.
+
+        `clave` es la familia opcional ("armado", "conexion") o None para los
+        avisos que no se pueden apagar por categoria -las alarmas-. Incluso con
+        None se consulta `alertas/telegram`, que es el interruptor del CANAL:
+        quien lo apaga esta diciendo "por Telegram no", no "de esto no".
+
+        Lee `Usuarios/{uid}/alertas`, el mismo sitio que el push. **No hay nodo
+        aparte.** Lo hubo un dia, indexado por chat_id, para ahorrarse esta
+        resolucion; era duplicar el estado para no escribir una consulta.
+
+        Todo lo que no se pueda resolver devuelve True. Un chat sin cuenta en la
+        app -un grupo, o alguien que solo usa Telegram- no tiene preferencias
+        que respetar, y quedarse callado ante la duda es justo lo que no puede
+        hacer una alarma.
+        """
+        if not self.is_available():
+            return True
+
+        uid = self._uid_por_chat_id(chat_id)
+        if not uid:
+            return True
+
+        try:
+            alertas = self.db.reference(f"Usuarios/{uid}/alertas").get()
+        except Exception as e:
+            logger.error(f"Error leyendo alertas de {uid}: {e}")
+            return True
+
+        if not isinstance(alertas, dict):
+            return True
+
+        # El canal entero, alarmas incluidas. Es una eleccion explicita del
+        # usuario sobre DONDE quiere que le avisen, no sobre QUE.
+        if alertas.get("telegram") is False:
+            return False
+
+        if not clave:
+            return True
+
+        return alertas.get(clave) is not False
+
     def get_authorized_devices(self, chat_id: str) -> List[str]:
         """
         Obtiene la lista de device_ids autorizados para un chat_id de Telegram.

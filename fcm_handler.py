@@ -234,8 +234,7 @@ class FCMHandler:
 
         total_sent = 0
         for user_id in user_ids:
-            # Verificar si el usuario tiene push habilitado
-            if self._is_push_enabled(user_id):
+            if self._quiere_aviso(user_id, notification.notification_type):
                 total_sent += self.send_to_user(user_id, notification)
 
         return total_sent
@@ -471,6 +470,53 @@ class FCMHandler:
         except Exception as e:
             logger.error(f"Error obteniendo usuarios del dispositivo {device_id}: {e}")
             return []
+
+    #: Avisos que el usuario puede apagar, y el campo que los apaga.
+    #:
+    #: ALARM_TRIGGERED y BENGALA_ACTIVATED NO estan aqui a proposito: son el
+    #: motivo de tener una alarma. Un interruptor para "no avisarme de que ha
+    #: entrado alguien" es una funcion que solo puede acabar mal.
+    OPCIONALES = {
+        NotificationType.SYSTEM_ARMED: "armado",
+        NotificationType.SYSTEM_DISARMED: "armado",
+        NotificationType.DEVICE_OFFLINE: "conexion",
+        NotificationType.DEVICE_ONLINE: "conexion",
+        NotificationType.SENSOR_OFFLINE: "conexion",
+    }
+
+    def _quiere_aviso(self, user_id: str, tipo: NotificationType) -> bool:
+        """
+        Si este usuario quiere ESTE aviso.
+
+        Antes solo se miraba `push_enabled`, un si/no para todo. El resultado
+        practico -reportado por los usuarios- era que armar y desarmar te
+        notificaba cada vez, incluido cuando lo habias hecho tu mismo desde la
+        propia app, y la unica salida era apagar TAMBIEN los avisos de alarma.
+        Entre ruido y quedarse sin la notificacion que importa, la gente elegia
+        quedarse sin ella.
+
+        Ahora `Usuarios/{uid}/alertas/{clave}` apaga una familia. Ausente =
+        encendido, para no cambiarle nada a quien ya lo tiene funcionando.
+        """
+        if not self._is_push_enabled(user_id):
+            return False
+
+        clave = self.OPCIONALES.get(tipo)
+        if not clave:
+            return True
+
+        if not self.firebase_manager.is_available():
+            return True
+
+        try:
+            valor = self.firebase_manager.db.reference(
+                f"Usuarios/{user_id}/alertas/{clave}"
+            ).get()
+        except Exception as e:
+            logger.error(f"Error leyendo alertas/{clave} de {user_id}: {e}")
+            return True
+
+        return valor is not False
 
     def _is_push_enabled(self, user_id: str) -> bool:
         """Verifica si el usuario tiene push notifications habilitadas"""

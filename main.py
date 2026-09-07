@@ -226,7 +226,9 @@ class AlarmBridgeService:
             f"📱 ID: `{device_id}`\n\n"
             "El dispositivo ha restablecido la conexión."
         )
-        self._schedule_telegram_broadcast_for_device(device_id, message)
+        self._schedule_telegram_broadcast_for_device(
+            device_id, message, familia="conexion"
+        )
 
     async def _monitor_device_connections(self):
         """Tarea que monitorea la conexión de dispositivos periódicamente"""
@@ -253,7 +255,9 @@ class AlarmBridgeService:
                         "⚠️ El dispositivo ha dejado de responder.\n"
                         "Verifique la conexión a internet o alimentación."
                     )
-                    self._schedule_telegram_broadcast_for_device(device_id, message)
+                    self._schedule_telegram_broadcast_for_device(
+                        device_id, message, familia="conexion"
+                    )
 
                     # También enviar push notification
                     self._send_push_device_offline(device_id, location)
@@ -351,21 +355,48 @@ class AlarmBridgeService:
 
     def _get_authorized_chats(self, device_id: str):
         """
-        Obtiene los chats autorizados para un dispositivo desde Firebase.
-        """
-        if self.firebase_available:
-            return firebase_manager.get_authorized_chats(device_id)
-        logger.warning("Firebase no está disponible, no se pueden obtener los chats autorizados.")
-        return []
+        Los chats a los que hay que NOTIFICAR algo de este dispositivo.
 
-    def _schedule_telegram_broadcast_for_device(self, device_id: str, message: str):
-        """Envia un mensaje a todos los chats autorizados para un dispositivo"""
+        Todos los que llaman a esto estan mandando avisos -recordatorios,
+        reconexiones, alarmas-, asi que aqui se aplica el interruptor de canal
+        `alertas/telegram`: quien lo apago esta diciendo "por Telegram no", y
+        eso vale tambien para las alarmas. Filtrarlo en cada llamante era
+        garantizar que alguno se quedaria sin filtrar, y de hecho los
+        recordatorios de alarma lo estaban.
+
+        Lo que NO se decide aqui es la familia (armado / conexion): eso lo sabe
+        cada llamante y lo pasa aparte.
+        """
+        if not self.firebase_available:
+            logger.warning("Firebase no está disponible, no se pueden obtener los chats autorizados.")
+            return []
+
+        chats = firebase_manager.get_authorized_chats(device_id)
+        return [
+            c for c in chats
+            if firebase_manager.quiere_aviso_telegram(c, None)
+        ]
+
+    def _schedule_telegram_broadcast_for_device(
+        self, device_id: str, message: str, familia: str = None
+    ):
+        """
+        Envia un mensaje a todos los chats autorizados para un dispositivo.
+
+        `familia` marca los avisos que el usuario puede apagar desde la app
+        ("conexion", "armado"). Sin `familia`, el mensaje sale siempre: es lo
+        que hace falta para las alarmas, que no se apagan.
+        """
         if not self._loop or not self.telegram.is_running():
             return
 
         chat_ids = self._get_authorized_chats(device_id)
 
         for chat_id in chat_ids:
+            # El interruptor de canal ya lo aplico _get_authorized_chats; aqui
+            # solo queda la familia.
+            if familia and not firebase_manager.quiere_aviso_telegram(chat_id, familia):
+                continue
             asyncio.run_coroutine_threadsafe(
                 self.telegram.send_message(
                     chat_id,

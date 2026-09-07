@@ -7,13 +7,48 @@ Documentacion completa de todos los comandos disponibles en el bot de Telegram.
 ## Comandos Basicos
 
 ### `/start`
-Inicia la interaccion con el bot.
+Inicia la interaccion con el bot. Es tambien la puerta de la vinculacion desde
+la app movil.
 
 - **Permisos:** Ninguno (publico)
-- **Descripcion:**
-  - Si es el primer usuario, se registra como Administrador Principal
-  - Si ya esta autorizado, muestra mensaje de bienvenida
-  - Si no esta autorizado, muestra instrucciones para solicitar acceso
+- **Descripcion**, en el orden en que se comprueba:
+  1. **Con payload de la app** (`/start <uid>`, que genera el boton "Abrir el
+     bot"): escribe `Usuarios/{uid}/telegram_id` y contesta "Listo, ya estas
+     vinculado". Repetirlo contesta "Ya estabas vinculado" y no escribe nada.
+  2. Si ya esta autorizado, mensaje de bienvenida con su Chat ID
+  3. Si es el primer usuario del sistema, se registra como Administrador
+     Principal
+  4. Si no, le da su Chat ID y le explica las dos salidas: copiarlo en la app,
+     o pedir un codigo de invitacion si espera acceso a un equipo ajeno
+
+**Lo que NO hace la vinculacion, y es deliberado:**
+
+- **No pisa un `telegram_id` que ya exista.** `Horarios` se indexa por el;
+  cambiarlo en silencio desde un `/start` dejaria los horarios del usuario
+  apuntando a una clave que ya no es la suya. Contesta avisando y no toca nada.
+- **No crea cuentas.** El payload viene de un enlace que cualquiera puede
+  teclear: si el uid no tiene cuenta, se registra un warning y sigue el camino
+  normal.
+
+El payload viejo era la palabra `app`, que no identificaba a nadie, asi que la
+"vinculacion automatica" solo reconocia a quien YA tenia equipos. Al recien
+registrado -el unico que la necesita- le contestaba "Usuario no registrado".
+Se sigue aceptando `app` como payload, sin efecto, porque hay enlaces repartidos.
+
+Cubierto por `test_vinculacion_app.py`.
+
+---
+
+### `/vincular <id>`
+Vincula tu Telegram con una cuenta de la app, escribiendo el identificador.
+
+- **Permisos:** Ninguno (publico), igual que `/id` y por lo mismo
+- **Descripcion:** hace lo mismo que `/start <uid>`, que es lo que manda el boton
+  "Abrir el bot" de la app sin que el usuario vea el identificador. Existe porque
+  un enlace profundo se rompe por el camino mas de lo que parece -un navegador
+  que no cede el control a Telegram, un pegado a medias-, y sin esto la unica
+  salida era escribir el Chat ID a mano en la app.
+- Sin argumento, recuerda como se usa y da el Chat ID.
 
 ---
 
@@ -314,10 +349,52 @@ El bot muestra un teclado permanente con los comandos mas usados:
 
 ---
 
+## Que avisos manda el bot, y cuales se pueden apagar
+
+El usuario elige desde la app. Hay DOS ejes y no son lo mismo:
+
+| Eje | Campo | Decide |
+|---|---|---|
+| Categoria | `alertas/armado`, `alertas/conexion` | De QUE avisar |
+| Canal | `alertas/telegram` | DONDE avisar |
+
+Por categoria, `armado` cubre `system_armed` y `system_disarmed`, y `conexion`
+los avisos de dispositivo sin conexion y reconectado. **Las alarmas no estan y no
+se pueden quitar de ahi.**
+
+El eje de canal SI las alcanza: con `alertas/telegram` en false el bot no manda
+NADA a ese chat, alarmas incluidas. Quien lo apaga esta diciendo "por Telegram
+no", no "de esto no". La app pide confirmacion antes de guardarlo si el usuario
+tiene tambien el push apagado, porque entonces se queda sin ninguna via.
+
+Las preferencias son POR CHAT: apagar el tuyo no calla al grupo ni al segundo
+usuario de la central.
+
+Todo vive en `Usuarios/{uid}/alertas`, el mismo sitio que lee el push. Aqui solo
+se tiene el chat_id, asi que `_uid_por_chat_id()` lo resuelve con
+`Usuarios.order_by_child("telegram_id")`, cacheado 5 minutos. **Hace falta la
+regla `.indexOn: ["telegram_id"]`**: sin ella Firebase avisa por log y filtra en
+cliente, o sea que se descarga el arbol de usuarios entero en cada evento.
+
+El filtro se aplica en `_get_authorized_chats()` (main.py) y en
+`_chats_que_quieren()` (telegram_bot.py), que son los dos sitios por los que pasa
+todo lo que se manda. En el flujo de alarma se filtra UNA vez, al crear la
+confirmacion, porque de esa lista salen tambien los recordatorios cada 30 s:
+filtrar solo el primer mensaje dejaba a quien apago el canal recibiendo los
+recordatorios.
+
+Ausente = se recibe todo. Y un chat sin cuenta en la app -un grupo, o alguien que
+solo usa Telegram- no tiene preferencias que respetar, asi que recibe todo
+tambien: callarse ante la duda es lo que no puede hacer una alarma.
+
+Cubierto por `test_avisos_opcionales.py`.
+
+---
+
 ## Notas Tecnicas
 
 - Los comandos que esperan respuesta del dispositivo tienen timeout de 5-7 segundos
-- El cooldown de `/status`, `/on`, `/off`, `/disparo` es de 8 segundos
+- El cooldown es de **5 segundos** en `/status`, `/on` y `/off`, y de **8** en `/disparo`
 - Los cambios en horarios se sincronizan automaticamente con Firebase y ESP32
 - Las confirmaciones de bengala expiran en 2 minutos
 - Los recordatorios de bengala se envian cada 30 segundos mientras la alarma esta activa

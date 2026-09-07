@@ -126,6 +126,16 @@ class MqttTelemetry:
     auto_schedule_enabled: bool
     tiempo_bomba: int = 60  # Tiempo de salida en segundos (default 60)
     tiempo_pre: int = 60    # Tiempo de pre-alarma en segundos (default 60)
+    #: Segundos desde la ultima vuelta de la tarea LoRa del ESP32.
+    #:
+    #: Es lo unico que distingue "viva" de "escuchando". La telemetria la
+    #: publica la tarea MQTT y los sensores los atiende la tarea LoRa, en otro
+    #: nucleo: con la de LoRa colgada la telemetria seguia saliendo cada 30 s y
+    #: todo el sistema -VPS y app- daba la central por sana mientras la alarma
+    #: estaba sorda.
+    #:
+    #: -1 = el firmware no lo manda (version anterior). No es lo mismo que 0.
+    lora_task_age_sec: int = -1
     location: str = ""
     name: str = ""
 
@@ -143,6 +153,7 @@ class MqttTelemetry:
             heap_free=d.get("heap_free", 0),
             uptime_sec=d.get("uptime_sec", 0),
             lora_sensors_active=d.get("lora_sensors_active", 0),
+            lora_task_age_sec=d.get("lora_task_age_sec", -1),
             auto_schedule_enabled=d.get("auto_schedule_enabled", False),
             tiempo_bomba=d.get("tiempo_bomba", 60),  # Tiempo de salida desde ESP32
             tiempo_pre=d.get("tiempo_pre", 60),      # Tiempo de pre-alarma desde ESP32

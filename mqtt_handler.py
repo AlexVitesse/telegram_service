@@ -39,6 +39,11 @@ class MqttHandler:
         self.connected = False
         self.device_id: Optional[str] = config.device_id or None
         self.device_location: str = ""
+        #: A partir de cuantos segundos de silencio de la tarea LoRa se
+        #: considera sospechoso. El firmware reinicia a los 60; 30 deja ver el
+        #: problema ANTES del reinicio, que es cuando sirve de algo.
+        self.LORA_EDAD_SOSPECHOSA = 30
+
         self.last_telemetry: Dict[str, MqttTelemetry] = {}
         self.last_telemetry_time: Dict[str, float] = {}
 
@@ -196,6 +201,19 @@ class MqttHandler:
             # Guardar telemetria
             self.last_telemetry[telemetry.device_id] = telemetry
             self.last_telemetry_time[telemetry.device_id] = time.time()
+
+            # La central dice que esta viva, pero puede tener la tarea de los
+            # sensores colgada. Sin esto no habia forma de enterarse: la
+            # telemetria llegaba igual de puntual y todo el mundo la daba por
+            # sana. El firmware reinicia solo a los 60 s; esto es para que
+            # quede constancia de que paso, y para verlo si el reinicio falla.
+            edad = getattr(telemetry, "lora_task_age_sec", -1)
+            if edad >= self.LORA_EDAD_SOSPECHOSA:
+                logger.error(
+                    f"[{telemetry.device_id}] La tarea LoRa lleva {edad} s sin "
+                    f"dar senales: la central responde pero puede no estar "
+                    f"escuchando a los sensores"
+                )
 
             # Actualizar tiempo de telemetría y verificar reconexión
             reconnected = self.device_manager.update_telemetry_time(telemetry.device_id)
