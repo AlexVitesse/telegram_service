@@ -7,7 +7,8 @@ orden importa: casi cada rareza de esta guia viene de un fallo que ya paso.
 
 | | |
 |---|---|
-| Maquina | `condor-ia`, usuario `space-user2`, acceso **por VNC** (no hay SSH) |
+| Maquina | `condor-ia`, usuario `space-user2` |
+| Acceso | `ssh -p 2222 space-user2@100.87.103.87` (sshd userland via Tailscale). VNC queda de rescate |
 | Ruta | `/home/space-user2/telegram_service` |
 | Interprete | `/home/space-user2/envs/deepseek/bin/python` |
 | Origen | `github.com/AlexVitesse/telegram_service`, rama `main` |
@@ -26,9 +27,20 @@ proceso suelto lanzado a mano.
 **dos instancias** peleandose el polling de Telegram, con respuestas duplicadas
 y errores de `Conflict`.
 
+**Por SSH, `pgrep -f "python main.py"` se encuentra A SI MISMO.** El comando
+remoto contiene esa cadena, asi que `pgrep -f` devuelve tambien el PID del
+propio `bash -c` y la comprobacion de "ya murio" miente: da vivo siempre. Paso
+el 2026-09-07 y dejo el servicio a medio morir -proceso vivo, puerto 8765 ya
+cerrado-, que es el estado del que habla el paso 5. Por eso los bloques de aqui
+filtran con `[m]ain\.py` o con `pgrep -u $USER -a python`, que compara el nombre
+del proceso -el mio es `bash`- y no puede autoencontrarse.
+
+En esa maquina corren otros servicios del mismo usuario (`admin_bot.py`, un
+uvicorn en el 8001, `ml_bot`). Filtrar siempre por `main.py`.
+
 ```bash
 cd /home/space-user2/telegram_service
-PID=$(pgrep -fu $USER "python main.py")
+PID=$(pgrep -u $USER -a python | grep -w "main.py" | cut -d" " -f1)
 kill $PID
 for i in $(seq 20); do ps -p $PID >/dev/null || break; sleep 1; done
 ps -p $PID >/dev/null && { kill -9 $PID; sleep 2; }
