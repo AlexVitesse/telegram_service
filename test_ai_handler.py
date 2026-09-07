@@ -12,12 +12,14 @@ clasificador ni RAG, y el .env no lo delata porque ahi no pone nada.
 """
 import asyncio
 import inspect
+import re
 import sys
 from types import SimpleNamespace
 
 import httpx
 
 import ai_handler
+import config
 from config import AIConfig
 
 
@@ -110,13 +112,23 @@ def test_ningun_default_clava_el_nombre_de_un_modelo():
     Clavar el nombre de un modelo de un proveedor es apostar a que ese nombre
     siga vivo. Que sigan al backend: si el backend contesta, el modelo existe.
     """
-    c = AIConfig()
-    assert c.intent_model == "", f"intent_model default clava {c.intent_model!r}"
-    assert c.chat_model == "", f"chat_model default clava {c.chat_model!r}"
+    # Se mira el DEFAULT en el fuente, no `AIConfig().intent_model`. Ese atributo
+    # ya trae el entorno aplicado, y en el VPS `INTENT_MODEL` va clavado a
+    # proposito en el `.env` -clavarlo ahi es una decision de despliegue y no el
+    # fallo que este test vigila-. Comprobando el objeto, el test se ponia rojo
+    # justo en la maquina donde importa, y por la razon contraria.
+    fuente = inspect.getsource(config)
+    for campo in ("INTENT_MODEL", "CHAT_MODEL"):
+        m = re.search(rf'_get_env\(\s*"{campo}"\s*,\s*([^)]*?)\s*\)', fuente)
+        assert m, f"no encuentro el default de {campo} en config.py"
+        assert m.group(1) in ('""', "''"), (
+            f"el default de {campo} clava {m.group(1)}"
+        )
 
+    c = AIConfig()
     h = ai_handler.AIHandler(
         llm_backend="groq", groq_api_key="x", groq_model=c.groq_model,
-        intent_model=c.intent_model, chat_model=c.chat_model,
+        intent_model="", chat_model="",
     )
     assert h._intent_model == c.groq_model, h._intent_model
     assert h._chat_model == c.groq_model, h._chat_model
