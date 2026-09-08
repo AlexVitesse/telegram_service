@@ -283,6 +283,95 @@ class FCMHandler:
             priority="high"
         )
 
+    #: Los dos momentos del armado remoto. La central publica `system_armed`
+    #: DOS veces por una sola orden: al recibirla -`source: "remote"`, arranca
+    #: el tiempo de salida- y al vencer ese tiempo -`source: "local"`-. Son dos
+    #: hechos distintos y los dos ciertos, asi que no se calla ninguno: se les
+    #: da el texto que les toca.
+    #:
+    #: El aviso viejo decia "Sistema Armado" en los dos, y en el primero eso es
+    #: falso: durante esos segundos el usuario esta saliendo y la casa NO esta
+    #: protegida. Visto en produccion el 2026-09-08, 60,58 s entre uno y otro.
+    def create_arming_notification(
+        self,
+        device_location: str,
+        segundos: Optional[int],
+        device_id: str
+    ) -> PushNotification:
+        """El tiempo de salida acaba de empezar. Todavia no esta protegida."""
+        cuenta = f"Tienes {segundos} s para salir." if segundos else "Tienes unos segundos para salir."
+        return PushNotification(
+            title="⏳ Armando",
+            body=f"{cuenta} {device_location} aún no está protegida.",
+            data={
+                "device_id": device_id,
+                "source": "remote",
+                "location": device_location,
+                "action": "view_status",
+            },
+            # El mismo tipo que el armado: quien apaga los avisos de armado
+            # apaga los dos momentos, que es lo que espera.
+            notification_type=NotificationType.SYSTEM_ARMED,
+            priority="high"
+        )
+
+    def create_protected_notification(
+        self,
+        device_location: str,
+        device_id: str
+    ) -> PushNotification:
+        """Vencio el tiempo de salida: ahora si esta protegida."""
+        return PushNotification(
+            title="🔒 Protegida",
+            body=f"{device_location} está protegida.",
+            data={
+                "device_id": device_id,
+                "source": "local",
+                "location": device_location,
+                "action": "view_status",
+            },
+            notification_type=NotificationType.SYSTEM_ARMED,
+            priority="high"
+        )
+
+    def create_reinicio_notification(
+        self,
+        device_location: str,
+        armado: bool,
+        device_id: str
+    ) -> PushNotification:
+        """
+        La central arranco y anuncia como quedo. No es que alguien haya armado.
+
+        Llega con `source: "boot"` en `system_armed` o en `system_disarmed`, y
+        el texto tiene que dejar claro que el reinicio no cambio nada: "armado
+        desde Reinicio" se lee como que el reinicio armo la casa, que es al
+        reves de lo que paso.
+
+        Existe porque hasta ahora nadie anunciaba el estado tras un arranque: la
+        RTDB se quedaba con lo ultimo que supo y la app lo pintaba como actual.
+        La mitad peligrosa es esta: un corte de luz con la central desarmada y
+        la base diciendo "armado" enseña protegida una casa que no lo esta.
+        """
+        estado = "protegida" if armado else "desarmada"
+        return PushNotification(
+            title="🔄 Reinicio",
+            body=f"{device_location} se reinició y sigue {estado}.",
+            data={
+                "device_id": device_id,
+                "source": "boot",
+                "location": device_location,
+                "armed": armado,
+                "action": "view_status",
+            },
+            # Misma familia que el resto del armado: quien apaga esos avisos
+            # apaga tambien este. Si se decide que un reinicio merece su propio
+            # interruptor, hace falta una clave nueva EN LA APP antes -sin ella,
+            # ausente = encendido y nadie podria apagarlo-.
+            notification_type=NotificationType.SYSTEM_ARMED,
+            priority="high"
+        )
+
     def create_disarmed_notification(
         self,
         device_location: str,

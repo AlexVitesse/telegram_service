@@ -21,7 +21,7 @@ import os
 import signal
 import sys
 import time as _time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from config import config
 from device_manager import DeviceManager
@@ -508,6 +508,23 @@ class AlarmBridgeService:
     # Push Notifications (FCM)
     # ========================================
 
+    def _segundos_de_salida(self, device_id: str) -> Optional[int]:
+        """
+        El tiempo de salida de esa central, o None si todavia no se sabe.
+
+        No se clava a 60: es configurable por equipo y el aviso tiene que decir
+        el numero de verdad. `device_exit_time` lo mantiene `mqtt_handler` con
+        cada telemetria, asi que aqui no hay consulta ninguna.
+
+        None es un caso real -telemetria aun no recibida tras arrancar-, y el
+        texto lo resuelve sin inventarse un numero.
+        """
+        origen = getattr(self.mqtt, "device_exit_time", None) or {}
+        for guardado, segundos in origen.items():
+            if guardado.startswith(device_id) or device_id.startswith(guardado):
+                return int(segundos) if segundos else None
+        return None
+
     def _send_push_for_event(self, event: MqttEvent):
         """
         Envía push notification a la App basado en el tipo de evento.
@@ -533,35 +550,68 @@ class AlarmBridgeService:
 
             elif event.event_type == EventType.SYSTEM_ARMED:
                 source = event.data.get("source", "Sistema")
-                # Traducir sources del ESP32 a español
-                source_traducido = {
-                    "schedule": "Horario",
-                    "remote": "Remoto",
-                    "local": "Local",
-                    "keypad": "Teclado",
-                    "alexa": "Alexa"
-                }.get(source, source)
-                notification = self.fcm.create_armed_notification(
-                    device_location=location,
-                    source=source_traducido,
-                    device_id=device_id
-                )
+
+                # OJO con "local": NO significa "lo armo alguien desde la casa".
+                # Sale de `handleLocalArming` en el firmware, que es la funcion
+                # del tiempo de salida, asi que aqui quiere decir "vencio la
+                # cuenta atras y ya esta protegida". El nombre viene de que esa
+                # misma funcion sirve al armado por boton fisico. Es un mal
+                # nombre y es estable: se traduce aqui y no se reflashea por el.
+                #
+                # Una orden remota publica los DOS: "remote" al recibirla y
+                # "local" ~tiempo_bomba segundos despues.
+                if source == "boot":
+                    notification = self.fcm.create_reinicio_notification(
+                        device_location=location, armado=True, device_id=device_id
+                    )
+                elif source == "remote":
+                    notification = self.fcm.create_arming_notification(
+                        device_location=location,
+                        segundos=self._segundos_de_salida(device_id),
+                        device_id=device_id
+                    )
+                elif source == "local":
+                    notification = self.fcm.create_protected_notification(
+                        device_location=location,
+                        device_id=device_id
+                    )
+                else:
+                    # schedule, keypad, alexa: arman al momento, sin cuenta
+                    # atras, y su texto de siempre ya es cierto.
+                    source_traducido = {
+                        "schedule": "Horario",
+                        "keypad": "Teclado",
+                        "alexa": "Alexa"
+                    }.get(source, source)
+                    notification = self.fcm.create_armed_notification(
+                        device_location=location,
+                        source=source_traducido,
+                        device_id=device_id
+                    )
 
             elif event.event_type == EventType.SYSTEM_DISARMED:
                 source = event.data.get("source", "Sistema")
-                # Traducir sources del ESP32 a español
-                source_traducido = {
-                    "schedule": "Horario",
-                    "remote": "Remoto",
-                    "local": "Local",
-                    "keypad": "Teclado",
-                    "alexa": "Alexa"
-                }.get(source, source)
-                notification = self.fcm.create_disarmed_notification(
-                    device_location=location,
-                    source=source_traducido,
-                    device_id=device_id
-                )
+                if source == "boot":
+                    # La central arranco desarmada y lo anuncia. Esta es la
+                    # mitad peligrosa del fallo: si la base decia "armado", el
+                    # cliente veia protegida una casa que no lo estaba.
+                    notification = self.fcm.create_reinicio_notification(
+                        device_location=location, armado=False, device_id=device_id
+                    )
+                else:
+                    # Traducir sources del ESP32 a español
+                    source_traducido = {
+                        "schedule": "Horario",
+                        "remote": "Remoto",
+                        "local": "Local",
+                        "keypad": "Teclado",
+                        "alexa": "Alexa"
+                    }.get(source, source)
+                    notification = self.fcm.create_disarmed_notification(
+                        device_location=location,
+                        source=source_traducido,
+                        device_id=device_id
+                    )
 
             elif event.event_type == EventType.BENGALA_ACTIVATED:
                 notification = self.fcm.create_bengala_notification(

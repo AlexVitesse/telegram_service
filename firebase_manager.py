@@ -614,56 +614,53 @@ class FirebaseManager:
 
         Busca el dispositivo tanto por ID exacto como por variantes (truncado/completo).
         Actualiza TODAS las variantes encontradas para mantener sincronización con la App.
-        Solo actualiza si al menos una variante tiene Telegram_ID configurado.
-        Usa solo el cache (el listener lo mantiene actualizado).
+        Escribe solo las que no coincidan ya con el valor: se compara contra el
+        cache de la RTDB, que mantiene el listener, no contra lo que creemos.
         """
         if not self.is_available():
             logger.error("Firebase no está disponible para actualizar el estado del dispositivo.")
             return
 
         try:
-            # Función auxiliar para buscar variantes y verificar Telegram_ID
-            def find_device_variants(devices: dict) -> tuple:
-                device_ids = []
-                has_tid = False
-                for dev_id, dev_data in devices.items():
-                    if not isinstance(dev_data, dict):
-                        continue
-                    if dev_id.startswith(device_id) or device_id.startswith(dev_id):
-                        device_ids.append(dev_id)
-                        if dev_data.get('Telegram_ID'):
-                            has_tid = True
-                return device_ids, has_tid
-
             # Usar solo el cache (el listener lo mantiene actualizado)
-            all_devices = self._get_all_devices()
-            device_ids_to_update = []
-            has_telegram_id = False
+            all_devices = self._get_all_devices() or {}
+            variantes = {
+                dev_id: dev_data
+                for dev_id, dev_data in all_devices.items()
+                if isinstance(dev_data, dict)
+                and (dev_id.startswith(device_id) or device_id.startswith(dev_id))
+            }
 
-            if all_devices:
-                device_ids_to_update, has_telegram_id = find_device_variants(all_devices)
-
-            if not device_ids_to_update:
+            if not variantes:
                 logger.warning(f"[{device_id}] Dispositivo no encontrado en Firebase")
                 return
 
-            if not has_telegram_id:
-                logger.warning(f"[{device_id}] Ninguna variante tiene Telegram_ID - ignorando actualización")
-                return
-
-            # Actualizar todas las variantes encontradas
-            for dev_id in device_ids_to_update:
+            # Aqui habia una guarda que se saltaba la escritura si ninguna
+            # variante tenia `Telegram_ID`. Hacia que el estado que ve la APP
+            # dependiera de si el equipo tiene TELEGRAM configurado, que no
+            # tienen nada que ver. Y bastaba con que el campo estuviera vacio
+            # -cadena vacia, no ausente- para que saltara: asi se quedo
+            # `08_D1_F9_29_E4` mintiendo, primero "desarmada" con la central
+            # armada y luego al reves, que es el lado peligroso.
+            #
+            # Se compara contra lo que hay EN LA BASE, no contra lo que creemos:
+            # eso es lo que hace que una divergencia se repare sola en la
+            # siguiente telemetria en vez de quedarse para siempre. El `cache`
+            # lo mantiene al dia el listener, asi que no hay lectura extra.
+            for dev_id, dev_data in variantes.items():
                 device_ref = self.db.reference(f'ESP32/{dev_id}')
 
                 # Escribir Estado como boolean directo (compatibilidad con App Ionic)
                 if "is_armed" in state_payload:
-                    device_ref.child('Estado').set(state_payload["is_armed"])
-                    logger.info(f"[{dev_id}] Estado actualizado en Firebase: {state_payload['is_armed']}")
+                    if dev_data.get('Estado') != state_payload["is_armed"]:
+                        device_ref.child('Estado').set(state_payload["is_armed"])
+                        logger.info(f"[{dev_id}] Estado actualizado en Firebase: {state_payload['is_armed']}")
 
                 # Escribir Alarming como boolean
                 if "is_alarming" in state_payload:
-                    device_ref.child('Alarming').set(state_payload["is_alarming"])
-                    logger.info(f"[{dev_id}] Alarming actualizado en Firebase: {state_payload['is_alarming']}")
+                    if dev_data.get('Alarming') != state_payload["is_alarming"]:
+                        device_ref.child('Alarming').set(state_payload["is_alarming"])
+                        logger.info(f"[{dev_id}] Alarming actualizado en Firebase: {state_payload['is_alarming']}")
 
         except Exception as e:
             logger.error(f"Error al actualizar el estado de {device_id} en Firebase: {e}")

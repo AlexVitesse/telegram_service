@@ -68,13 +68,28 @@ class DeviceManager:
         logger.debug(f"Info actualizada para {device_id}: {device_data}")
 
     def set_armed_state(self, device_id: str, armed: bool):
-        """Establece el estado de armado/desarmado de un dispositivo."""
+        """
+        Establece el estado de armado/desarmado de un dispositivo.
+
+        La comparacion con la memoria decide si se REGISTRA el cambio, no si se
+        sincroniza. Antes decidia las dos cosas, y ese era el fallo: la memoria
+        se alimenta de la telemetria, asi que en cuanto la RTDB se desviaba -un
+        reinicio a media orden, un apagon, una escritura rechazada- memoria y
+        base decian cosas distintas, no habia "cambio" que detectar, y la
+        divergencia se volvia permanente.
+
+        Visto en produccion: `ESP32/08_D1_F9_29_E4/Estado` llevaba desde el
+        2026-09-01 diciendo `False` con la central armada, y la app se lo creia.
+        Quien decide si hay que escribir es `update_device_state_in_firebase`,
+        que compara contra lo que hay en la base y no contra lo que creemos.
+        """
         device_data = self._get_device_data(device_id)
         if device_data.get("is_armed") != armed:
             device_data["is_armed"] = armed
             logger.info(f"Estado de armado de {device_id} establecido a: {armed}")
-            if self.firebase_manager:
-                self.firebase_manager.update_device_state_in_firebase(device_id, {"is_armed": armed})
+
+        if self.firebase_manager:
+            self.firebase_manager.update_device_state_in_firebase(device_id, {"is_armed": armed})
 
     def set_alarming_state(self, device_id: str, alarming: bool):
         """
