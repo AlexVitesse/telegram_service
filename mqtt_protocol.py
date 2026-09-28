@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, List, Dict, Any
 import json
+import re
 import time
 import uuid
 
@@ -136,6 +137,13 @@ class MqttTelemetry:
     #:
     #: -1 = el firmware no lo manda (version anterior). No es lo mismo que 0.
     lora_task_age_sec: int = -1
+    #: Si la radio LoRa llego a inicializar. `None` = el firmware no lo manda.
+    #:
+    #: La distincion importa y no es cosmetica: `None` significa "no lo se" y
+    #: `False` significa "la radio esta muerta". Si se colapsan, las centrales
+    #: con firmware anterior -que no publican el campo- se pintan averiadas sin
+    #: estarlo. Por eso es Optional y por eso no se escribe cuando falta.
+    lora_ok: Optional[bool] = None
     location: str = ""
     name: str = ""
 
@@ -154,6 +162,7 @@ class MqttTelemetry:
             uptime_sec=d.get("uptime_sec", 0),
             lora_sensors_active=d.get("lora_sensors_active", 0),
             lora_task_age_sec=d.get("lora_task_age_sec", -1),
+            lora_ok=d.get("lora_ok"),   # ausente -> None, "no lo se"
             auto_schedule_enabled=d.get("auto_schedule_enabled", False),
             tiempo_bomba=d.get("tiempo_bomba", 60),  # Tiempo de salida desde ESP32
             tiempo_pre=d.get("tiempo_pre", 60),      # Tiempo de pre-alarma desde ESP32
@@ -271,93 +280,143 @@ class MqttConfig:
 # FORMATEADOR DE MENSAJES TELEGRAM
 # ============================================
 
+#: Lo que le interesa al usuario. Todo lo demas (system_boot, watchdog_*,
+#: config_mode_started, wifi_*...) es tecnico y va solo al administrador:
+#: tras un reinicio llegaban 3-4 mensajes que el usuario no sabia leer, tambien
+#: a los grupos.
+EVENTOS_USUARIO = {
+    EventType.SYSTEM_ARMED, EventType.SYSTEM_DISARMED,
+    EventType.ALARM_TRIGGERED, EventType.ALARM_STOPPED,
+    EventType.BENGALA_ACTIVATED, EventType.BENGALA_DEACTIVATED,
+    EventType.MOVEMENT_DETECTED, EventType.DOOR_OPEN,
+    EventType.SENSOR_ONLINE, EventType.SENSOR_OFFLINE,
+    EventType.KEYPAD_ARM, EventType.KEYPAD_DISARM,
+    EventType.STATUS_RESPONSE,
+}
+
+
+def es_evento_tecnico(event_type) -> bool:
+    return getattr(event_type, "value", event_type) not in {e.value for e in EVENTOS_USUARIO}
+
+
+def normalizar_mac(mac: str) -> str:
+    """`AA:BB:CC:DD:EE:FF` o `AA_BB_CC_DD_EE_FF` -> `AA_BB_CC_DD_EE`, como formatMac() de la app."""
+    mac = str(mac or "").strip().replace(":", "_").upper()
+    if len(mac) == 17 and mac[14] == "_":
+        return mac[:14]
+    return mac
+
+
+def escape_md(texto: Any) -> str:
+    """
+    Escapa texto dinamico para el Markdown legacy de Telegram.
+
+    Un `_` suelto (nombre del equipo, `device_id`, tipo de evento) hacia que
+    Telegram rechazara el mensaje entero y el aviso se perdia; con dos, salia
+    deformado (`watchdog*lora*reboot`).
+    """
+    return re.sub(r"([_*`\[])", r"\\\1", str(texto))
+
+
 class TelegramFormatter:
     """Formatea eventos en mensajes para Telegram"""
 
+    SOURCES = {
+        "schedule": "Horario",
+        "remote": "Remoto",
+        "local": "Local",
+        "keypad": "Teclado",
+        "alexa": "Alexa"
+    }
+
     @staticmethod
     def format_event(event: MqttEvent, location: str = "") -> str:
-        """Convierte un evento MQTT en mensaje de Telegram"""
+        """Convierte un evento MQTT en mensaje de Telegram. Todo lo dinamico va escapado."""
         event_type = event.event_type
         data = event.data
+        lugar = escape_md(location or event.device_id)
+
+        def via(default: str) -> str:
+            source = data.get("source", default)
+            return escape_md(TelegramFormatter.SOURCES.get(source, source))
 
         if event_type == EventType.SYSTEM_BOOT:
-            return f"🔄 *Sistema reiniciado*\n📍 {location or event.device_id}"
+            return f"🔄 *Sistema reiniciado*\n📍 {lugar}"
+
+        elif event_type in (EventType.SYSTEM_ARMED, EventType.SYSTEM_DISARMED) and data.get("source") == "boot":
+            # El unico mensaje de un reinicio que ve el usuario. Lo tecnico
+            # (system_boot, watchdog...) va al administrador.
+            estado = "ARMADA" if event_type == EventType.SYSTEM_ARMED else "DESARMADA"
+            return f"🔄 *Tu central se reinició*\n📍 {lugar}\nSigue *{estado}*."
 
         elif event_type == EventType.SYSTEM_ARMED:
             source = data.get("source", "remoto")
-            # Traducir sources del ESP32 a español
-            source_traducido = {
-                "schedule": "Horario",
-                "remote": "Remoto",
-                "local": "Local",
-                "keypad": "Teclado",
-                "alexa": "Alexa"
-            }.get(source, source)
-            return f"🔒 *Sistema ARMADO*\n📍 {location or event.device_id}\n⚙️ Via: {source_traducido}"
+            # Cada armado publica dos: al empezar el tiempo de salida
+            # (remote/schedule) y al vencer (local, `handleLocalArming`). Con el
+            # mismo texto parecia que se habia armado dos veces.
+            if source in ("remote", "schedule"):
+                return (
+                    f"⏳ *Armando…*\n📍 {lugar}\n⚙️ Via: {via('remoto')}\n"
+                    f"La protección se activa al terminar el tiempo de salida."
+                )
+            if source == "local":
+                return f"🛡️ *Protección activa*\n📍 {lugar}"
+            return f"🔒 *Sistema ARMADO*\n📍 {lugar}\n⚙️ Via: {via('remoto')}"
 
         elif event_type == EventType.SYSTEM_DISARMED:
-            source = data.get("source", "remoto")
-            # Traducir sources del ESP32 a español
-            source_traducido = {
-                "schedule": "Horario",
-                "remote": "Remoto",
-                "local": "Local",
-                "keypad": "Teclado",
-                "alexa": "Alexa"
-            }.get(source, source)
-            return f"🔓 *Sistema DESARMADO*\n📍 {location or event.device_id}\n⚙️ Via: {source_traducido}"
+            return f"🔓 *Sistema DESARMADO*\n📍 {lugar}\n⚙️ Via: {via('remoto')}"
 
         elif event_type == EventType.ALARM_TRIGGERED:
-            sensor_name = data.get("sensorName", "Manual")
+            sensor_name = escape_md(data.get("sensorName", "Manual"))
             return (
                 f"🚨 *¡ALARMA ACTIVADA!*\n"
-                f"📍 {location or event.device_id}\n"
+                f"📍 {lugar}\n"
                 f"📡 Sensor: {sensor_name}"
             )
 
         elif event_type == EventType.ALARM_STOPPED:
-            return f"✅ *Alarma detenida*\n📍 {location or event.device_id}"
+            return f"✅ *Alarma detenida*\n📍 {lugar}"
 
         elif event_type == EventType.BENGALA_ACTIVATED:
-            return f"🔥 *Bengala ACTIVADA*\n📍 {location or event.device_id}"
+            return f"🔥 *Bengala ACTIVADA*\n📍 {lugar}"
 
         elif event_type == EventType.BENGALA_DEACTIVATED:
-            return f"🔥 *Bengala desactivada*\n📍 {location or event.device_id}"
+            return f"🔥 *Bengala desactivada*\n📍 {lugar}"
 
         elif event_type == EventType.MOVEMENT_DETECTED:
-            sensor_name = data.get("sensorName", "Desconocido")
-            sensor_location = data.get("location", "")
+            sensor_name = escape_md(data.get("sensorName", "Desconocido"))
+            sensor_location = escape_md(data.get("location", "")) or lugar
             return (
                 f"🚶 *Movimiento detectado*\n"
                 f"📡 {sensor_name}\n"
-                f"📍 {sensor_location or location or event.device_id}"
+                f"📍 {sensor_location}"
             )
 
         elif event_type == EventType.DOOR_OPEN:
-            sensor_name = data.get("sensorName", "Desconocido")
-            sensor_location = data.get("location", "")
+            sensor_name = escape_md(data.get("sensorName", "Desconocido"))
+            sensor_location = escape_md(data.get("location", "")) or lugar
             return (
                 f"🚪 *Puerta/ventana abierta*\n"
                 f"📡 {sensor_name}\n"
-                f"📍 {sensor_location or location or event.device_id}"
+                f"📍 {sensor_location}"
             )
 
         elif event_type == EventType.SENSOR_ONLINE:
-            sensor_name = data.get("sensorName", "Desconocido")
+            sensor_name = escape_md(data.get("sensorName", "Desconocido"))
             return f"📡 Sensor conectado: {sensor_name}"
 
         elif event_type == EventType.SENSOR_OFFLINE:
-            sensor_name = data.get("sensorName", "Desconocido")
+            sensor_name = escape_md(data.get("sensorName", "Desconocido"))
             return f"⚠️ Sensor desconectado: {sensor_name}"
 
         elif event_type == EventType.STATUS_RESPONSE:
             armed = "ARMADO" if data.get("armed", False) else "DESARMADO"
             bengala = "Si" if data.get("bengala_enabled", False) else "No"
-            sensors = data.get("sensors_count", 0)
+            sensors = escape_md(data.get("sensors_count", 0))
             schedule = "Si" if data.get("auto_schedule_enabled", False) else "No"
             return (
                 f"📊 *Estado del Sistema*\n"
-                f"📍 {location or event.device_id}\n\n"
+                f"📍 {lugar}\n\n"
                 f"🔒 Sistema: *{armed}*\n"
                 f"🔥 Bengala: {bengala}\n"
                 f"📡 Sensores: {sensors}\n"
@@ -365,7 +424,8 @@ class TelegramFormatter:
             )
 
         else:
-            return f"📢 Evento: {event_type}\n📍 {location or event.device_id}"
+            tipo = getattr(event_type, "value", event_type)
+            return f"📢 Evento: {escape_md(tipo)}\n📍 {lugar}"
 
 # ============================================
 # UTILIDADES

@@ -9,6 +9,8 @@ from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 from enum import Enum
 
+from mqtt_protocol import normalizar_mac
+
 if TYPE_CHECKING:
     from firebase_manager import FirebaseManager
 
@@ -26,6 +28,7 @@ class NotificationType(Enum):
     DEVICE_ONLINE = "device_online"
     MOVEMENT_DETECTED = "movement_detected"
     DOOR_OPEN = "door_open"
+    DEVICE_TRANSFERRED = "device_transferred"
 
 
 @dataclass
@@ -72,6 +75,9 @@ class PushNotification:
 class FCMHandler:
     """Manejador de Firebase Cloud Messaging para notificaciones push"""
 
+    #: Avisos que nunca frena el rate limit: son el motivo de tener una alarma.
+    NUNCA_SE_DESCARTAN = {NotificationType.ALARM_TRIGGERED, NotificationType.BENGALA_ACTIVATED}
+
     def __init__(self, firebase_manager: 'FirebaseManager'):
         self.firebase_manager = firebase_manager
         self.initialized = False
@@ -107,7 +113,16 @@ class FCMHandler:
     # Métodos para enviar notificaciones
     # ========================================
 
-    def send_to_token(self, token: str, notification: PushNotification) -> bool:
+    #: Lo que puede pasarle a un envio. Se distingue "el token esta muerto" de
+    #: "el envio fallo" porque solo lo primero justifica BORRAR el token, y
+    #: confundirlos sale caro: el 2026-09-08 un `data` con un booleano dentro
+    #: hizo fallar el envio, se tomo por token invalido y se borro el unico
+    #: token de Eric. Un error nuestro dejaba al usuario sin avisos.
+    ENVIO_OK = "ok"
+    ENVIO_TOKEN_MUERTO = "token_muerto"
+    ENVIO_FALLO = "fallo"
+
+    def send_to_token(self, token: str, notification: PushNotification) -> str:
         """
         Envía una notificación push a un token específico.
 
@@ -116,11 +131,12 @@ class FCMHandler:
             notification: Objeto PushNotification con los datos
 
         Returns:
-            True si se envió correctamente
+            ENVIO_OK, ENVIO_TOKEN_MUERTO (y solo entonces se puede borrar) o
+            ENVIO_FALLO.
         """
         if not self.is_available():
             logger.warning("FCM no disponible")
-            return False
+            return self.ENVIO_FALLO
 
         try:
             message = self._messaging.Message(
@@ -129,8 +145,12 @@ class FCMHandler:
                     title=notification.title,
                     body=notification.body,
                 ),
+                # FCM exige que TODO el `data` sean cadenas, y revienta el envio
+                # entero si algo no lo es. Se convierte aqui, en la frontera, y
+                # no en cada `create_*`: asi ninguna plantilla futura puede
+                # volver a tirar los avisos por meter un bool o un int.
                 data={
-                    **notification.data,
+                    **{k: str(v) for k, v in notification.data.items()},
                     "type": notification.notification_type.value,
                     "timestamp": str(int(time.time())),
                 },
@@ -153,14 +173,18 @@ class FCMHandler:
 
             response = self._messaging.send(message)
             logger.debug(f"Notificación enviada: {response}")
-            return True
+            return self.ENVIO_OK
 
         except self._messaging.UnregisteredError:
+            # Este es el UNICO caso en que el token esta muerto de verdad: la
+            # app se desinstalo o FCM lo revoco. Cualquier otro fallo puede ser
+            # nuestro, y borrar por el deja al usuario sin avisos sin que nadie
+            # se entere.
             logger.warning(f"Token no registrado, debe eliminarse: {token[:20]}...")
-            return False
+            return self.ENVIO_TOKEN_MUERTO
         except Exception as e:
-            logger.error(f"Error enviando notificación: {e}")
-            return False
+            logger.error(f"Error enviando notificación (el token NO se toca): {e}")
+            return self.ENVIO_FALLO
 
     def send_to_user(self, user_id: str, notification: PushNotification) -> int:
         """
@@ -176,8 +200,9 @@ class FCMHandler:
         if not self.is_available():
             return 0
 
-        # Rate limiting
-        if not self._check_rate_limit(user_id):
+        # Rate limiting. La alarma y la bengala lo saltan: si `movement_detected`
+        # llegaba justo antes, `alarm_triggered` se descartaba sin rastro.
+        if notification.notification_type not in self.NUNCA_SE_DESCARTAN and not self._check_rate_limit(user_id):
             logger.debug(f"Rate limit activo para usuario {user_id}")
             return 0
 
@@ -195,19 +220,24 @@ class FCMHandler:
             if not token:
                 continue
 
-            if self.send_to_token(token, notification):
+            resultado = self.send_to_token(token, notification)
+            if resultado == self.ENVIO_OK:
                 sent_count += 1
                 # Actualizar lastUsed
                 self._update_token_last_used(user_id, token_data.get("token_id"))
-            else:
-                # Marcar token como inválido para limpieza posterior
+            elif resultado == self.ENVIO_TOKEN_MUERTO:
+                # Solo si FCM dijo que ese token ya no existe. Un fallo nuestro
+                # no puede costarle al usuario su unico canal de aviso.
                 invalid_tokens.append(token_data.get("token_id"))
 
         # Limpiar tokens inválidos
         for token_id in invalid_tokens:
             self._remove_invalid_token(user_id, token_id)
 
-        self._last_notification_time[user_id] = time.time()
+        # Solo cuenta como "ya se le aviso" si de verdad le llego algo; si no, un
+        # envio fallido bloqueaba el siguiente aviso 5 s.
+        if sent_count:
+            self._last_notification_time[user_id] = time.time()
         logger.info(f"Enviadas {sent_count}/{len(tokens)} notificaciones a usuario {user_id}")
 
         return sent_count
@@ -361,7 +391,7 @@ class FCMHandler:
                 "device_id": device_id,
                 "source": "boot",
                 "location": device_location,
-                "armed": armado,
+                "armed": "true" if armado else "false",
                 "action": "view_status",
             },
             # Misma familia que el resto del armado: quien apaga esos avisos
@@ -537,8 +567,10 @@ class FCMHandler:
                 return []
 
             user_ids = []
-            # Truncar device_id para comparación
-            device_id_truncated = device_id.rstrip('_0123456789ABCDEF')[:17] if len(device_id) > 17 else device_id
+            # Igualdad exacta tras normalizar. Antes se comparaba por prefijo en
+            # los dos sentidos, y con un id de mas de 17 caracteres el prefijo
+            # quedaba vacio: la alarma de un equipo le llegaba a TODOS.
+            objetivo = normalizar_mac(device_id)
 
             for uid, user_data in all_users.items():
                 if not isinstance(user_data, dict):
@@ -546,11 +578,16 @@ class FCMHandler:
 
                 dispositivos = user_data.get("Dispositivos", [])
                 if isinstance(dispositivos, str):
-                    dispositivos = [dispositivos]
+                    dispositivos = dispositivos.split(",")
 
                 # Verificar si alguno de los dispositivos coincide
                 for dev in dispositivos:
-                    if dev == device_id or dev.startswith(device_id_truncated) or device_id.startswith(dev):
+                    if not isinstance(dev, str) or not dev.strip():
+                        continue
+                    dev = normalizar_mac(dev)
+                    # dev[:-1]: listas viejas con un caracter de mas, el mismo
+                    # caso que la app corrige al cargar (dispositivos.service.ts).
+                    if dev == objetivo or dev[:-1] == objetivo:
                         user_ids.append(uid)
                         break
 

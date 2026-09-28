@@ -14,7 +14,7 @@ import paho.mqtt.client as mqtt
 from config import config
 from mqtt_protocol import (
     Topics, MqttEvent, MqttTelemetry, MqttCommand, TelegramFormatter,
-    EventType, Command, get_timestamp, SensorsList
+    EventType, Command, get_timestamp, SensorsList, normalizar_mac
 )
 # from firebase_manager import firebase_manager  <- Se elimina esta importación directa
 from device_manager import DeviceManager
@@ -68,6 +68,9 @@ class MqttHandler:
         # Cola de comandos pendientes para dispositivos offline
         # Estructura: {device_id: [(command, args, timestamp), ...]}
         self._pending_commands: Dict[str, List[tuple]] = {}
+        # MAC normalizada -> cuando se vio por ultima vez un boton largo o un
+        # arranque (ver _handle_event y api_server /equipos/reclamar).
+        self.prueba_fisica: Dict[str, float] = {}
 
         # Configurar cliente MQTT
         self._setup_client()
@@ -181,6 +184,19 @@ class MqttHandler:
                 self.last_arm_event_time[event.device_id] = time.time()
 
             logger.info(f"Evento de {event.device_id}: {event.event_type}")
+
+            # Prueba de que alguien tiene la central en la mano: el boton largo
+            # (config_mode_started) o un arranque recien configurado. La usa
+            # POST /equipos/reclamar para no dar una central a quien solo
+            # conoce su MAC.
+            tipo = getattr(event.event_type, "value", event.event_type)
+            if tipo in ("config_mode_started", "system_boot"):
+                self.prueba_fisica[normalizar_mac(event.device_id)] = time.time()
+
+            # La central arranca con el horario que tenia en NVS; si cambio
+            # mientras estaba apagada, se quedaba con el viejo.
+            if tipo == "system_boot" and self.firebase_manager.is_available():
+                self.firebase_manager.enviar_horario(event.device_id)
 
             if self._on_event_callback:
                 self._on_event_callback(event)
@@ -405,8 +421,9 @@ class MqttHandler:
         if device_id not in self._pending_commands:
             self._pending_commands[device_id] = []
 
-        # Solo guardar comandos de configuración (evitar duplicados para set_bengala_mode)
-        if cmd == Command.SET_BENGALA_MODE.value:
+        # Solo el ultimo de cada configuracion: dos horarios encolados se
+        # aplicarian en orden y el primero ya no vale.
+        if cmd in (Command.SET_BENGALA_MODE.value, Command.SET_SCHEDULE.value):
             # Remover comandos anteriores del mismo tipo
             self._pending_commands[device_id] = [
                 (c, a, t) for c, a, t in self._pending_commands[device_id]
@@ -508,7 +525,7 @@ class MqttHandler:
 
     def send_set_schedule(self, enabled: bool, on_hour: int, on_minute: int,
                           off_hour: int, off_minute: int, days: list = None,
-                          device_id: str = None) -> bool:
+                          device_id: str = None, queue_if_offline: bool = False) -> bool:
         """
         Configura horarios automaticos.
         days: Lista de índices de días [0-6] donde 0=Domingo, 1=Lunes, etc.
@@ -526,7 +543,8 @@ class MqttHandler:
             "off_minute": off_minute,
             "days": days
         }
-        return self.send_command(Command.SET_SCHEDULE.value, args, device_id=device_id)
+        return self.send_command(Command.SET_SCHEDULE.value, args, device_id=device_id,
+                                 queue_if_offline=queue_if_offline)
 
     def send_set_exit_time(self, seconds: int, device_id: str = None) -> bool:
         """Configura el tiempo de salida (countdown antes de armar)"""
@@ -663,10 +681,22 @@ class MqttHandler:
             # El ESP32 ya envía el ID truncado, usar directamente sin truncar de nuevo
             device_id = telemetry.device_id
 
+            # Un equipo borrado sigue mandando telemetria cada 30 s, y el
+            # `update` le volvia a crear el nodo: el "fantasma" que otra cuenta
+            # seguia controlando. Misma guarda que Estado/Alarming.
+            if device_id not in (self.firebase_manager._get_all_devices() or {}):
+                logger.debug(f"[{device_id}] Telemetria ignorada: el equipo no existe en Firebase")
+                return
+
+            # Esto es una lista blanca: lo que no este aqui NO llega a la app,
+            # aunque el firmware lo publique. `lora_ok` viajaba en el MQTT desde
+            # 65a250d y se quedaba en el camino, asi que la app no tenia forma
+            # de saber que una radio estaba muerta.
             telemetry_data = {
                 "wifi_rssi": telemetry.wifi_rssi,
                 "heap_free": telemetry.heap_free,
                 "lora_sensors_active": telemetry.lora_sensors_active,
+                "lora_task_age_sec": telemetry.lora_task_age_sec,
                 "uptime_sec": telemetry.uptime_sec,
                 "armed": telemetry.armed,
                 "bengala_enabled": telemetry.bengala_enabled,
@@ -676,6 +706,12 @@ class MqttHandler:
                 "tiempo_pre": telemetry.tiempo_pre,
                 "timestamp": int(time.time()),
             }
+
+            # Solo si el firmware lo manda. Escribir `False` cuando el campo
+            # falta convertiria a las centrales con firmware anterior en
+            # averiadas a ojos de la app: ausente es "no lo se", no "esta mal".
+            if telemetry.lora_ok is not None:
+                telemetry_data["lora_ok"] = telemetry.lora_ok
 
             path = f"ESP32/{device_id}/Telemetry"
             self.firebase_manager.update_data(path, telemetry_data)

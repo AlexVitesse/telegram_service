@@ -9,6 +9,7 @@ import asyncio
 import datetime
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List, Callable, TYPE_CHECKING
@@ -493,7 +494,7 @@ class TelegramBot:
                 await update.message.reply_text(
                     f"{cabecera}\n\n"
                     f"🆔 Tu ID: `{chat_id}`\n\n"
-                    "Vuelve a la app y toca «Ya lo vinculé».",
+                    "Vuelve a la app: se completa solo. Si no, toca «Comprobar ahora».",
                     parse_mode=ParseMode.MARKDOWN,
                 )
                 return
@@ -1429,6 +1430,14 @@ class TelegramBot:
             time_result = scheduler.parse_time_string(args[1])
             if time_result:
                 hour, minute = time_result
+                # Armar y desarmar a la misma hora: la central hace las dos y
+                # gana desarmar. Se para aqui, no a las 7 de la mañana.
+                if any(scheduler.cfg(d).off_hour == hour and scheduler.cfg(d).off_minute == minute for d in target_devices):
+                    await update.message.reply_text(
+                        f"⚠️ {hour:02d}:{minute:02d} ya es la hora de desactivacion. "
+                        "Armar y desarmar no pueden ser a la misma hora: elige otra."
+                    )
+                    return
                 for dev_id in target_devices:
                     scheduler.set_on_time(dev_id, hour, minute)
                 cfg = scheduler.cfg(target_devices[0])
@@ -1451,6 +1460,14 @@ class TelegramBot:
             time_result = scheduler.parse_time_string(args[1])
             if time_result:
                 hour, minute = time_result
+                # Armar y desarmar a la misma hora: la central hace las dos y
+                # gana desarmar. Se para aqui, no a las 7 de la mañana.
+                if any(scheduler.cfg(d).on_hour == hour and scheduler.cfg(d).on_minute == minute for d in target_devices):
+                    await update.message.reply_text(
+                        f"⚠️ {hour:02d}:{minute:02d} ya es la hora de activacion. "
+                        "Armar y desarmar no pueden ser a la misma hora: elige otra."
+                    )
+                    return
                 for dev_id in target_devices:
                     scheduler.set_off_time(dev_id, hour, minute)
                 cfg = scheduler.cfg(target_devices[0])
@@ -1714,7 +1731,13 @@ class TelegramBot:
                     # Usar el Telegram_ID del propietario del dispositivo, no el chat_id
                     # Esto es necesario porque si el comando viene de un grupo, chat_id sería
                     # el ID del grupo, pero la App busca horarios por el Telegram_ID del dispositivo
-                    owner_id = self.firebase_manager.get_device_owner(device_id)
+                    # La clave es la cuenta duena (ownerUid), la misma que usa la
+                    # app: antes el bot escribia bajo el Telegram_ID y la app bajo
+                    # otra clave, y el mismo equipo acababa con dos horarios.
+                    owner_id = (
+                        (self.firebase_manager._nodo(device_id) or {}).get("ownerUid")
+                        or self.firebase_manager.get_device_owner(device_id)
+                    )
                     if not owner_id:
                         # Fallback: usar chat_id si no se encuentra propietario
                         owner_id = chat_id
@@ -1726,7 +1749,9 @@ class TelegramBot:
                         "deactivationTime": cfg.format_off_time(),
                         "enabled": cfg.enabled,
                         "days": cfg.days,  # Lista de nombres: ['Lunes', 'Martes', ...]
-                        "lastUpdatedBy": "telegram"
+                        "lastUpdatedBy": "telegram",
+                        # Numerico, como la app: se usa para desempatar entre entradas.
+                        "lastUpdated": int(time.time() * 1000),
                     }
                     self.firebase_manager.db.reference(schedule_path).set(schedule_data)
                     logger.info(f"Horario sincronizado a Firebase: {schedule_path} (días: {cfg.format_days()})")
@@ -2192,7 +2217,13 @@ class TelegramBot:
         """Devuelve los datos de contacto humano (SUPPORT_EMAIL/PHONE/HOURS)."""
         chat_id = str(update.effective_chat.id)
         user_name = update.effective_user.first_name or ""
-        msg = build_escalation_message("manual", config.support)
+        # Con los equipos en el mensaje de WhatsApp, soporte sabe de cual se
+        # habla sin preguntar.
+        equipos = [
+            f"{self.firebase_manager.get_device_location(d) or d} {d}"
+            for d in self.firebase_manager.get_authorized_devices(chat_id)
+        ]
+        msg = build_escalation_message("manual", config.support, ", ".join(equipos))
         await update.message.reply_text(msg, reply_markup=self._get_keyboard())
         self.interaction_logger.record(
             user_id=chat_id, user_name=user_name, query="/soporte",
@@ -2375,7 +2406,7 @@ class TelegramBot:
                 self._lead_states.pop(chat_id, None)
                 await update.message.reply_text(
                     "Listo, cancelé el registro. Si querés volver a intentar, "
-                    "tocá '🛒 Quiero comprar' de nuevo o usá /info."
+                    "toca '🛒 Quiero comprar' de nuevo o usa /info."
                 )
                 return
             await self._handle_lead_capture_step(update, text, lead_state)
@@ -2387,7 +2418,7 @@ class TelegramBot:
                 self._unauth_welcomed.add(chat_id)
                 msg = (
                     f"Hola {user_name}! Soy el asistente de SentinelGuard. "
-                    "Hacé tu pregunta sobre el sistema o usá /info para una intro."
+                    "Haz tu pregunta sobre el sistema o usa /info para una intro."
                 )
             else:
                 msg = "Contame qué querés saber del sistema. Usá /info si necesitás un repaso general."
@@ -3200,7 +3231,7 @@ class TelegramBot:
 
     async def handle_mqtt_event(self, event: MqttEvent):
         """Procesa un evento MQTT y notifica a los usuarios"""
-        from mqtt_protocol import EventType
+        from mqtt_protocol import EventType, TelegramFormatter, es_evento_tecnico
 
         # Ignorar eventos de status_response (status diario automático del ESP32)
         if event.event_type == EventType.STATUS_RESPONSE:
@@ -3209,6 +3240,17 @@ class TelegramBot:
 
         device_id = event.device_id
         device_location = self.firebase_manager.get_device_location(device_id) or device_id
+
+        # Lo tecnico (reinicios, watchdog, modo configuracion, WiFi) solo al
+        # administrador. El usuario ve el reinicio por el system_armed /
+        # system_disarmed con source "boot", en un solo mensaje.
+        if es_evento_tecnico(event.event_type):
+            admin_id = config.telegram.admin_chat_id
+            if admin_id:
+                await self.send_message(
+                    admin_id, TelegramFormatter.format_event(event, device_location), "Markdown"
+                )
+            return
 
         # Obtener chats autorizados para este dispositivo
         chat_ids = self.firebase_manager.get_authorized_chats(device_id)
@@ -3752,6 +3794,18 @@ class TelegramBot:
         except telegram.error.BadRequest as e:
             if 'Chat not found' in e.message:
                 logger.warning(f"No se pudo enviar mensaje a {chat_id}: Chat no encontrado. El bot puede que no sea miembro.")
+            elif pm and "parse entities" in e.message:
+                # Un `_` o `*` sin escapar en algun texto dinamico: antes el aviso
+                # se perdia. Mejor que llegue sin formato que no llegue.
+                logger.warning(f"Markdown invalido para {chat_id}, reenviando en texto plano: {e}")
+                try:
+                    await self.application.bot.send_message(
+                        chat_id=int(chat_id),
+                        text=re.sub(r"\\([_*`\[])", r"\1", text),
+                        reply_markup=final_markup
+                    )
+                except Exception as e2:
+                    logger.error(f"Tampoco salio en texto plano a {chat_id}: {e2}")
             else:
                 logger.error(f"Error de Telegram (BadRequest) enviando a {chat_id}: {e}")
         except Exception as e:

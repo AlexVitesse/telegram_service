@@ -35,6 +35,29 @@ DAY_ABBREV_MAP = {
 }
 
 
+def marca_ms(valor) -> int:
+    """
+    `lastUpdated` en milisegundos. La app lo guardaba como ISO en la pestana
+    Horarios y como numero en la ficha del equipo, y Telegram no lo guardaba:
+    comparados como texto, un numero y una fecha no se ordenan de ninguna forma
+    que signifique algo. Lo que no se entiende vale 0 (mas viejo que todo).
+    """
+    if isinstance(valor, bool):
+        return 0
+    if isinstance(valor, (int, float)):
+        # Segundos o milisegundos: por debajo de 1e11 son segundos.
+        return int(valor * 1000) if valor < 1e11 else int(valor)
+    if isinstance(valor, str) and valor.strip():
+        texto = valor.strip()
+        if texto.isdigit():
+            return marca_ms(int(texto))
+        try:
+            return int(datetime.fromisoformat(texto.replace('Z', '+00:00')).timestamp() * 1000)
+        except ValueError:
+            return 0
+    return 0
+
+
 def elegir_por_dispositivo(todos: dict, dispositivos_de) -> Dict[str, dict]:
     """
     De todo /Horarios, qué horario le toca a cada equipo.
@@ -78,7 +101,7 @@ def elegir_por_dispositivo(todos: dict, dispositivos_de) -> Dict[str, dict]:
             peso = (
                 0 if es_system else 1,
                 1 if horario.get('enabled') else 0,
-                str(horario.get('lastUpdated') or ''),
+                marca_ms(horario.get('lastUpdated')),
                 str(clave),
             )
             destinos = dispositivos_de(clave) if es_system else [device_id]

@@ -12,6 +12,8 @@ red del VPS, y las peticiones llevan un ID token de Firebase.
     POST /preguntar   Authorization: Bearer <idToken de Firebase>
                       {"pregunta": "..."}  ->  {"texto": "...", "fuente": "..."}
     GET  /salud       sin auth, para comprobar que está vivo
+    POST /equipos/reclamar  {"mac", "nombre", "telegram_id", "group_id"}
+    POST /equipos/borrar    {"mac"}   (siempre con token de Firebase)
 
 Quien contesta es `knowledge_qa.responder()`, el mismo que usa el bot, así que
 los dos canales dan **la misma respuesta a la misma pregunta**.
@@ -25,6 +27,7 @@ import asyncio
 import hmac
 import json
 import logging
+import re
 import time
 from typing import Any, Optional, Tuple
 
@@ -35,6 +38,7 @@ import comandos_app
 import knowledge_qa
 from api_limites import Limitador, normalizar_pregunta
 from config import config
+from mqtt_protocol import escape_md, normalizar_mac
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +64,16 @@ _PARTE_CLASIFICADOR = 0.5
 #: esto, el ultimo segundo se lo lleva el LLM y el cliente corta justo cuando
 #: habia respuesta.
 _MARGEN_RESPUESTA = 2.0
+
+#: Cuanto vale como prueba de "la tengo en la mano" un boton largo o un
+#: arranque de la central. Da tiempo a terminar el alta por BLE y a que la
+#: central se conecte con el WiFi nuevo.
+VENTANA_PRUEBA_FISICA = 15 * 60
+
+# El `_X` final opcional son claves antiguas de 16 caracteres (p. ej.
+# `AC_15_18_D4_47_4`) que siguen en /ESP32: sin el, su dueño no podria
+# borrarlas. Sigue siendo solo hex y `_`, nada que forme otra ruta.
+_MAC_VALIDA = re.compile(r"[0-9A-F]{2}(_[0-9A-F]{2}){4}(_[0-9A-F])?")
 
 
 def _restante(limite: float) -> float:
@@ -90,13 +104,14 @@ def elegir_tunel(datos: dict, puerto: int) -> Optional[str]:
 
 
 class ApiSenti:
-    def __init__(self, bot: Any, firebase: Any):
+    def __init__(self, bot: Any, firebase: Any, fcm: Any = None):
         # Se toman del bot en cada peticion y no en el constructor: el admin
         # puede recargar la base de conocimiento con /reload_kb, y guardarnos
         # una referencia aqui dejaria al endpoint contestando con la version
         # vieja para siempre.
         self._bot = bot
         self._firebase = firebase
+        self._fcm = fcm
         self._limitador = Limitador(
             config.api.max_por_hora, config.api.espera_min_seg
         )
@@ -422,6 +437,119 @@ class ApiSenti:
             logger.error("No se pudo registrar la interaccion de la app: %s", e)
 
     # ------------------------------------------------------------------
+    # Propiedad del equipo: /equipos/reclamar y /equipos/borrar
+    # ------------------------------------------------------------------
+    #
+    # Siempre con token de Firebase, sea cual sea API_AUTH: aqui se decide de
+    # quien es una central, y una clave compartida o el modo abierto no dicen
+    # quien pregunta. Y sin `_esta_habilitado`: el primer equipo de una cuenta
+    # se reclama cuando la cuenta todavia no tiene ninguno.
+
+    async def _uid_obligatorio(self, request: web.Request) -> Tuple[Optional[str], Optional[web.Response]]:
+        token = self._token_de(request)
+        uid = await asyncio.to_thread(self._uid_del_token, token) if token else None
+        if not uid:
+            return None, web.json_response(
+                {"error": "Sesión no válida. Vuelve a iniciar sesión."}, status=401
+            )
+        return uid, None
+
+    @staticmethod
+    async def _cuerpo_con_mac(request: web.Request) -> Tuple[dict, str, Optional[web.Response]]:
+        try:
+            cuerpo = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            return {}, "", web.json_response({"error": "El cuerpo no es JSON."}, status=400)
+        cuerpo = cuerpo if isinstance(cuerpo, dict) else {}
+        mac = normalizar_mac(cuerpo.get("mac"))
+        # Formato estricto: la MAC acaba en una ruta de la base de datos.
+        if not _MAC_VALIDA.fullmatch(mac):
+            return cuerpo, "", web.json_response({"error": "MAC no válida."}, status=400)
+        return cuerpo, mac, None
+
+    def _vista_en_mano(self, mac: str) -> bool:
+        mqtt = getattr(self._bot, "mqtt_handler", None)
+        visto = getattr(mqtt, "prueba_fisica", {}).get(mac, 0) if mqtt else 0
+        return time.time() - visto <= VENTANA_PRUEBA_FISICA
+
+    async def reclamar(self, request: web.Request) -> web.Response:
+        """
+        La central pasa a quien la tiene en la mano. Conocer la MAC no basta:
+        la central tiene que haber mandado hace poco un boton largo o un
+        arranque, que es lo que pasa al darla de alta por BLE.
+        """
+        uid, error = await self._uid_obligatorio(request)
+        if error is not None:
+            return error
+        cuerpo, mac, error = await self._cuerpo_con_mac(request)
+        if error is not None:
+            return error
+
+        telegram_id = str(cuerpo.get("telegram_id") or "").strip()
+        group_id = str(cuerpo.get("group_id") or "").strip()
+        if any(v and not v.lstrip("-").isdigit() for v in (telegram_id, group_id)):
+            return web.json_response({"error": "Chat ID no válido."}, status=400)
+
+        if not self._vista_en_mano(mac):
+            return web.json_response(
+                {"error": "Mantén pulsado el botón de la central hasta el pitido y vuelve a intentarlo."},
+                status=409,
+            )
+
+        try:
+            r = await asyncio.to_thread(
+                self._firebase.reclamar_equipo, uid, mac,
+                str(cuerpo.get("nombre") or "").strip()[:60], telegram_id, group_id,
+            )
+        except Exception as e:
+            logger.error("No se pudo reclamar %s para %s: %s", mac, uid, e)
+            return web.json_response({"error": "No se pudo completar el alta. Inténtalo de nuevo."}, status=503)
+
+        if r["traspaso"]:
+            await self._avisar_dueno_anterior(mac, r)
+        return web.json_response({"ok": True, "traspaso": r["traspaso"]})
+
+    async def borrar(self, request: web.Request) -> web.Response:
+        uid, error = await self._uid_obligatorio(request)
+        if error is not None:
+            return error
+        _, mac, error = await self._cuerpo_con_mac(request)
+        if error is not None:
+            return error
+        try:
+            r = await asyncio.to_thread(self._firebase.borrar_equipo, uid, mac)
+        except Exception as e:
+            logger.error("No se pudo borrar %s para %s: %s", mac, uid, e)
+            return web.json_response({"error": "No se pudo borrar. Inténtalo de nuevo."}, status=503)
+        if r == "no_es_dueno":
+            return web.json_response({"error": "Solo el dueño de la central puede borrarla."}, status=403)
+        return web.json_response({"ok": True})
+
+    async def _avisar_dueno_anterior(self, mac: str, r: dict) -> None:
+        """Que el dueno anterior no se entere porque su central desaparecio de la app."""
+        nombre = r.get("nombre") or mac
+        texto = f"{nombre} se dio de alta en otra cuenta y ya no la verás en tu app."
+        if self._fcm is not None:
+            from fcm_handler import NotificationType, PushNotification
+
+            aviso = PushNotification(
+                title="Tu central cambió de cuenta", body=texto,
+                data={"device_id": mac, "action": "view_status"},
+                notification_type=NotificationType.DEVICE_TRANSFERRED,
+            )
+            for anterior in r.get("anteriores", []):
+                try:
+                    await asyncio.to_thread(self._fcm.send_to_user, anterior, aviso)
+                except Exception as e:
+                    logger.error("No se pudo avisar por push a %s: %s", anterior, e)
+        chat = r.get("telegram_anterior")
+        if chat and hasattr(self._bot, "send_message"):
+            try:
+                await self._bot.send_message(chat, f"ℹ️ *Tu central cambió de cuenta*\n{escape_md(texto)}", "Markdown")
+            except Exception as e:
+                logger.error("No se pudo avisar por Telegram a %s: %s", chat, e)
+
+    # ------------------------------------------------------------------
     # CORS
     # ------------------------------------------------------------------
 
@@ -470,6 +598,8 @@ class ApiSenti:
         app = web.Application(middlewares=[self._cors])
         app.router.add_post("/preguntar", self.preguntar)
         app.router.add_get("/salud", self.salud)
+        app.router.add_post("/equipos/reclamar", self.reclamar)
+        app.router.add_post("/equipos/borrar", self.borrar)
         app.router.add_route("OPTIONS", "/{cualquiera:.*}", self._preflight)
 
         self._runner = web.AppRunner(app, access_log=None)

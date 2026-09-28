@@ -32,7 +32,7 @@ from scheduler import scheduler
 from fcm_handler import FCMHandler
 
 from firebase_manager import firebase_manager
-from mqtt_protocol import MqttEvent, MqttTelemetry, EventType
+from mqtt_protocol import MqttEvent, MqttTelemetry, EventType, escape_md
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 # Configurar logging con rotación automática
@@ -146,16 +146,20 @@ class AlarmBridgeService:
         Solo notifica a los chats privados del dispositivo dueño del horario.
         """
         cfg = scheduler.cfg(device_id)
+        # Con el equipo en el texto el usuario sabe de cual es, y dos
+        # recordatorios a la misma hora dejan de ser texto identico (el
+        # anti-spam de 15 s de Telegram se comia el segundo).
+        lugar = escape_md(firebase_manager.get_device_location(device_id) or device_id)
         if action == "on":
             msg = (
-                f"⏰ *RECORDATORIO*\n\n"
-                f"🔒 El sistema se *activará* en {minutes} minutos\n"
+                f"⏰ *RECORDATORIO*\n📍 {lugar}\n\n"
+                f"🔒 Se *activará* en {minutes} minutos\n"
                 f"Hora: {cfg.format_on_time()}"
             )
         else:
             msg = (
-                f"⏰ *RECORDATORIO*\n\n"
-                f"🔓 El sistema se *desactivará* en {minutes} minutos\n"
+                f"⏰ *RECORDATORIO*\n📍 {lugar}\n\n"
+                f"🔓 Se *desactivará* en {minutes} minutos\n"
                 f"Hora: {cfg.format_off_time()}"
             )
 
@@ -163,6 +167,9 @@ class AlarmBridgeService:
         for chat_id in self._get_authorized_chats(device_id):
             # Solo chats privados (ID positivo); los grupos no reciben recordatorio
             if int(chat_id) < 0:
+                continue
+            # Quien apago los avisos de armado tampoco quiere su recordatorio.
+            if not firebase_manager.quiere_aviso_telegram(chat_id, "armado"):
                 continue
             if self._loop and self.telegram.is_running():
                 asyncio.run_coroutine_threadsafe(
@@ -564,7 +571,10 @@ class AlarmBridgeService:
                     notification = self.fcm.create_reinicio_notification(
                         device_location=location, armado=True, device_id=device_id
                     )
-                elif source == "remote":
+                elif source in ("remote", "schedule"):
+                    # El horario tambien empieza con cuenta atras (el firmware
+                    # publica "schedule" y luego "local"), y `_pending_scheduled`
+                    # reetiqueta como "schedule" la orden remota del horario.
                     notification = self.fcm.create_arming_notification(
                         device_location=location,
                         segundos=self._segundos_de_salida(device_id),
@@ -576,10 +586,9 @@ class AlarmBridgeService:
                         device_id=device_id
                     )
                 else:
-                    # schedule, keypad, alexa: arman al momento, sin cuenta
-                    # atras, y su texto de siempre ya es cierto.
+                    # keypad, alexa: arman al momento, sin cuenta atras, y su
+                    # texto de siempre ya es cierto.
                     source_traducido = {
-                        "schedule": "Horario",
                         "keypad": "Teclado",
                         "alexa": "Alexa"
                     }.get(source, source)
@@ -775,7 +784,7 @@ class AlarmBridgeService:
         # KnowledgeBase construye sus embeddings al cargar y no tiene sentido
         # pagarlos dos veces ni tener dos copias en memoria.
         if config.api.enabled:
-            self.api = ApiSenti(self.telegram, firebase_manager)
+            self.api = ApiSenti(self.telegram, firebase_manager, self.fcm)
             await self.api.start()
 
         # Escribir PID file para admin_bot

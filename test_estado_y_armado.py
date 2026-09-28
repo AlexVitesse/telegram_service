@@ -189,6 +189,106 @@ def test_los_dos_avisos_siguen_siendo_de_la_familia_armado():
     assert fcm_mod.FCMHandler.OPCIONALES[tipo] == "armado"
 
 
+# --------------------------------------------------------------------------
+# Un fallo nuestro no puede borrarle el token al usuario
+# --------------------------------------------------------------------------
+
+class _MensajeriaFalsa:
+    """Lo minimo de firebase_admin.messaging, con el fallo que queramos."""
+
+    class UnregisteredError(Exception):
+        pass
+
+    def __init__(self, excepcion=None):
+        self.excepcion = excepcion
+        self.enviados = []
+
+    # Las fabricas que usa send_to_token; aqui no hacen nada.
+    Message = staticmethod(lambda **kw: kw)
+    Notification = staticmethod(lambda **kw: kw)
+    AndroidConfig = staticmethod(lambda **kw: kw)
+    AndroidNotification = staticmethod(lambda **kw: kw)
+    APNSConfig = staticmethod(lambda **kw: kw)
+    APNSPayload = staticmethod(lambda **kw: kw)
+    Aps = staticmethod(lambda **kw: kw)
+
+    def send(self, message):
+        if self.excepcion:
+            raise self.excepcion
+        self.enviados.append(message)
+        return "ok"
+
+
+def _handler(excepcion=None):
+    h = fcm_mod.FCMHandler.__new__(fcm_mod.FCMHandler)
+    h.initialized = True
+    h._messaging = _MensajeriaFalsa(excepcion)
+    return h
+
+
+def test_un_fallo_nuestro_no_borra_el_token():
+    """
+    Lo que paso el 2026-09-08: un `data` con un booleano hizo que FCM rechazara
+    el mensaje, el codigo lo tomo por token invalido y **borro el unico token
+    de Eric**. Un error de programacion dejo al usuario sin avisos, y sin que
+    nadie se enterara hasta que alguien miro el log.
+    """
+    h = _handler(ValueError("Message.data must not contain non-string values."))
+    aviso = h.create_protected_notification("merida", "D1")
+    assert h.send_to_token("tok", aviso) == fcm_mod.FCMHandler.ENVIO_FALLO
+
+
+def test_un_token_muerto_de_verdad_si_se_borra():
+    """La limpieza tiene que seguir funcionando: si no, se acumulan para siempre."""
+    h = _handler()
+    h._messaging.excepcion = h._messaging.UnregisteredError("desinstalada")
+    aviso = h.create_protected_notification("merida", "D1")
+    assert h.send_to_token("tok", aviso) == fcm_mod.FCMHandler.ENVIO_TOKEN_MUERTO
+
+
+def test_ningun_aviso_mete_algo_que_no_sea_texto_en_data():
+    """
+    FCM revienta el envio entero si `data` trae un bool o un int. Se convierte
+    en la frontera, asi que da igual lo que ponga una plantilla nueva: se
+    comprueba aqui para las que existen y para que la conversion no se caiga.
+    """
+    h = _handler()
+    avisos = [
+        h.create_arming_notification("merida", 60, "D1"),
+        h.create_protected_notification("merida", "D1"),
+        h.create_reinicio_notification("merida", True, "D1"),
+        h.create_reinicio_notification("merida", False, "D1"),
+    ]
+    for aviso in avisos:
+        assert h.send_to_token("tok", aviso) == fcm_mod.FCMHandler.ENVIO_OK, aviso.title
+    for enviado in h._messaging.enviados:
+        for clave, valor in enviado["data"].items():
+            assert isinstance(valor, str), f"{clave}={valor!r} no es texto"
+
+
+# --------------------------------------------------------------------------
+# Lo que el firmware publica tiene que llegar a la app
+# --------------------------------------------------------------------------
+
+def test_ausente_no_es_lo_mismo_que_radio_muerta():
+    """
+    Las centrales con firmware anterior no publican `lora_ok`. Si se escribiera
+    `False` por ausencia, la app las pintaria averiadas estando sanas.
+    """
+    from mqtt_protocol import MqttTelemetry
+    import json
+
+    base = {"deviceId": "D1", "armed": True}
+    vieja = MqttTelemetry.from_json(json.dumps(base))
+    assert vieja.lora_ok is None, vieja.lora_ok
+
+    rota = MqttTelemetry.from_json(json.dumps({**base, "lora_ok": False}))
+    assert rota.lora_ok is False, rota.lora_ok
+
+    sana = MqttTelemetry.from_json(json.dumps({**base, "lora_ok": True}))
+    assert sana.lora_ok is True, sana.lora_ok
+
+
 def _correr():
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0

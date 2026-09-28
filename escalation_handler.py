@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import unicodedata
+from urllib.parse import quote
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -42,15 +43,15 @@ COMPLAINT_KEYWORDS = (
 _REASON_HEADERS = {
     "no_results": (
         "No encontré información sobre eso en mi documentación. "
-        "Para una respuesta humana, podés contactarnos:"
+        "Para una respuesta de una persona, contáctanos:"
     ),
     "llm_error": (
-        "No pude procesar tu consulta. Si necesitás ayuda inmediata, "
-        "contactá a una persona del equipo:"
+        "No pude procesar tu consulta. Si necesitas ayuda inmediata, "
+        "contacta a una persona del equipo:"
     ),
     "complaint": (
         "Lamento la mala experiencia. Para que un humano del equipo "
-        "atienda tu caso, escribinos:"
+        "atienda tu caso, escríbenos:"
     ),
     "manual": (
         "Para hablar con una persona del equipo de soporte:"
@@ -78,7 +79,15 @@ def has_any_contact(support: "SupportConfig") -> bool:
     return bool(support.email or support.phone)
 
 
-def build_escalation_message(reason: str, support: "SupportConfig") -> str:
+def enlace_whatsapp(telefono: str, texto: str = "") -> str:
+    """`wa.me` con el mensaje ya escrito, para que el usuario no tenga que explicar que equipo tiene."""
+    numero = "".join(c for c in telefono if c.isdigit())
+    if not numero:
+        return ""
+    return f"https://wa.me/{numero}" + (f"?text={quote(texto)}" if texto else "")
+
+
+def build_escalation_message(reason: str, support: "SupportConfig", contexto: str = "") -> str:
     """
     Arma el texto que se le envia al usuario.
 
@@ -98,13 +107,13 @@ def build_escalation_message(reason: str, support: "SupportConfig") -> str:
         logger.warning(
             "⚠️ Escalacion solicitada (reason=%s) pero no hay SUPPORT_EMAIL ni "
             "SUPPORT_PHONE configurados en .env. El usuario recibe un mensaje "
-            "generico. Configurá los datos de contacto para escalar correctamente.",
+            "generico. Configura los datos de contacto para escalar correctamente.",
             reason,
         )
         return (
             f"{header}\n\n"
             "Por el momento no hay un canal de contacto disponible. "
-            "Volvé a intentarlo más tarde o usá /help para ver lo que puedo resolver."
+            "Vuelve a intentarlo más tarde o usa /help para ver lo que puedo resolver."
         )
 
     lines = [header, ""]
@@ -112,6 +121,8 @@ def build_escalation_message(reason: str, support: "SupportConfig") -> str:
         lines.append(f"📧 Email: {support.email}")
     if support.phone:
         lines.append(f"📞 Teléfono: {support.phone}")
+        texto = "Hola, necesito ayuda con Sentinel Guard" + (f" ({contexto})" if contexto else "")
+        lines.append(f"💬 WhatsApp: {enlace_whatsapp(support.phone, texto)}")
     if support.hours:
         lines.append(f"🕐 Horario de atención: {support.hours}")
 

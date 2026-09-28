@@ -8,7 +8,7 @@ Maneja la conexion con Firebase Realtime Database (RTDB) para:
 import logging
 import time
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
-from mqtt_protocol import Command # Importar el Enum de Comandos
+from mqtt_protocol import Command, normalizar_mac # Importar el Enum de Comandos
 from scheduler import scheduler, DAY_NAMES, elegir_por_dispositivo  # Para sincronizar horarios
 
 from config import config # Asegurarse que config tenga la databaseURL
@@ -27,6 +27,19 @@ try:
 except ImportError:
     FIREBASE_AVAILABLE = False
     logger.warning("firebase_admin no instalado. Ejecuta: pip install firebase-admin")
+
+def lista_macs(datos) -> List[str]:
+    """`Usuarios/{uid}/Dispositivos` como lista limpia: lista, dict o texto con comas (cuentas viejas)."""
+    if isinstance(datos, list):
+        crudas = datos
+    elif isinstance(datos, dict):
+        crudas = list(datos.values())
+    elif isinstance(datos, str):
+        crudas = datos.split(",")
+    else:
+        return []
+    return [str(m).strip() for m in crudas if m and str(m).strip()]
+
 
 # --- Estructuras de Datos (similares a antes para compatibilidad interna) ---
 
@@ -441,44 +454,18 @@ class FirebaseManager:
         )
         return True
 
-    def _sync_scheduler_from_initial_data(self, all_schedules: dict) -> None:
-        """
-        Sincroniza el scheduler local con los datos iniciales de Firebase.
-        Cada dispositivo conserva SU horario: no hay horario global compartido.
-        Estructura: {userId: {devices: {deviceId: {schedule_data}}}}
-
-        Se elige UN horario por equipo antes de escribir nada. Antes se
-        aplicaban todos los que hubiera segun se iteraba, asi que un equipo
-        reclamado por dos usuarios se quedaba con el ultimo que llegara: el
-        orden lo decide Firebase y podia cambiar entre arranques.
-        """
-        try:
-            # _devices_for_schedule_key y no get_authorized_devices: un horario
-            # "system" de un usuario sin Telegram va indexado por su uid, que no
-            # es ningun Telegram_ID. Con el resolver de solo Telegram, al
-            # arrancar se quedaba sin aplicar y el equipo perdia su horario
-            # hasta que alguien lo tocara desde la app -que sí usa este otro-.
-            elegidos = elegir_por_dispositivo(all_schedules, self._devices_for_schedule_key)
-            cambios = sum(
-                1 for dev_id, schedule_data in elegidos.items()
-                if self._apply_schedule_to_scheduler(dev_id, schedule_data)
-            )
-
-            if cambios:
-                logger.info(f"Scheduler sincronizado desde Firebase: {cambios} horario(s) actualizado(s)")
-            else:
-                logger.debug("Scheduler local ya esta sincronizado con Firebase")
-
-        except Exception as e:
-            logger.error(f"Error sincronizando scheduler desde datos iniciales: {e}")
-
     def _schedule_listener(self, event) -> None:
         """
-        Callback para procesar cambios de horarios programados.
-        Path: /Horarios/{userTelegramId}/devices/{deviceMac}
-        Data: {activationTime: "22:00", deactivationTime: "07:00", enabled: true, days: [...]}
+        Callback de cambios en /Horarios.
+
+        Antes el listener aplicaba "lo ultimo que se escribio" y la carga
+        inicial elegia con otro criterio, asi que el VPS y la central podian
+        quedarse con horarios distintos segun el orden de las escrituras. Y
+        borrar una clave entera (`/Horarios/{clave}`) no se procesaba: sus
+        equipos seguian con el horario puesto. Ahora cualquier cambio
+        recalcula todo con el mismo criterio que el arranque. /Horarios es
+        pequeno: leerlo entero es mas barato que equivocarse.
         """
-        # Actualizar timestamp del último evento recibido
         self._last_listener_event_time = time.time()
 
         if not self.mqtt_handler:
@@ -486,125 +473,109 @@ class FirebaseManager:
 
         logger.debug(f"Evento de Horarios: Type={event.event_type}, Path={event.path}, Data={event.data}")
 
-        # Evento inicial con todos los datos - sincronizar scheduler local
-        if event.path == '/' and isinstance(event.data, dict):
-            self._sync_scheduler_from_initial_data(event.data)
-            return
-
-        parts = event.path.split('/')
-        # Path esperado: /{userTelegramId}/devices/{deviceMac} o /{userTelegramId}/devices/{deviceMac}/{field}
-        # parts[0] = '', parts[1] = userTelegramId, parts[2] = 'devices', parts[3] = deviceMac
-
-        if len(parts) < 4 or parts[2] != 'devices':
-            return
-
-        device_id = parts[3]
-        user_telegram_id = parts[1]  # El ID de Telegram del usuario
-        if not device_id:
-            return
-
-        # Si es "system", obtener todos los dispositivos del usuario
-        if device_id == "system":
-            device_ids = self._devices_for_schedule_key(user_telegram_id)
-            if not device_ids:
-                logger.warning(f"No se encontraron dispositivos para el usuario {user_telegram_id}")
-                return
+        if event.path == '/':
+            self._recalcular_horarios(event.data if isinstance(event.data, dict) else {})
         else:
-            device_ids = [device_id]
+            self._recalcular_horarios()
 
-        # Caso especial: horario eliminado (Data=None)
-        if event.data is None:
-            logger.info(f"Horario eliminado para {device_ids}")
-            for dev_id in device_ids:
-                self.mqtt_handler.send_set_schedule(
-                    enabled=False,
-                    on_hour=0,
-                    on_minute=0,
-                    off_hour=0,
-                    off_minute=0,
-                    device_id=dev_id
-                )
-                scheduler.remove(dev_id)
-            return
-
-        # Determinar si es un cambio completo o parcial
-        schedule_data = None
-
-        if len(parts) == 4 and isinstance(event.data, dict):
-            # Cambio completo del schedule
-            schedule_data = event.data
-        elif len(parts) == 4 and event.event_type == 'patch' and isinstance(event.data, dict):
-            # Patch con múltiples campos
-            schedule_data = event.data
-        elif len(parts) > 4:
-            # Cambio de un campo específico - necesitamos cargar el schedule completo
-            # Por ahora solo procesamos cambios completos
-            return
-
-        if schedule_data and 'activationTime' in schedule_data and 'deactivationTime' in schedule_data:
+    def _recalcular_horarios(self, todos: Optional[dict] = None) -> None:
+        """
+        Elige UN horario por equipo, lo aplica al scheduler y se lo manda a la
+        central si cambio. Los equipos que ya no tienen horario (borrado, equipo
+        dado de baja, entrada de alguien que no es el dueno) se deshabilitan:
+        antes se quedaban armandose solos para siempre.
+        """
+        if todos is None:
             try:
-                enabled = schedule_data.get('enabled', False)
-                activation_time = schedule_data.get('activationTime', '')
-                deactivation_time = schedule_data.get('deactivationTime', '')
-                days = schedule_data.get('days', [])  # Lista de días: ['Lunes', 'Martes', ...]
-                updated_by = schedule_data.get('lastUpdatedBy', '')
-
-                # Parsear horas (formato "HH:MM" o "YYYY-MM-DDTHH:MM")
-                on_hour, on_minute = 0, 0
-                off_hour, off_minute = 0, 0
-
-                def parse_time(time_str: str) -> tuple:
-                    """Parsea hora en formato HH:MM o YYYY-MM-DDTHH:MM"""
-                    if not time_str or ':' not in time_str:
-                        return 0, 0
-                    # Si tiene 'T', es formato ISO - extraer solo la parte de hora
-                    if 'T' in time_str:
-                        time_str = time_str.split('T')[1]  # Obtener parte después de T
-                    parts = time_str.split(':')
-                    try:
-                        return int(parts[0]), int(parts[1])
-                    except (ValueError, IndexError):
-                        return 0, 0
-
-                on_hour, on_minute = parse_time(activation_time)
-                off_hour, off_minute = parse_time(deactivation_time)
-
-                # Convertir nombres de días a índices (0=Domingo, 1=Lunes, ...)
-                day_name_to_index = {
-                    'Domingo': 0, 'Lunes': 1, 'Martes': 2, 'Miércoles': 3,
-                    'Jueves': 4, 'Viernes': 5, 'Sábado': 6
-                }
-                days_indices = []
-                for day_name in days:
-                    if day_name in day_name_to_index:
-                        days_indices.append(day_name_to_index[day_name])
-                days_indices.sort()
-
-                # Si no hay días configurados, usar todos
-                if not days_indices:
-                    days_indices = [0, 1, 2, 3, 4, 5, 6]
-
-                # Enviar al ESP32 (a cada dispositivo)
-                for dev_id in device_ids:
-                    logger.info(f"Comando de App: HORARIO para {dev_id} - Enabled={enabled}, On={on_hour:02d}:{on_minute:02d}, Off={off_hour:02d}:{off_minute:02d}, Days={days_indices}")
-                    self.mqtt_handler.send_set_schedule(
-                        enabled=enabled,
-                        on_hour=on_hour,
-                        on_minute=on_minute,
-                        off_hour=off_hour,
-                        off_minute=off_minute,
-                        days=days_indices,
-                        device_id=dev_id
-                    )
-
-                # Sincronizar con scheduler local de Python (solo si no viene de Telegram;
-                # si viene de Telegram el bot ya escribio el horario del dispositivo)
-                if updated_by != "telegram":
-                    for dev_id in device_ids:
-                        self._apply_schedule_to_scheduler(dev_id, schedule_data)
-
+                todos = self.db.reference('Horarios').get() or {}
             except Exception as e:
-                logger.error(f"Error procesando horario: {e}")
+                # Sin datos no se decide nada: tomar un fallo de lectura por
+                # "no hay horarios" deshabilitaria todas las centrales.
+                logger.error(f"No se pudo leer /Horarios, no se recalcula: {e}")
+                return
+
+        try:
+            elegidos = elegir_por_dispositivo(
+                self._filtrar_horarios(todos), self._devices_for_schedule_key
+            )
+            for dev_id, horario in elegidos.items():
+                if self._apply_schedule_to_scheduler(dev_id, horario):
+                    self.enviar_horario(dev_id)
+
+            for dev_id in [d for d in list(scheduler.configs) if d not in elegidos]:
+                logger.info(f"Horario huerfano de {dev_id}: se deshabilita")
+                scheduler.remove(dev_id)
+                if self.mqtt_handler:
+                    self.mqtt_handler.send_set_schedule(
+                        enabled=False, on_hour=0, on_minute=0, off_hour=0, off_minute=0,
+                        device_id=dev_id, queue_if_offline=True
+                    )
+        except Exception as e:
+            logger.error(f"Error recalculando horarios: {e}")
+
+    def enviar_horario(self, device_id: str) -> None:
+        """
+        Manda a la central el horario que tiene el scheduler para ella.
+
+        Se usa al cambiar el horario y cuando la central arranca: sin eso, una
+        central que estaba apagada al cambiarlo se quedaba con el viejo en NVS.
+        Encola si esta desconectada.
+        """
+        if not self.mqtt_handler or device_id not in scheduler.configs:
+            return
+        cfg = scheduler.configs[device_id]
+        logger.info(
+            f"Horario a {device_id}: enabled={cfg.enabled}, on={cfg.format_on_time()}, "
+            f"off={cfg.format_off_time()}, dias={cfg.days_indices()}"
+        )
+        self.mqtt_handler.send_set_schedule(
+            enabled=cfg.enabled,
+            on_hour=cfg.on_hour,
+            on_minute=cfg.on_minute,
+            off_hour=cfg.off_hour,
+            off_minute=cfg.off_minute,
+            days=cfg.days_indices(),
+            device_id=device_id,
+            queue_if_offline=True,
+        )
+
+    def _nodo(self, mac: str) -> Optional[dict]:
+        nodo = (self._get_all_devices() or {}).get(mac)
+        return nodo if isinstance(nodo, dict) else None
+
+    def _horario_aplica(self, clave: str, mac: str) -> bool:
+        """
+        Si la entrada `Horarios/{clave}/devices/{mac}` cuenta.
+
+        - Equipo que ya no existe: no (horario huerfano).
+        - Equipo con `ownerUid`: solo si la clave es la del dueno, o su
+          Telegram_ID mientras quedan claves viejas por migrar. Antes cualquiera
+          que tuviera el equipo en su lista -o en Telegram_ID_2- le ponia
+          horario, y asi llegaban recordatorios y armados de equipos ajenos.
+        - Equipo sin `ownerUid` (datos sin migrar): como antes.
+        """
+        nodo = self._nodo(mac)
+        if nodo is None:
+            return False
+        dueno = str(nodo.get("ownerUid") or "")
+        if not dueno:
+            return True
+        return clave == dueno or clave == str(nodo.get("Telegram_ID") or "")
+
+    def _filtrar_horarios(self, todos: dict) -> dict:
+        """/Horarios sin las entradas especificas que no cuentan (ver _horario_aplica)."""
+        limpio = {}
+        for clave, datos in (todos or {}).items():
+            devices = datos.get('devices') if isinstance(datos, dict) else None
+            if not isinstance(devices, dict):
+                continue
+            validos = {
+                dev: h for dev, h in devices.items()
+                if dev == "system" or self._horario_aplica(str(clave), dev)
+            }
+            if validos:
+                limpio[clave] = {"devices": validos}
+        return limpio
 
     def update_device_state_in_firebase(self, device_id: str, state_payload: Dict[str, Any]):
         """
@@ -727,7 +698,14 @@ class FirebaseManager:
         NO sustituye a get_authorized_devices() para autorizar: esto solo
         resuelve a que equipos aplica un horario que el dueno ya escribio.
         """
-        por_telegram = self.get_authorized_devices(key)
+        # Solo los equipos de los que esa clave es DUENA (Telegram_ID), no
+        # los que la tienen como Telegram_ID_2 o Group_ID: un "system" de un
+        # usuario armaba y mandaba recordatorios de equipos de otros.
+        por_telegram = [
+            mac for mac in self.get_authorized_devices(key)
+            if str((self._nodo(mac) or {}).get("Telegram_ID") or "") == key
+            and self._horario_aplica(key, mac)
+        ]
         if por_telegram:
             return por_telegram
 
@@ -742,19 +720,150 @@ class FirebaseManager:
             logger.error(f"No se pudieron leer los dispositivos de {key}: {e}")
             return []
 
-        if isinstance(datos, list):
-            macs = [str(m).strip() for m in datos if m]
-        elif isinstance(datos, str):
-            # Cuentas viejas guardan la lista como string separado por comas.
-            macs = [m.strip() for m in datos.split(",") if m.strip()]
-        elif isinstance(datos, dict):
-            macs = [str(m).strip() for m in datos.values() if m]
-        else:
-            return []
-
+        macs = [m for m in lista_macs(datos) if self._horario_aplica(key, m)]
         if macs:
             logger.info(f"Horario 'system' de {key} resuelto por uid: {len(macs)} equipo(s)")
         return macs
+
+    # ========================================
+    # Propiedad del equipo (endpoints /equipos/*)
+    # ========================================
+    #
+    # El dueno era "quien tenga la MAC en su lista" para la app y "quien sea
+    # Telegram_ID" para el bot, y nadie mantenia los dos iguales: asi Pedrito
+    # veia y armaba la central de Jose. Ahora hay un dueno, `ESP32/{mac}/ownerUid`,
+    # y estas dos operaciones son las unicas que lo cambian. Van por el VPS
+    # (Admin SDK) porque tocan listas y horarios de OTRAS cuentas, cosa que las
+    # reglas de seguridad no le dejan hacer a la app.
+
+    @staticmethod
+    def _misma_mac(guardada: str, mac: str) -> bool:
+        guardada = normalizar_mac(guardada)
+        # [:-1]: listas viejas con un caracter de mas (la app las corrige al cargar).
+        return guardada == mac or guardada[:-1] == mac
+
+    def _quitar_de_listas(self, mac: str, excepto: Optional[str] = None) -> List[str]:
+        """Quita la MAC de `Usuarios/*/Dispositivos` (menos la de `excepto`). Devuelve a quien se la quito."""
+        usuarios = self.db.reference("Usuarios").get() or {}
+        tocados = []
+        for uid, datos in usuarios.items():
+            if uid == excepto or not isinstance(datos, dict):
+                continue
+            macs = lista_macs(datos.get("Dispositivos"))
+            quedan = [m for m in macs if not self._misma_mac(m, mac)]
+            if len(quedan) == len(macs):
+                continue
+            ref = self.db.reference(f"Usuarios/{uid}/Dispositivos")
+            ref.set(quedan) if quedan else ref.delete()
+            tocados.append(uid)
+            logger.info(f"{mac} quitado de la lista de {uid}")
+        return tocados
+
+    def _borrar_horarios_de(self, mac: str, excepto: Optional[str] = None) -> None:
+        """Borra `Horarios/*/devices/{mac}` en todas las claves (menos `excepto`)."""
+        todos = self.db.reference("Horarios").get() or {}
+        for clave, datos in todos.items():
+            if clave == excepto or not isinstance(datos, dict):
+                continue
+            if isinstance(datos.get("devices"), dict) and mac in datos["devices"]:
+                self.db.reference(f"Horarios/{clave}/devices/{mac}").delete()
+                logger.info(f"Horario de {mac} bajo {clave} borrado")
+
+    def _apagar_horario_central(self, mac: str) -> None:
+        scheduler.remove(mac)
+        if self.mqtt_handler:
+            self.mqtt_handler.send_set_schedule(
+                enabled=False, on_hour=0, on_minute=0, off_hour=0, off_minute=0,
+                device_id=mac, queue_if_offline=True
+            )
+
+    def reclamar_equipo(self, uid: str, mac: str, nombre: str = "",
+                        telegram_id: str = "", group_id: str = "") -> Dict[str, Any]:
+        """
+        Da la central a `uid`. La prueba de que la tiene en la mano la comprueba
+        quien llama (api_server); aqui solo se ejecuta.
+
+        Si era de otra cuenta: se le quita de su lista, se borran sus horarios
+        de ese equipo, se le quita el acceso por Telegram (Telegram_ID,
+        Telegram_ID_2, Group_ID) y se apaga el horario de la central. La
+        configuracion de la central (bengala, tiempos, telemetria) se conserva.
+        """
+        ref = self.db.reference(f"ESP32/{mac}")
+        nodo = ref.get()
+        nodo = nodo if isinstance(nodo, dict) else None
+        dueno = str((nodo or {}).get("ownerUid") or "")
+
+        otros = self._quitar_de_listas(mac, excepto=uid)
+        anteriores = sorted(set(otros) | ({dueno} if dueno and dueno != uid else set()))
+        traspaso = bool(anteriores)
+
+        if nodo is None:
+            ref.set({
+                "Answer": False, "Estado": False, "Nombre": nombre or "Mi central",
+                "Telegram_ID": telegram_id, "Group_ID": group_id,
+                "Tiempo_Bomba": 60, "Tiempo_pre": 60,
+                "DisparoApp": False, "DisparoESP": False,
+                "ownerUid": uid,
+            })
+        else:
+            cambios: Dict[str, Any] = {"ownerUid": uid}
+            if nombre:
+                cambios["Nombre"] = nombre
+            if traspaso:
+                # Lo del dueno anterior fuera, aunque venga vacio: un Telegram
+                # suyo que se quedara seguiria mandando sobre la central.
+                cambios.update({"Telegram_ID": telegram_id, "Group_ID": group_id, "Telegram_ID_2": None})
+            else:
+                if telegram_id:
+                    cambios["Telegram_ID"] = telegram_id
+                if group_id:
+                    cambios["Group_ID"] = group_id
+            ref.update(cambios)
+
+        if traspaso:
+            self._borrar_horarios_de(mac, excepto=uid)
+            self._apagar_horario_central(mac)
+
+        lista = self.db.reference(f"Usuarios/{uid}/Dispositivos")
+        macs = lista_macs(lista.get())
+        if not any(self._misma_mac(m, mac) for m in macs):
+            lista.set(macs + [mac])
+
+        self.invalidate_cache()
+        logger.info(f"{mac} reclamado por {uid} (traspaso={traspaso}, anteriores={anteriores})")
+        return {
+            "traspaso": traspaso,
+            "anteriores": anteriores,
+            "nombre": (nodo or {}).get("Nombre") or nombre,
+            "telegram_anterior": str((nodo or {}).get("Telegram_ID") or "") if traspaso else "",
+        }
+
+    def borrar_equipo(self, uid: str, mac: str) -> str:
+        """
+        Borra la central para todos: listas, horarios bajo cualquier clave, el
+        nodo y el horario de la central. Antes la app borraba el nodo y nada
+        mas: los horarios seguian armandola y otras cuentas la seguian viendo.
+
+        Devuelve "ok" o "no_es_dueno". Un nodo sin `ownerUid` (sin migrar) lo
+        puede borrar quien lo tenga en su lista, como hasta ahora.
+        """
+        nodo = self.db.reference(f"ESP32/{mac}").get()
+        dueno = str(nodo.get("ownerUid") or "") if isinstance(nodo, dict) else ""
+        if dueno and dueno != uid:
+            return "no_es_dueno"
+        if not dueno:
+            mias = lista_macs(self.db.reference(f"Usuarios/{uid}/Dispositivos").get())
+            if not any(self._misma_mac(m, mac) for m in mias):
+                return "no_es_dueno"
+
+        self._quitar_de_listas(mac)
+        self._borrar_horarios_de(mac)
+        if isinstance(nodo, dict):
+            self.db.reference(f"ESP32/{mac}").delete()
+        self._apagar_horario_central(mac)
+        self.invalidate_cache()
+        logger.info(f"{mac} borrado por {uid}")
+        return "ok"
 
     def vincular_chat_id(self, uid: str, chat_id: str) -> str:
         """
@@ -791,6 +900,9 @@ class FirebaseManager:
 
         actual = str(cuenta.get("telegram_id") or "").strip()
         if actual == str(chat_id):
+            # Tambien aqui: el que se vinculo antes de este cambio tiene equipos
+            # sin Chat ID, y volver a tocar "Vincular" es lo que va a hacer.
+            self._propagar_chat_id(uid, chat_id, cuenta.get("Dispositivos"))
             return "ya_estaba"
         if actual:
             logger.info(f"La cuenta {uid} ya tiene otro telegram_id; no se pisa")
@@ -798,8 +910,27 @@ class FirebaseManager:
 
         if self.update_data(f"Usuarios/{uid}", {"telegram_id": str(chat_id)}):
             logger.info(f"Cuenta {uid} vinculada al chat {chat_id}")
+            self._propagar_chat_id(uid, chat_id, cuenta.get("Dispositivos"))
             return "vinculado"
         return "error"
+
+    def _propagar_chat_id(self, uid: str, chat_id: str, dispositivos) -> None:
+        """
+        Pone el Chat ID en los equipos del usuario que no lo tienen.
+
+        Antes solo lo hacia la app, y solo si el dialogo de vinculacion estaba
+        abierto en ese momento: la cuenta decia "vinculado" y la central no
+        avisaba por Telegram a nadie. Solo equipos suyos (ownerUid) o sin dueno
+        todavia, y solo si el campo esta vacio: nunca se pisa el de otro.
+        """
+        for mac in lista_macs(dispositivos):
+            nodo = self._nodo(mac)
+            if nodo is None or str(nodo.get("Telegram_ID") or "").strip():
+                continue
+            if nodo.get("ownerUid") not in (None, "", uid):
+                continue
+            if self.update_data(f"ESP32/{mac}", {"Telegram_ID": str(chat_id)}):
+                logger.info(f"Chat ID de {uid} propagado a {mac}")
 
     #: chat_id -> (uid, cuando_se_resolvio). Ver _uid_por_chat_id.
     _cache_uid: Dict[str, tuple] = {}

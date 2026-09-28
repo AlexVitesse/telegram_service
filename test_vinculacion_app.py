@@ -51,6 +51,9 @@ class FirebaseFalso:
         self.cuentas.setdefault(uid, {}).update(data)
         return True
 
+    def _propagar_chat_id(self, *_):
+        pass  # se prueba aparte, en test_retro_banco.py
+
 
 def _fm(cuentas=None):
     from firebase_manager import FirebaseManager
