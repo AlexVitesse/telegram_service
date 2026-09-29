@@ -145,13 +145,37 @@ para que la republique: solo lo intenta una vez, al arrancar.
 | `API_AUTH` | `firebase` | ID token. **Nunca `abierto` detras de ngrok** |
 | `NGROK_API` | `http://127.0.0.1:4041/api/tunnels` | El agente de Senti |
 | `DEBUG` | `false` | Baja el log de DEBUG a INFO |
-| `SUPPORT_EMAIL` / `SUPPORT_PHONE` | definidos | Contacto al escalar a soporte |
+| `SUPPORT_EMAIL` | `pedro.nicolas@i-condor.com` | Confirmado el 28/09 |
+| `SUPPORT_PHONE` | `+52 1 55 6815 5033` | WhatsApp de soporte, confirmado el 28/09 |
+| `TELEGRAM_ADMIN_CHAT_ID` | **pendiente** | Recibe los eventos técnicos (watchdog, reinicios, modo configuración) y los avisos de nuevos contactos. Vacío = no le llegan a nadie. Se saca con `/id` en el bot |
 
 > **Cuidado con las claves repetidas.** `config.py` usa `load_dotenv()` sin
 > `override`, asi que ante una clave duplicada dentro del `.env` **gana la
 > primera aparicion, no la ultima**. Añadir `DEBUG=false` al final no hace nada
 > mientras arriba siga el `DEBUG=true` original: hay que editar la linea
 > existente.
+
+---
+
+## Migracion de propiedad y horarios (aplicada el 28/09/2026)
+
+`migrar_retro_banco.py` pone `ownerUid` a cada central, quita la MAC de las
+listas de quien no es dueño y deja un horario por equipo en
+`Horarios/{uid}/devices/{mac}`. **Ya se aplicó en producción**; solo haría falta
+repetirla si se restaurara una copia anterior al 28/09.
+
+```bash
+python backup_firebase.py backup          # siempre antes
+python migrar_retro_banco.py              # ensayo: solo informa
+python migrar_retro_banco.py --aplicar    # escribe, en una sola actualizacion
+```
+
+Las centrales que están en varias cuentas y no se pueden decidir salen como
+**conflicto** y se dejan sin dueño. El 28/09 fueron `20_E7_C8_AD_43`,
+`AC_15_18_D5_2D` y `C8_2E_18_25_CA_6`: las reclama por BLE quien las tenga.
+
+Va junto con las reglas de `APP/database.rules.json`: sin `ownerUid`, las reglas
+dejarían a los dueños sin acceso a su propia central.
 
 ---
 

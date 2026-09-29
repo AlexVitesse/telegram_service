@@ -82,6 +82,79 @@ llegar a ver. Comprobado desde el telefono el 2026-09-02.
 El `429` sigue siendo otra cosa distinta: "has preguntado demasiadas veces tu",
 no "el servidor esta lleno".
 
+### `POST /equipos/reclamar`
+
+Da de alta una central en la cuenta de quien llama. Si era de otra cuenta, se la
+traspasa (decisión del 28/09: **pasa a quien la tiene en la mano**, sin
+aprobación del dueño anterior). Lo llama la app al final del alta por BLE
+cuando el nodo `ESP32/{mac}` es de otra cuenta o las reglas le niegan leerlo.
+
+```http
+POST /equipos/reclamar
+Authorization: Bearer <idToken de Firebase>
+Content-Type: application/json
+
+{"mac": "AA_BB_CC_DD_EE", "nombre": "Casa", "telegram_id": "123456789", "group_id": ""}
+```
+
+**Prueba de que la tiene en la mano:** la central tuvo que mandar
+`config_mode_started` (botón largo) o `system_boot` en los últimos **15 min**
+(`VENTANA_PRUEBA_FISICA`). Conocer la MAC no basta. `mqtt_handler.prueba_fisica`
+guarda la hora de esos eventos, **en memoria**: tras reiniciar el VPS hay que
+volver a pulsar el botón.
+
+| Respuesta | Cuándo |
+|---|---|
+| `200 {"ok": true, "traspaso": false}` | Central nueva o ya suya |
+| `200 {"ok": true, "traspaso": true}` | Era de otra cuenta y pasó a esta |
+| `400` | Cuerpo no JSON, MAC con formato inválido, o chat ID no numérico |
+| `401` | Sin token o token no válido |
+| `409` | La central no se vio en la mano en los últimos 15 min. La app reintenta cada 5 s durante 2 min |
+| `503` | Falló Firebase; reintentar |
+
+Con traspaso, `firebase_manager.reclamar_equipo()`:
+- quita la MAC de las listas de las otras cuentas;
+- borra sus horarios de ese equipo;
+- reemplaza `Telegram_ID`, `Group_ID` y `Telegram_ID_2` por los del nuevo dueño (aunque vengan vacíos);
+- apaga el horario de la central por MQTT;
+- avisa al dueño anterior por push (`DEVICE_TRANSFERRED`) y por Telegram.
+
+La configuración de la central (bengala, tiempos) se conserva.
+
+### `POST /equipos/borrar`
+
+```http
+POST /equipos/borrar
+Authorization: Bearer <idToken de Firebase>
+Content-Type: application/json
+
+{"mac": "AA_BB_CC_DD_EE"}
+```
+
+Borra la central **para todos**:
+- la MAC de todas las listas;
+- los horarios bajo cualquier clave;
+- el nodo `ESP32/{mac}`;
+- el horario de la central, apagado por MQTT con `queue_if_offline`.
+
+Solo el dueño (`ownerUid`). Un nodo sin dueño lo puede borrar quien lo tenga en
+su lista.
+
+| Respuesta | Cuándo |
+|---|---|
+| `200 {"ok": true}` | Borrada |
+| `400` / `401` / `503` | Como en `reclamar` |
+| `403` | No es el dueño |
+
+**Las dos rutas exigen siempre token de Firebase**, sea cual sea `API_AUTH`: una
+clave compartida o el modo abierto no dicen quién pregunta, y aquí se decide de
+quién es una central. Tampoco pasan por `_esta_habilitado`: el primer equipo de
+una cuenta se reclama cuando la cuenta todavía no tiene ninguno.
+
+La MAC se valida con `_MAC_VALIDA` (`AA_BB_CC_DD_EE`, y se acepta un carácter
+extra de las claves antiguas de 16 caracteres), porque acaba en una ruta de la
+base de datos.
+
 ### `GET /salud`
 
 Sin autenticacion. `{"ok": true, "kb": true, "ia": true}`. Si `kb` o `ia` salen
