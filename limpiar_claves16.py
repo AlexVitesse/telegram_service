@@ -26,6 +26,12 @@ Qué hace, para cada clave de 16 en `Usuarios/{uid}/Dispositivos`:
       no reporta en ningún formato). Eso lo decide una persona.
 Después, los nodos `ESP32/{16}` que ya no lista nadie y sus horarios
 `Horarios/*/devices/{16}` se borran.
+
+También se borran los nodos `ESP32/` cuya clave lleva una coma y que nadie
+lista, con sus horarios. Ejemplo: `08_D1_F9_29_E4,E4_65_B8_11_89`, que una
+app vieja creó el 15/02 al usar como ruta la lista `Dispositivos` sin
+separarla. Sin dueño, sin horario y sin nadie que la liste, pero el servidor
+la tomaba por una variante de `08_D1_F9_29_E4` y le escribía el estado.
 """
 import re
 import sys
@@ -85,7 +91,7 @@ def planificar(arbol: dict) -> Tuple[Dict[str, object], List[str]]:
         if despues != antes:
             cambios[f"Usuarios/{uid}/Dispositivos"] = despues or None
 
-    for mac in sorted(k for k in esp32 if CLAVE16.match(k)):
+    for mac in sorted(k for k in esp32 if CLAVE16.match(k) or "," in k):
         if mac in listadas_despues:
             continue
         cambios[f"ESP32/{mac}"] = None

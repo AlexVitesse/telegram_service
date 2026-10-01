@@ -56,6 +56,15 @@ def test_nodo_16_sin_listar_se_borra_con_su_horario():
     assert cambios["Horarios/admin/devices/D4_D4_DA_E3_DC_1"] is None
 
 
+def test_clave_con_coma_que_nadie_lista_se_borra():
+    a = arbol()
+    a["ESP32"]["08_D1_F9_29_E4,E4_65_B8_11_89"] = {"Estado": False}
+    a["ESP32"]["08_D1_F9_29_E4"] = {"ownerUid": "luis"}
+    cambios, _ = planificar(a)
+    assert cambios["ESP32/08_D1_F9_29_E4,E4_65_B8_11_89"] is None
+    assert "ESP32/08_D1_F9_29_E4" not in cambios
+
+
 def test_quien_ya_esta_bien_no_se_escribe():
     cambios, _ = planificar(arbol())
     assert "Usuarios/pedro/Dispositivos" not in cambios
