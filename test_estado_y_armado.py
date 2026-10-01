@@ -108,7 +108,7 @@ def test_la_divergencia_se_repara_aunque_la_memoria_ya_estuviera_bien():
 
 def test_si_ya_coincide_no_se_escribe():
     """La reconciliacion no puede convertirse en una escritura por telemetria."""
-    fm = _fm({"D1": {"Estado": True, "Telegram_ID": "123"}})
+    fm = _fm({"D1": {"Estado": True, "Answer": True, "Telegram_ID": "123"}})
     gestor = dm_mod.DeviceManager(fm)
     gestor.devices_state["D1"] = {"is_armed": True}
 
@@ -152,6 +152,24 @@ def test_el_eco_de_nuestra_answer_no_manda_orden_a_la_central():
     fm.update_device_state_in_firebase("C8", {"is_armed": True})
     fm._app_command_listener(_Evento("/C8/Answer", True))
     fm.mqtt_handler.send_command.assert_not_called()
+
+
+def test_dos_cambios_seguidos_no_escapan_ningun_eco():
+    """Rafaga al reconectar: armado y desarmado antes de que llegue el primer eco."""
+    fm = _fm({"C8": {"Estado": False, "Answer": False}})
+    fm.update_device_state_in_firebase("C8", {"is_armed": True})
+    fm._falso.nodos["C8"] = {"Estado": True, "Answer": True}
+    fm.update_device_state_in_firebase("C8", {"is_armed": False})
+    fm._app_command_listener(_Evento("/C8/Answer", True))
+    fm._app_command_listener(_Evento("/C8/Answer", False))
+    fm.mqtt_handler.send_command.assert_not_called()
+
+
+def test_answer_desfasado_se_repara_aunque_estado_no_cambie():
+    """Una orden que no se ejecuto deja Answer distinto de Estado para siempre."""
+    fm = _fm({"C8": {"Estado": False, "Answer": True}})
+    fm.update_device_state_in_firebase("C8", {"is_armed": False})
+    assert fm._falso.escrituras == [("ESP32/C8/Answer", False)], fm._falso.escrituras
 
 
 def test_la_orden_real_de_la_app_si_pasa():
