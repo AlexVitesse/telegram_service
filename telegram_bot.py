@@ -1884,8 +1884,8 @@ class TelegramBot:
             and (confidence is None or confidence >= 0.7)
         )
         if is_complaint_intent or looks_like_complaint(text):
-            msg = build_escalation_message("complaint", config.support)
-            await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+            msg = build_escalation_message("complaint", config.support, html=True)
+            await update.message.reply_text(msg, parse_mode="HTML", reply_markup=self._get_keyboard())
             self.interaction_logger.record(
                 user_id=chat_id, user_name=user_name, query=text,
                 intent=intent or "complaint", confidence=confidence, backend=backend,
@@ -1930,8 +1930,8 @@ class TelegramBot:
                 and any(kw in stripped for kw in interrog)
             )
             if looks_like_question:
-                msg = build_escalation_message("no_results", config.support)
-                await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+                msg = build_escalation_message("no_results", config.support, html=True)
+                await update.message.reply_text(msg, parse_mode="HTML", reply_markup=self._get_keyboard())
                 self.interaction_logger.record(
                     user_id=chat_id, user_name=user_name, query=text,
                     intent=intent, confidence=confidence, backend=backend,
@@ -2223,8 +2223,8 @@ class TelegramBot:
             f"{self.firebase_manager.get_device_location(d) or d} {d}"
             for d in self.firebase_manager.get_authorized_devices(chat_id)
         ]
-        msg = build_escalation_message("manual", config.support, ", ".join(equipos))
-        await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+        msg = build_escalation_message("manual", config.support, ", ".join(equipos), html=True)
+        await update.message.reply_text(msg, parse_mode="HTML", reply_markup=self._get_keyboard())
         self.interaction_logger.record(
             user_id=chat_id, user_name=user_name, query="/soporte",
             intent="manual", response_type="escalation", response=msg, ok=True,
@@ -2651,8 +2651,8 @@ class TelegramBot:
 
         if data == "sales_support":
             # Reusar el escalation message que ya tenemos
-            msg = build_escalation_message("manual", config.support)
-            await query.message.reply_text(msg)
+            msg = build_escalation_message("manual", config.support, html=True)
+            await query.message.reply_text(msg, parse_mode="HTML")
             self.interaction_logger.record(
                 user_id=chat_id, user_name=user_name, query="[btn:sales_support]",
                 intent="prospect", response_type="escalation", response=msg, ok=True,

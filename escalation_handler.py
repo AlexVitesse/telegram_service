@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import unicodedata
+from html import escape
 from urllib.parse import quote
 from typing import TYPE_CHECKING
 
@@ -87,7 +88,9 @@ def enlace_whatsapp(telefono: str, texto: str = "") -> str:
     return f"https://wa.me/{numero}" + (f"?text={quote(texto)}" if texto else "")
 
 
-def build_escalation_message(reason: str, support: "SupportConfig", contexto: str = "") -> str:
+def build_escalation_message(
+    reason: str, support: "SupportConfig", contexto: str = "", html: bool = False
+) -> str:
     """
     Arma el texto que se le envia al usuario.
 
@@ -116,14 +119,19 @@ def build_escalation_message(reason: str, support: "SupportConfig", contexto: st
             "Vuelve a intentarlo más tarde o usa /help para ver lo que puedo resolver."
         )
 
-    lines = [header, ""]
+    # html=True es para Telegram con parse_mode=HTML: el enlace con el texto
+    # codificado ocupaba cinco lineas de %20; asi se ve como "Abrir chat".
+    # La app pinta texto plano, por eso no es el defecto.
+    esc = escape if html else (lambda t: t)
+    lines = [esc(header), ""]
     if support.email:
-        lines.append(f"📧 Email: {support.email}")
+        lines.append(f"📧 Email: {esc(support.email)}")
     if support.phone:
-        lines.append(f"📞 Teléfono: {support.phone}")
+        lines.append(f"📞 Teléfono: {esc(support.phone)}")
         texto = "Hola, necesito ayuda con Sentinel Guard" + (f" ({contexto})" if contexto else "")
-        lines.append(f"💬 WhatsApp: {enlace_whatsapp(support.phone, texto)}")
+        url = enlace_whatsapp(support.phone, texto)
+        lines.append(f'💬 WhatsApp: <a href="{escape(url)}">Abrir chat</a>' if html else f"💬 WhatsApp: {url}")
     if support.hours:
-        lines.append(f"🕐 Horario de atención: {support.hours}")
+        lines.append(f"🕐 Horario de atención: {esc(support.hours)}")
 
     return "\n".join(lines)
