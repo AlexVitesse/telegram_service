@@ -88,6 +88,11 @@ class FirebaseManager:
         # Cache de últimos valores para detectar cambios reales (evitar comandos duplicados)
         self._last_known_values: Dict[str, Dict[str, Any]] = {}
 
+        # Answer que escribimos nosotros para seguir a Estado: {dev_id: [(valor, hora)]}.
+        # Lista y no un solo valor: dos cambios seguidos (rafaga al reconectar)
+        # pisaban el primer eco y se escapaba como orden real a la central.
+        self._answer_eco: Dict[str, list] = {}
+
     def initialize(self) -> bool:
         """Inicializa la conexion con Firebase RTDB"""
         if not FIREBASE_AVAILABLE:
@@ -325,6 +330,15 @@ class FirebaseManager:
         if event.event_type in ['put', 'patch']:
             # Caso 1: Path específico (ej: /device_id/Answer)
             if command_key == 'Answer':
+                # El eco de nuestra propia sincronizacion no es una orden.
+                ahora = time.time()
+                ecos = [e for e in self._answer_eco.get(device_id, []) if ahora - e[1] < 30]
+                propio = next((e for e in ecos if e[0] is event.data), None)
+                if propio:
+                    ecos.remove(propio)
+                self._answer_eco[device_id] = ecos
+                if propio:
+                    return
                 if event.data is True:
                     logger.info(f"Comando de App: ARMAR para {device_id}")
                     self.mqtt_handler.send_command(cmd=Command.ARM.value, device_id=device_id)
@@ -626,6 +640,15 @@ class FirebaseManager:
                     if dev_data.get('Estado') != state_payload["is_armed"]:
                         device_ref.child('Estado').set(state_payload["is_armed"])
                         logger.info(f"[{dev_id}] Estado actualizado en Firebase: {state_payload['is_armed']}")
+                    # La app ordena escribiendo `Answer`, y la RTDB no avisa si se
+                    # escribe el mismo valor. Si la central cambio por horario,
+                    # Telegram o teclado -o una orden no llego a ejecutarse-,
+                    # `Answer` quedaba viejo y la siguiente orden de la app se
+                    # perdia (C8_2E_18_26_60, 30-sep). Se compara siempre, no solo
+                    # cuando cambia Estado.
+                    if dev_data.get('Answer') != state_payload["is_armed"]:
+                        self._answer_eco.setdefault(dev_id, []).append((state_payload["is_armed"], time.time()))
+                        device_ref.child('Answer').set(state_payload["is_armed"])
 
                 # Escribir Alarming como boolean
                 if "is_alarming" in state_payload:
