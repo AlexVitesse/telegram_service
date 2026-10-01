@@ -7,9 +7,15 @@ aviso del firmware se perdio y nadie se entero hasta que empezo a pitar.
 
     python test_cambio_sin_conexion.py
 """
+import logging
 import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+
+# Antes de importar main: su basicConfig escribe en alarm_service.log, y al
+# correr esto en el VPS durante un despliegue dejaba avisos "[C8]" falsos en
+# el log de produccion. Con el root ya configurado, el suyo no hace nada.
+logging.basicConfig(handlers=[logging.NullHandler()])
 
 import fcm_handler as fcm_mod
 import main as main_mod
