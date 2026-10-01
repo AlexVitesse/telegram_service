@@ -8,8 +8,17 @@ Integracion con el emulador de la RTDB: la forma real de los eventos.
 ordenes y que las de la app si (auditoria del 1-oct, PR #6). Aqui se comprueba
 contra el emulador, no contra produccion.
 
+Desde una carpeta con un firebase.json que solo diga
+`{"emulators": {"database": {"port": 9000}}}`:
+
     firebase emulators:exec --only database --project demo-sentinel \\
-        "python test_answer_emulador.py"
+        "cd <ruta>/VPS && python test_answer_emulador.py"
+
+En Windows el emulador (java) puede quedar vivo en el puerto 9000 al terminar,
+y la siguiente ejecucion falla con "port taken": hay que cerrar ese proceso.
+
+Comprobado el 1-oct: pasa con `update()` y falla ("la sincronizacion mando
+ordenes: disarm") si se vuelve a escribir con `child('Answer').set()`.
 
 Sin FIREBASE_DATABASE_EMULATOR_HOST se salta: nunca toca la base real.
 """
