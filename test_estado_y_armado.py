@@ -34,7 +34,17 @@ class _Ref:
         return _Ref(self.base, f"{self.path}/{hijo}")
 
     def set(self, valor):
+        if self.base.falla and self.path.endswith("/Answer"):
+            raise RuntimeError("escritura rechazada")
         self.base.escrituras.append((self.path, valor))
+
+    def update(self, valores):
+        """Como la RTDB: un patch del nodo, que el listener ve en /{dev_id}."""
+        if self.base.falla and "Answer" in valores:
+            raise RuntimeError("escritura rechazada")
+        for k, v in valores.items():
+            self.base.escrituras.append((f"{self.path}/{k}", v))
+        self.base.patches.append((self.path, dict(valores)))
 
 
 class _FakeFirebase:
@@ -43,6 +53,8 @@ class _FakeFirebase:
     def __init__(self, nodos):
         self.nodos = nodos
         self.escrituras = []
+        self.patches = []
+        self.falla = False
         self.db = MagicMock()
         self.db.reference = lambda p: _Ref(self, p)
 
@@ -62,9 +74,9 @@ def _fm(nodos):
     fm.is_available = falso.is_available
     fm._get_all_devices = falso._get_all_devices
     fm._falso = falso
-    fm._answer_eco = {}
     fm.mqtt_handler = MagicMock()
     fm._last_listener_event_time = 0
+    fm._last_known_values = {}
     fm._update_cache_from_event = lambda e: None
     return fm
 
@@ -133,8 +145,14 @@ def test_las_variantes_truncadas_se_sincronizan_todas():
 # --------------------------------------------------------------------------
 
 class _Evento:
-    def __init__(self, path, data):
-        self.event_type, self.path, self.data = "put", path, data
+    def __init__(self, path, data, tipo="put"):
+        self.event_type, self.path, self.data = tipo, path, data
+
+
+def _eventos_de_lo_escrito(fm):
+    """Lo que la RTDB le entrega al listener por las escrituras del servidor."""
+    for path, valores in fm._falso.patches:
+        yield _Evento("/" + path.split("/", 1)[1], valores, "patch")
 
 
 def test_answer_sigue_al_estado_cuando_la_central_cambia_sola():
@@ -147,21 +165,22 @@ def test_answer_sigue_al_estado_cuando_la_central_cambia_sola():
     assert ("ESP32/C8/Answer", True) in fm._falso.escrituras, fm._falso.escrituras
 
 
-def test_el_eco_de_nuestra_answer_no_manda_orden_a_la_central():
+def test_la_sincronizacion_no_manda_orden_a_la_central():
     fm = _fm({"C8": {"Estado": False, "Answer": False}})
     fm.update_device_state_in_firebase("C8", {"is_armed": True})
-    fm._app_command_listener(_Evento("/C8/Answer", True))
+    for evento in _eventos_de_lo_escrito(fm):
+        fm._app_command_listener(evento)
     fm.mqtt_handler.send_command.assert_not_called()
 
 
-def test_dos_cambios_seguidos_no_escapan_ningun_eco():
-    """Rafaga al reconectar: armado y desarmado antes de que llegue el primer eco."""
+def test_rafaga_de_cambios_no_manda_ordenes():
+    """Armado y desarmado seguidos al reconectar: ninguna orden espuria."""
     fm = _fm({"C8": {"Estado": False, "Answer": False}})
     fm.update_device_state_in_firebase("C8", {"is_armed": True})
     fm._falso.nodos["C8"] = {"Estado": True, "Answer": True}
     fm.update_device_state_in_firebase("C8", {"is_armed": False})
-    fm._app_command_listener(_Evento("/C8/Answer", True))
-    fm._app_command_listener(_Evento("/C8/Answer", False))
+    for evento in _eventos_de_lo_escrito(fm):
+        fm._app_command_listener(evento)
     fm.mqtt_handler.send_command.assert_not_called()
 
 
@@ -172,10 +191,38 @@ def test_answer_desfasado_se_repara_aunque_estado_no_cambie():
     assert fm._falso.escrituras == [("ESP32/C8/Answer", False)], fm._falso.escrituras
 
 
+def test_dos_sincronizaciones_iguales_no_se_comen_la_orden_siguiente():
+    """
+    Auditoria 1-oct, P1 #1: con el cache atrasado se escribia dos veces el
+    mismo Answer, la RTDB daba un solo evento y el eco sobrante descartaba la
+    siguiente orden real de la app.
+    """
+    fm = _fm({"C8": {"Estado": True, "Answer": True}})
+    fm.update_device_state_in_firebase("C8", {"is_armed": False})
+    fm.update_device_state_in_firebase("C8", {"is_armed": False})   # cache atrasado
+    fm._app_command_listener(_Evento("/C8", {"Answer": False}, "patch"))  # un solo evento
+    fm._app_command_listener(_Evento("/C8/Answer", True))           # el usuario arma
+    fm._app_command_listener(_Evento("/C8/Answer", False))          # y desarma
+    cmds = [c.kwargs["cmd"] for c in fm.mqtt_handler.send_command.call_args_list]
+    assert cmds == ["arm", "disarm"], cmds
+
+
+def test_una_escritura_fallida_no_se_come_la_orden_siguiente():
+    """Auditoria 1-oct, P1 #2: el eco se registraba antes del set() fallido."""
+    fm = _fm({"C8": {"Estado": True, "Answer": True}})
+    fm._falso.falla = True
+    fm.update_device_state_in_firebase("C8", {"is_armed": False})   # Answer se rechaza
+    fm._falso.falla = False
+    fm._app_command_listener(_Evento("/C8/Answer", False))          # el usuario desarma
+    cmds = [c.kwargs["cmd"] for c in fm.mqtt_handler.send_command.call_args_list]
+    assert cmds == ["disarm"], cmds
+
+
 def test_la_orden_real_de_la_app_si_pasa():
     fm = _fm({"C8": {"Estado": False, "Answer": False}})
     fm.update_device_state_in_firebase("C8", {"is_armed": True})
-    fm._app_command_listener(_Evento("/C8/Answer", True))   # eco
+    for evento in _eventos_de_lo_escrito(fm):
+        fm._app_command_listener(evento)
     fm._app_command_listener(_Evento("/C8/Answer", False))  # el usuario desarma
     fm.mqtt_handler.send_command.assert_called_once()
     assert fm.mqtt_handler.send_command.call_args.kwargs["device_id"] == "C8"
