@@ -236,7 +236,12 @@ class AlarmBridgeService:
         self._schedule_telegram_broadcast_for_device(
             device_id, message, familia="conexion"
         )
-        self._avisar_cambio_sin_conexion(device_id, location)
+        # Va antes de set_armed_state en el mismo hilo: un fallo aqui no puede
+        # dejar sin sincronizar el estado de esta telemetria.
+        try:
+            self._avisar_cambio_sin_conexion(device_id, location)
+        except Exception as e:
+            logger.error(f"[{device_id}] No se pudo avisar del cambio sin conexion: {e}")
 
     def _avisar_cambio_sin_conexion(self, device_id: str, location: str):
         """
