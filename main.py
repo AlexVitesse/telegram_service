@@ -236,6 +236,30 @@ class AlarmBridgeService:
         self._schedule_telegram_broadcast_for_device(
             device_id, message, familia="conexion"
         )
+        self._avisar_cambio_sin_conexion(device_id, location)
+
+    def _avisar_cambio_sin_conexion(self, device_id: str, location: str):
+        """
+        Si la central vuelve con otro estado del que tenia al irse, avisa.
+
+        Se llama antes de que la telemetria de reconexion actualice el estado,
+        asi que `devices_state` aun guarda el de antes de perder la red.
+        """
+        antes = self.device_manager.devices_state.get(device_id, {}).get("is_armed")
+        telemetria = self.mqtt.last_telemetry.get(device_id)
+        if antes is None or telemetria is None or telemetria.armed == antes:
+            return
+        armado = telemetria.armed
+        cfg = scheduler.configs.get(device_id)
+        hora = cfg.format_on_time() if armado and cfg and cfg.enabled else None
+        logger.warning(f"[{device_id}] Cambio de estado sin conexion: armado={armado} (horario={hora})")
+
+        aviso = self.fcm.create_cambio_sin_conexion_notification(location, armado, device_id, hora)
+        self._schedule_telegram_broadcast_for_device(
+            device_id, f"*{aviso.title}*\n\n{aviso.body}", familia="armado"
+        )
+        if self.fcm.is_available():
+            self.fcm.send_to_device_users(device_id, aviso)
 
     async def _monitor_device_connections(self):
         """Tarea que monitorea la conexión de dispositivos periódicamente"""

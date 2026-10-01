@@ -402,6 +402,39 @@ class FCMHandler:
             priority="high"
         )
 
+    def create_cambio_sin_conexion_notification(
+        self,
+        device_location: str,
+        armado: bool,
+        device_id: str,
+        hora_horario: Optional[str] = None,
+    ) -> PushNotification:
+        """
+        La central volvio con otro estado del que tenia al perder la red.
+
+        El horario arma aunque no haya internet, y su aviso se pierde porque no
+        hay MQTT: el 30-sep C8_2E_18_26_60 se armo a las 07:00 sin red y nadie
+        se entero hasta que empezo a pitar.
+        """
+        if armado:
+            motivo = f", seguramente por su horario de las {hora_horario}" if hora_horario else ""
+            titulo, cuerpo = "🔒 Se armó sin conexión", f"{device_location} se armó mientras estaba sin internet{motivo}."
+        else:
+            titulo, cuerpo = "🔓 Se desarmó sin conexión", f"{device_location} se desarmó mientras estaba sin internet."
+        return PushNotification(
+            title=titulo,
+            body=cuerpo,
+            data={
+                "device_id": device_id,
+                "source": "offline",
+                "location": device_location,
+                "armed": "true" if armado else "false",
+                "action": "view_status",
+            },
+            notification_type=NotificationType.SYSTEM_ARMED if armado else NotificationType.SYSTEM_DISARMED,
+            priority="high"
+        )
+
     def create_disarmed_notification(
         self,
         device_location: str,
