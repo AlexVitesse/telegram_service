@@ -740,7 +740,11 @@ class FirebaseManager:
     def _misma_mac(guardada: str, mac: str) -> bool:
         guardada = normalizar_mac(guardada)
         # [:-1]: listas viejas con un caracter de mas (la app las corrige al cargar).
-        return guardada == mac or guardada[:-1] == mac
+        # Clave de 16 (`AA_BB_CC_DD_EE_F`, de una app antigua): le sobran DOS,
+        # asi que [:-1] no la reconocia y el traspaso o el borrado la dejaban
+        # en otras cuentas. Ver limpiar_claves16.py.
+        clave16 = len(guardada) == 16 and guardada[14] == "_"
+        return guardada == mac or guardada[:-1] == mac or (clave16 and guardada[:14] == mac)
 
     def _quitar_de_listas(self, mac: str, excepto: Optional[str] = None) -> List[str]:
         """Quita la MAC de `Usuarios/*/Dispositivos` (menos la de `excepto`). Devuelve a quien se la quito."""
