@@ -88,6 +88,9 @@ class FirebaseManager:
         # Cache de últimos valores para detectar cambios reales (evitar comandos duplicados)
         self._last_known_values: Dict[str, Dict[str, Any]] = {}
 
+        # Answer que escribimos nosotros para seguir a Estado: {dev_id: (valor, hora)}
+        self._answer_eco: Dict[str, tuple] = {}
+
     def initialize(self) -> bool:
         """Inicializa la conexion con Firebase RTDB"""
         if not FIREBASE_AVAILABLE:
@@ -325,6 +328,10 @@ class FirebaseManager:
         if event.event_type in ['put', 'patch']:
             # Caso 1: Path específico (ej: /device_id/Answer)
             if command_key == 'Answer':
+                # El eco de nuestra propia sincronizacion no es una orden.
+                eco = self._answer_eco.pop(device_id, None)
+                if eco and eco[0] is event.data and time.time() - eco[1] < 30:
+                    return
                 if event.data is True:
                     logger.info(f"Comando de App: ARMAR para {device_id}")
                     self.mqtt_handler.send_command(cmd=Command.ARM.value, device_id=device_id)
@@ -626,6 +633,13 @@ class FirebaseManager:
                     if dev_data.get('Estado') != state_payload["is_armed"]:
                         device_ref.child('Estado').set(state_payload["is_armed"])
                         logger.info(f"[{dev_id}] Estado actualizado en Firebase: {state_payload['is_armed']}")
+                        # La app ordena escribiendo `Answer`, y la RTDB no avisa si
+                        # se escribe el mismo valor. Si la central cambio por horario,
+                        # Telegram o teclado, `Answer` quedaba viejo y la siguiente
+                        # orden de la app no llegaba (C8_2E_18_26_60, 30-sep).
+                        if dev_data.get('Answer') != state_payload["is_armed"]:
+                            self._answer_eco[dev_id] = (state_payload["is_armed"], time.time())
+                            device_ref.child('Answer').set(state_payload["is_armed"])
 
                 # Escribir Alarming como boolean
                 if "is_alarming" in state_payload:

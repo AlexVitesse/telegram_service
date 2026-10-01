@@ -62,6 +62,10 @@ def _fm(nodos):
     fm.is_available = falso.is_available
     fm._get_all_devices = falso._get_all_devices
     fm._falso = falso
+    fm._answer_eco = {}
+    fm.mqtt_handler = MagicMock()
+    fm._last_listener_event_time = 0
+    fm._update_cache_from_event = lambda e: None
     return fm
 
 
@@ -76,7 +80,7 @@ def test_un_equipo_sin_telegram_tambien_sincroniza_su_estado():
     un estado viejo. Que el equipo tenga Telegram no dice nada sobre si esta
     armado.
     """
-    fm = _fm({"08_D1_F9_29_E4": {"Estado": False, "Telegram_ID": ""}})
+    fm = _fm({"08_D1_F9_29_E4": {"Estado": False, "Answer": True, "Telegram_ID": ""}})
     fm.update_device_state_in_firebase("08_D1_F9_29_E4", {"is_armed": True})
     assert fm._falso.escrituras == [("ESP32/08_D1_F9_29_E4/Estado", True)], \
         fm._falso.escrituras
@@ -92,7 +96,7 @@ def test_la_divergencia_se_repara_aunque_la_memoria_ya_estuviera_bien():
     memoria ya decia True no habia "cambio", no se escribia, y la mentira se
     quedaba. Ahora quien decide es la base.
     """
-    fm = _fm({"D1": {"Estado": False, "Telegram_ID": "123"}})
+    fm = _fm({"D1": {"Estado": False, "Answer": True, "Telegram_ID": "123"}})
     gestor = dm_mod.DeviceManager(fm)
     gestor.devices_state["D1"] = {"is_armed": True}   # la memoria ya estaba bien
 
@@ -120,8 +124,43 @@ def test_las_variantes_truncadas_se_sincronizan_todas():
         "08_D1_F9_29_E4": {"Estado": False},
     })
     fm.update_device_state_in_firebase("08_D1_F9_29_E4", {"is_armed": True})
-    escritos = {p for p, _ in fm._falso.escrituras}
+    escritos = {p for p, _ in fm._falso.escrituras if p.endswith("/Estado")}
     assert escritos == {"ESP32/08_D1_F9_29/Estado", "ESP32/08_D1_F9_29_E4/Estado"}, escritos
+
+
+# --------------------------------------------------------------------------
+# (c) `Answer` sigue a `Estado` (C8_2E_18_26_60, 30-sep)
+# --------------------------------------------------------------------------
+
+class _Evento:
+    def __init__(self, path, data):
+        self.event_type, self.path, self.data = "put", path, data
+
+
+def test_answer_sigue_al_estado_cuando_la_central_cambia_sola():
+    """
+    Se armo por horario con `Answer=False`. Al pulsar "desarmar", la app
+    escribio False sobre False, la RTDB no aviso y la orden no llego nunca.
+    """
+    fm = _fm({"C8": {"Estado": False, "Answer": False}})
+    fm.update_device_state_in_firebase("C8", {"is_armed": True})
+    assert ("ESP32/C8/Answer", True) in fm._falso.escrituras, fm._falso.escrituras
+
+
+def test_el_eco_de_nuestra_answer_no_manda_orden_a_la_central():
+    fm = _fm({"C8": {"Estado": False, "Answer": False}})
+    fm.update_device_state_in_firebase("C8", {"is_armed": True})
+    fm._app_command_listener(_Evento("/C8/Answer", True))
+    fm.mqtt_handler.send_command.assert_not_called()
+
+
+def test_la_orden_real_de_la_app_si_pasa():
+    fm = _fm({"C8": {"Estado": False, "Answer": False}})
+    fm.update_device_state_in_firebase("C8", {"is_armed": True})
+    fm._app_command_listener(_Evento("/C8/Answer", True))   # eco
+    fm._app_command_listener(_Evento("/C8/Answer", False))  # el usuario desarma
+    fm.mqtt_handler.send_command.assert_called_once()
+    assert fm.mqtt_handler.send_command.call_args.kwargs["device_id"] == "C8"
 
 
 # --------------------------------------------------------------------------
