@@ -16,6 +16,7 @@ nosetests.xml
 coverage.xml
 *.cover
 *.log
+*.log.*
 .pytest_cache/
 nul
 
