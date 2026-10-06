@@ -4,7 +4,7 @@
 
 El Master debe colocarse cerca del modem o router de internet, en un punto lo mas central posible del lugar a proteger. Requiere alimentacion electrica permanente. Puede montarse en pared o colocarse sobre un estante.
 
-Al encender el Master por primera vez, se observara un parpadeo de LEDs acompañado de un pitido. En aproximadamente 10 segundos el equipo confirma que ha iniciado correctamente. Antes de montar el Master en su ubicacion definitiva, se recomienda completar la configuracion inicial (conexion WiFi y ubicacion via BLE).
+Al encender el Master, los LEDs y el zumbador se activan durante un segundo como prueba. Despues el LED de estado parpadea rapido mientras se conecta a la red WiFi y queda encendido fijo cuando ya esta conectado. Si el equipo estaba armado antes de apagarse, vuelve armado. Antes de montar el Master en su ubicacion definitiva, se recomienda emparejarlo desde la app por Bluetooth (red WiFi de 2.4 GHz y nombre del dispositivo).
 
 ## Instalacion del Sensor PIR (movimiento)
 
