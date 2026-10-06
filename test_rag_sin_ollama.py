@@ -68,6 +68,41 @@ def test_la_consulta_usa_el_techo_corto():
     assert techos == [rag_handler.QUERY_EMBED_TIMEOUT_SEC], techos
 
 
+def test_recargar_espera_a_la_busqueda_en_curso():
+    """
+    `search` corre en un hilo y `/reload_kb` vacia `chunks`. Sin lock, la
+    recarga se colaba a mitad de busqueda y esta reventaba con IndexError.
+    """
+    import threading
+    import time
+
+    kb = KnowledgeBase(KB_DIR, use_embeddings=False)
+    kb.load()
+    dentro = threading.Event()
+    orden = []
+    boosts = kb._apply_boosts
+
+    def boosts_lentos(query, scores):
+        dentro.set()
+        time.sleep(0.2)  # ventana en la que la recarga se colaba
+        boosts(query, scores)
+
+    kb._apply_boosts = boosts_lentos
+
+    def buscar():
+        kb.search("horarios")
+        orden.append("busqueda")
+
+    hilo = threading.Thread(target=buscar)
+    hilo.start()
+    dentro.wait(5)
+    kb.load()
+    orden.append("recarga")
+    hilo.join(5)
+
+    assert orden == ["busqueda", "recarga"], orden
+
+
 if __name__ == "__main__":
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0

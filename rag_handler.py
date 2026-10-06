@@ -9,6 +9,7 @@ import os
 import re
 import glob
 import logging
+import threading
 import unicodedata
 import numpy as np
 from dataclasses import dataclass
@@ -180,7 +181,18 @@ class KnowledgeBase:
         # Precomputado en load(): file -> set de tokens >=MIN_LEN (normalizados+stem).
         self._file_tokens: dict = {}
 
+        # `search` corre en hilos (asyncio.to_thread) y `/reload_kb` vacia y
+        # rehace chunks e indices: sin esto una busqueda puede leer la mitad
+        # vieja y la mitad nueva (IndexError visto en revision).
+        # ponytail: un lock global serializa las busquedas; son milisegundos
+        # con TF-IDF. Si algun dia pesan, publicar el indice como instantanea.
+        self._lock = threading.RLock()
+
     def load(self) -> int:
+        with self._lock:
+            return self._load()
+
+    def _load(self) -> int:
         """
         Carga todos los .md del directorio, los divide en chunks
         y construye el índice (embeddings o TF-IDF).
@@ -244,6 +256,10 @@ class KnowledgeBase:
         return len(self.chunks)
 
     def search(self, query: str, top_k: int = 4, min_score: float = 0.08) -> List[SearchResult]:
+        with self._lock:
+            return self._search(query, top_k, min_score)
+
+    def _search(self, query: str, top_k: int = 4, min_score: float = 0.08) -> List[SearchResult]:
         """
         Busca chunks relevantes para la query.
 
