@@ -4,6 +4,36 @@
 
 Este documento reune las preguntas frecuentes (FAQ) mas comunes sobre el uso y funcionamiento del sistema de alarma Sentinel Guard. Incluye dudas generales sobre dispositivos, conectividad, bateria, alcance LoRa, multiples usuarios y cobertura sin internet. Para dudas especificas sobre instalacion o solucion de problemas, consulta los documentos dedicados.
 
+## Para que sirve la app Sentinel Guard
+
+La app Sentinel Guard sirve para controlar y vigilar tu alarma desde el telefono, en Android e iOS. Desde la app puedes:
+
+- Armar y desarmar el sistema, o activar la alarma (sirena) manualmente.
+- Ver el estado de cada dispositivo en tiempo real: senal WiFi, sensores activos y tiempo encendido.
+- Dar de alta (agregar) un dispositivo nuevo y cambiarle el nombre.
+- Programar horarios de armado y desarmado automatico.
+- Configurar la bengala, el tiempo de salida y los IDs de Telegram que reciben los avisos.
+- Recibir notificaciones push cuando salta la alarma o un sensor deja de responder.
+- Preguntar dudas a Senti, el asistente, con el boton flotante.
+
+La app es una de las tres formas de controlar Sentinel Guard; las otras son el bot de Telegram y el teclado fisico.
+
+## Como doy de alta, agrego o emparejo un dispositivo o equipo nuevo?
+
+Si te preguntas como agrego, añado, registro, vinculo o emparejo mi equipo, o como doy de alta un dispositivo nuevo (el Master o central del equipo): se hace desde la app Sentinel Guard por Bluetooth. Antes de empezar ten a mano tu red WiFi de 2.4 GHz con su contraseña y, si quieres recibir avisos, tu ID de Telegram.
+
+1. En la app, pulsa "+ Agregar".
+2. Pon el equipo en modo emparejamiento: busca el orificio trasero del Master, inserta un clip y mantenlo pulsado de 5 a 8 segundos, hasta oir un pitido. No pases de 10 segundos: eso hace un reset de fabrica.
+3. Acercate al dispositivo. El Bluetooth alcanza unos 10 metros.
+4. En la pantalla "Configurar dispositivo" ingresa el nombre de tu red WiFi (SSID), su contraseña, tu ID de Telegram para los avisos (opcional) y un nombre para el dispositivo. Pulsa "Confirmar".
+5. El Master se reinicia, se conecta a WiFi y queda registrado en tu cuenta.
+
+### Tiempo para emparejar y modulos del kit
+
+Desde el pitido tienes 5 minutos para emparejar el equipo. Si se pasa ese tiempo, el Master sale del modo emparejamiento y se reinicia solo; vuelve a ponerlo en modo emparejamiento con el clip. Los sensores, la sirena, la bengala y el teclado del kit ya vienen emparejados de fabrica con su Master y no hay que darlos de alta uno por uno.
+
+La guia detallada esta en "Configuracion del Master via Bluetooth (BLE)". Si el Bluetooth no encuentra el equipo, revisa "BLE no detecta el dispositivo" en Solucion de Problemas.
+
 ## Cuantos dispositivos puedo tener?
 
 Puedes tener multiples dispositivos en una misma cuenta. Cada dispositivo se vincula individualmente mediante Bluetooth (BLE). Todos se controlan desde la misma app Sentinel Guard y desde Telegram.
