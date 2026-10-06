@@ -206,8 +206,13 @@ def test_reclamar_con_la_central_en_la_mano_traspasa_y_limpia():
 
 def test_borrar_solo_el_dueno_y_limpia_todo():
     fm = _fm(_arbol_jose())
-    assert fm.borrar_equipo("pedro", MAC) == "no_es_dueno"
+    # Pedro la tiene en su lista pero es de Jose: se le quita a el y nada mas.
+    assert fm.borrar_equipo("pedro", MAC) == "quitado"
     assert MAC in fm.db.datos["ESP32"]
+    assert "Dispositivos" not in fm.db.datos["Usuarios"]["pedro"]
+    assert MAC in fm.db.datos["Usuarios"]["jose"]["Dispositivos"]
+    # Ya sin ella en su lista, otro intento si es "no es tuya".
+    assert fm.borrar_equipo("pedro", MAC) == "no_es_dueno"
 
     assert fm.borrar_equipo("jose", MAC) == "ok"
     d = fm.db.datos
@@ -219,10 +224,25 @@ def test_borrar_solo_el_dueno_y_limpia_todo():
 
 def test_endpoint_borrar_no_dueno_es_403_y_mac_rara_400():
     fm = _fm(_arbol_jose())
+    del fm.db.datos["Usuarios"]["pedro"]["Dispositivos"]  # ni dueno ni en su lista
     r, mala = _api(fm, "pedro", [("/equipos/borrar", {"mac": MAC}),
                                  ("/equipos/borrar", {"mac": "../Usuarios"})])
     assert r[0] == 403 and mala[0] == 400, (r, mala)
     assert MAC in fm.db.datos["ESP32"]
+
+
+def test_endpoint_borrar_la_ajena_de_mi_lista_es_ok_y_no_toca_la_central():
+    """
+    La tarjeta "Error al cargar" de la app: central de otra cuenta que sigue en
+    mi lista. Antes daba 403 y no habia forma de quitarla.
+    """
+    fm = _fm(_arbol_jose())
+    (r,) = _api(fm, "pedro", [("/equipos/borrar", {"mac": MAC})])
+    assert r[0] == 200 and r[1] == {"ok": True, "quitado": True}, r
+    d = fm.db.datos
+    assert MAC in d["ESP32"] and d["ESP32"][MAC]["ownerUid"] == "jose"
+    assert "Dispositivos" not in d["Usuarios"]["pedro"]
+    assert MAC in d["Usuarios"]["jose"]["Dispositivos"]
 
 
 def test_horario_de_quien_no_es_el_dueno_no_cuenta():

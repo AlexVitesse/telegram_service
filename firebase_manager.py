@@ -864,13 +864,27 @@ class FirebaseManager:
         nodo y el horario de la central. Antes la app borraba el nodo y nada
         mas: los horarios seguian armandola y otras cuentas la seguian viendo.
 
-        Devuelve "ok" o "no_es_dueno". Un nodo sin `ownerUid` (sin migrar) lo
-        puede borrar quien lo tenga en su lista, como hasta ahora.
+        Devuelve "ok", "quitado" o "no_es_dueno". Un nodo sin `ownerUid` (sin
+        migrar) lo puede borrar quien lo tenga en su lista, como hasta ahora.
+
+        "quitado": la central es de OTRA cuenta pero sigue en la lista de quien
+        pide borrarla (traspasos de antes de la migracion, o una app vieja que
+        la volvio a escribir). Las reglas no le dejan leer el nodo, asi que la
+        app la pinta como "Error al cargar", y antes tampoco podia borrarla: se
+        le quedaba para siempre. Se le quita solo de SU lista; la central y la
+        cuenta del dueno no se tocan.
         """
         nodo = self.db.reference(f"ESP32/{mac}").get()
         dueno = str(nodo.get("ownerUid") or "") if isinstance(nodo, dict) else ""
         if dueno and dueno != uid:
-            return "no_es_dueno"
+            ref = self.db.reference(f"Usuarios/{uid}/Dispositivos")
+            mias = lista_macs(ref.get())
+            quedan = [m for m in mias if not self._misma_mac(m, mac)]
+            if len(quedan) == len(mias):
+                return "no_es_dueno"
+            ref.set(quedan) if quedan else ref.delete()
+            logger.info(f"{mac} quitado de la lista de {uid} (la central es de otra cuenta)")
+            return "quitado"
         if not dueno:
             mias = lista_macs(self.db.reference(f"Usuarios/{uid}/Dispositivos").get())
             if not any(self._misma_mac(m, mac) for m in mias):

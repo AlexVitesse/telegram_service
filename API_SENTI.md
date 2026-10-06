@@ -140,11 +140,18 @@ Borra la central **para todos**:
 Solo el dueño (`ownerUid`). Un nodo sin dueño lo puede borrar quien lo tenga en
 su lista.
 
+Si quien pide **no es el dueño pero la tiene en su lista**, no se borra la
+central: solo se quita de **su** lista. Ocurre con traspasos anteriores a la
+migración o cuando una app vieja vuelve a escribir la MAC. Como las reglas no
+le dejan leer el nodo, la app pinta la tarjeta como "Error al cargar", y antes
+recibía un 403 y no había manera de quitarla.
+
 | Respuesta | Cuándo |
 |---|---|
-| `200 {"ok": true}` | Borrada |
+| `200 {"ok": true, "quitado": false}` | Borrada para todos |
+| `200 {"ok": true, "quitado": true}` | Era de otra cuenta: solo se quitó de la lista de quien pide |
 | `400` / `401` / `503` | Como en `reclamar` |
-| `403` | No es el dueño |
+| `403` | No es el dueño y tampoco la tiene en su lista |
 
 **Las dos rutas exigen siempre token de Firebase**, sea cual sea `API_AUTH`: una
 clave compartida o el modo abierto no dicen quién pregunta, y aquí se decide de
