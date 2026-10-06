@@ -9,8 +9,8 @@ Este documento reune las preguntas frecuentes (FAQ) mas comunes sobre el uso y f
 La app Sentinel Guard sirve para controlar y vigilar tu alarma desde el telefono, en Android e iOS. Desde la app puedes:
 
 - Armar y desarmar el sistema, o activar la alarma (sirena) manualmente.
-- Ver el estado de cada dispositivo en tiempo real: senal WiFi, sensores activos y tiempo encendido.
-- Dar de alta (agregar) un dispositivo nuevo y cambiarle el nombre.
+- Ver el estado de cada dispositivo en tiempo real: senal WiFi, sensores LoRa y tiempo activo.
+- Dar de alta (agregar) un dispositivo nuevo, cambiarle el nombre o borrarlo.
 - Programar horarios de armado y desarmado automatico.
 - Configurar la bengala, el tiempo de salida y los IDs de Telegram que reciben los avisos.
 - Recibir notificaciones push cuando salta la alarma o un sensor deja de responder.
@@ -18,15 +18,15 @@ La app Sentinel Guard sirve para controlar y vigilar tu alarma desde el telefono
 
 La app es una de las tres formas de controlar Sentinel Guard; las otras son el bot de Telegram y el teclado fisico.
 
-## Como doy de alta, agrego o emparejo un dispositivo o equipo nuevo?
+## Como doy de alta, agrego, vinculo, registro o emparejo un dispositivo o equipo nuevo?
 
-Si te preguntas como agrego, añado, registro, vinculo o emparejo mi equipo, o como doy de alta un dispositivo nuevo (el Master o central del equipo): se hace desde la app Sentinel Guard por Bluetooth. Antes de empezar ten a mano tu red WiFi de 2.4 GHz con su contraseña y, si quieres recibir avisos, tu ID de Telegram.
+Si te preguntas como vinculo un dispositivo, como registro un dispositivo, como agrego, añado o emparejo mi equipo, o como doy de alta un dispositivo nuevo (el Master o central del equipo): se hace desde la app Sentinel Guard por Bluetooth. Antes de empezar ten a mano tu red WiFi de 2.4 GHz con su contraseña y, si quieres recibir avisos, tu ID de Telegram.
 
-1. En la app, pulsa "+ Agregar".
+1. En la app, pulsa "Agregar" en la barra inferior (o el icono + de la pantalla Inicio).
 2. Pon el equipo en modo emparejamiento: busca el orificio trasero del Master, inserta un clip y mantenlo pulsado de 5 a 8 segundos, hasta oir un pitido. No pases de 10 segundos: eso hace un reset de fabrica.
 3. Acercate al dispositivo. El Bluetooth alcanza unos 10 metros.
-4. En la pantalla "Configurar dispositivo" ingresa el nombre de tu red WiFi (SSID), su contraseña, tu ID de Telegram para los avisos (opcional) y un nombre para el dispositivo. Pulsa "Confirmar".
-5. El Master se reinicia, se conecta a WiFi y queda registrado en tu cuenta.
+4. Cuando aparezca "Sentinel Master", tocalo. En la pantalla "Configurar dispositivo" (Paso 2 de 3) ingresa el nombre de tu red WiFi (SSID, de la lista o con "Ingresar SSID"), su contraseña, tu ID de Telegram en "Avisos por Telegram (opcional)" y el "Nombre del dispositivo". Pulsa "Confirmar".
+5. El Master se conecta a WiFi, queda registrado en tu cuenta y se reinicia. La app termina con "CONFIGURACION COMPLETA".
 
 ### Tiempo para emparejar y modulos del kit
 
@@ -40,15 +40,15 @@ Puedes tener multiples dispositivos en una misma cuenta. Cada dispositivo se vin
 
 ## Funciona sin internet?
 
-Parcialmente. El ESP32 puede ejecutar los horarios programados de forma autonoma ya que utiliza NTP para mantener la hora. Sin embargo, sin internet no recibiras notificaciones ni podras controlar el sistema de forma remota desde la app o Telegram.
+Parcialmente. Sin internet el Master sigue vigilando: los sensores, la sirena y el teclado funcionan por LoRa directamente con el Master, y ejecuta los horarios programados de forma autonoma usando la hora que sincronizo por NTP. Si el Master se reinicia sin internet, no ejecuta horarios hasta recuperar la hora. Sin internet no recibiras notificaciones ni podras controlar el sistema de forma remota desde la app o Telegram.
 
 ## Puedo usar el bot en un grupo de Telegram?
 
-Si, pero con limitaciones. El grupo solo recibe notificaciones de alerta (alarma activada, sensores, etc.). Los comandos de control solo funcionan en chat privado con el bot. El GroupID se configura durante el setup inicial del dispositivo.
+Si, pero con limitaciones. El grupo solo recibe notificaciones de alerta (alarma activada, sensores, etc.). Los comandos de control solo funcionan en chat privado con el bot. El ID del grupo se pone en la app: en "CHATID GRUPAL" al emparejar, o en la ficha del equipo con "Agregar usuario o grupo". Para saberlo, escribe /id dentro del grupo.
 
 ## Que pasa si se va la luz?
 
-El Master (ESP32) y la sirena necesitan alimentacion electrica continua para funcionar. Los sensores LoRa funcionan con bateria propia y seguiran operando. Si se va la luz, el Master se desconecta, pero al volver la electricidad se reconecta automaticamente y retoma su operacion normal.
+El Master (ESP32) y la sirena necesitan alimentacion electrica continua para funcionar. Los sensores LoRa funcionan con bateria propia y seguiran operando. Si se va la luz, el Master se desconecta, pero al volver la electricidad se reconecta automaticamente y retoma su operacion normal: recuerda si estaba armado, su red WiFi, el modo de bengala y el horario.
 
 ## Cuanto alcance tiene el sistema?
 
@@ -61,11 +61,11 @@ Los modulos LoRa tienen los siguientes alcances aproximados:
 
 ## Puedo tener varios usuarios?
 
-Si. El administrador puede agregar usuarios con el comando /adduser. Cada usuario puede controlar los dispositivos que le sean asignados. Se pueden configurar hasta 2 Telegram IDs por dispositivo de forma directa, y mas usuarios a traves de grupos de Telegram.
+Si. El administrador puede agregar usuarios con el comando /adduser, o el dueño puede poner su Chat ID en la ficha del equipo en la app. Cada equipo admite hasta 3 destinatarios de Telegram: 2 usuarios y 1 grupo; con un grupo pueden enterarse mas personas. La cuenta de la app es personal: no hay opcion para compartir un equipo con otra cuenta de la app.
 
 ## Como se cuanto dura la bateria de los sensores?
 
-Los sensores LoRa son de bajo consumo energetico. La duracion de la bateria depende del modelo del sensor y la frecuencia de uso. Puedes verificar el estado de los sensores activos con el comando /sensors en Telegram.
+Los sensores LoRa son de bajo consumo energetico. La duracion de la bateria depende del modelo del sensor y la frecuencia de uso. El sistema no mide el nivel de bateria, pero con el comando /sensors en Telegram puedes ver cada sensor, su senal y hace cuanto se escucho por ultima vez; un sensor que lleva mucho sin oirse puede tener la bateria agotada.
 
 ## Es seguro el sistema?
 
@@ -73,21 +73,29 @@ Si. La comunicacion MQTT utiliza cifrado TLS a traves del puerto 8883. Los datos
 
 ## Puedo cambiar el nombre de un dispositivo?
 
-Si. Desde la app, entra a la pantalla de Dispositivos, selecciona el dispositivo que quieres renombrar y edita el nombre directamente.
+Si. Desde la app, en la pantalla Inicio toca el equipo ("Ver detalles y ajustes"), luego "Editar", cambia "Nombre del equipo" y toca "Guardar cambios".
 
 ## Que es el tiempo de salida?
 
-Es el periodo que tienes para salir del area protegida despues de armar el sistema. Por defecto es de 1 minuto y se puede configurar desde la app entre 0 y 180 segundos. Durante este tiempo los sensores no disparan la alarma, permitiendote salir sin activarla.
+Es el periodo que tienes para salir del area protegida despues de armar el sistema. Por defecto es de 60 segundos y se cambia en la ficha del equipo ("Editar" > "Tiempo de salida"), entre 0 y 180 segundos. Durante este tiempo el Master pita cada 5 segundos y los sensores no disparan la alarma, permitiendote salir sin activarla. No hay tiempo de entrada: al volver, desarma antes de entrar.
 
-## Como desvinculo un dispositivo?
+## Como desvinculo, quito o borro un dispositivo?
 
-Puedes desvincular un dispositivo de dos formas:
+Si te preguntas como desvinculo un dispositivo, como borro un dispositivo, como quito un equipo o como elimino un equipo de mi cuenta, hay dos cosas distintas:
 
-- Desde Telegram con el comando /desvincular.
-- Desde la app, eliminando el dispositivo de tu cuenta.
-
-Para volver a vincular el dispositivo necesitaras una nueva invitacion.
+- **Borrar el equipo de la app**: abre la ficha del equipo y toca "Borrar dispositivo", luego "Eliminar". Se borra el equipo y toda su configuracion: nombre, destinatarios de Telegram, horarios y tiempos. El equipo sigue funcionando, pero para volver a controlarlo desde la app hay que emparejarlo otra vez por Bluetooth (pestaña "Agregar", clip de 5 a 8 segundos). Solo el dueño de la central puede borrarla con toda su configuracion.
+- **Quitar solo tu Telegram**: el comando /desvincular quita tu chat de los destinatarios de un equipo. Dejas de recibir sus avisos por Telegram y de controlarlo desde ahi, pero el equipo sigue en la app. Para volver, pide al administrador un nuevo codigo con /adduser, o que el dueño vuelva a poner tu Chat ID en la ficha del equipo.
 
 ## Puedo programar horarios diferentes por dispositivo?
 
-Si. Desde la app puedes crear horarios especificos para cada dispositivo individual, o configurar horarios globales que apliquen a todo el sistema completo.
+Si. Cada equipo tiene su propio horario. En la pestaña Horarios eliges el "Equipo"; con "Todos mis equipos" se guarda el mismo horario en cada uno. En Telegram, /horarios pregunta primero sobre que equipo actuar.
+
+## Como consigo mi Chat ID o ID de Telegram?
+
+Envia /id al bot de Sentinel Guard (@esp32_space_bot) por chat privado: contesta "Tu Chat ID es: ..." con tu numero. En la app, el boton "Obtenerlo ahora" de la pantalla Agregar abre el bot directamente. Para el ID de un grupo, agrega el bot al grupo y escribe /id dentro del grupo: el numero empieza por -.
+
+Tu Chat ID se pone en la app en Perfil > "Chat ID de Telegram", en "Avisos por Telegram (opcional)" al emparejar, o en la ficha del equipo con "Agregar usuario o grupo".
+
+## Que pasa si mantengo el clip mas de 10 segundos (reset de fabrica)?
+
+Con el clip pulsado de 5 a 8 segundos el Master entra en modo emparejamiento (suena el pitido). Si sigues pulsando hasta 10 segundos o mas, hace un reset de fabrica: borra la red WiFi, el nombre, el modo de bengala, el tiempo de salida, los horarios y el estado de armado guardados en el Master, y se reinicia. Despues hay que emparejarlo otra vez desde la app.

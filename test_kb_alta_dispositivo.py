@@ -53,6 +53,34 @@ def test_emparejar():
     _top_es_emparejar("como emparejo mi equipo")
 
 
+def test_vincular():
+    # "vinculo" es una palabra distinta de "desvinculo" para TF-IDF: antes
+    # ganaba la FAQ de desvincular y la lista de ejemplos de 06.
+    _top_es_emparejar("como vinculo un dispositivo")
+
+
+def test_registrar():
+    _top_es_emparejar("como registro un dispositivo")
+
+
+def _top_es_borrar(pregunta):
+    resultados = _buscar(pregunta)
+    assert resultados, f"{pregunta!r}: sin resultados"
+    top = resultados[0].chunk
+    donde = f"{pregunta!r} -> {top.source_file} / {top.heading}"
+    assert "desvincul" in top.heading.lower(), donde
+    assert "Borrar dispositivo" in top.text, donde
+
+
+def test_desvincular():
+    _top_es_borrar("como desvinculo un dispositivo")
+
+
+def test_borrar_o_quitar():
+    _top_es_borrar("como borro un dispositivo")
+    _top_es_borrar("como quito un equipo")
+
+
 def test_para_que_sirve_la_app():
     assert _buscar("para que sirve esta app"), "sin resultados"
 
