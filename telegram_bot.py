@@ -296,6 +296,7 @@ class TelegramBot:
                 llm_backend=config.ai.llm_backend,
                 ollama_base_url=config.ai.ollama_base_url,
                 ollama_model=config.ai.ollama_model,
+                ollama_api_key=config.ai.ollama_api_key,
                 groq_api_key=config.ai.groq_api_key,
                 groq_model=config.ai.groq_model,
                 intent_model=config.ai.intent_model,
@@ -1869,8 +1870,17 @@ class TelegramBot:
                 "is_online": state.get("is_online", False),
             })
 
-        # Llamar al LLM (async)
-        result = await self.ai_handler.parse_intent(text, devices_context)
+        # Llamar al LLM (async). Con techo, como el endpoint de la app: sin el,
+        # un LLM colgado deja al usuario sin respuesta. Si expira se sigue por
+        # la rama "unknown" (busqueda en la KB), igual que si no se entendiera.
+        try:
+            result = await asyncio.wait_for(
+                self.ai_handler.parse_intent(text, devices_context),
+                timeout=config.ai.llm_timeout_sec * 2,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("🤖 parse_intent expiro para %s: %r", chat_id, text[:80])
+            result = None
 
         intent = result["intent"] if result else None
         confidence = result.get("confidence") if result else None
@@ -1909,7 +1919,10 @@ class TelegramBot:
         if result is None or result["intent"] == "unknown":
             # Si no se reconoció el intent, intentar RAG como último recurso
             if self.knowledge_base:
-                results = self.knowledge_base.search(text, top_k=config.ai.rag_max_chunks, min_score=config.ai.rag_min_score)
+                results = await asyncio.to_thread(
+                    self.knowledge_base.search, text,
+                    top_k=config.ai.rag_max_chunks, min_score=config.ai.rag_min_score,
+                )
                 if results:
                     await self._handle_rag_chat(
                         update, text,
@@ -2467,7 +2480,8 @@ class TelegramBot:
         rag_sources: List[str] = []
         rag_scores: List[float] = []
         if self.knowledge_base:
-            results = self.knowledge_base.search(
+            results = await asyncio.to_thread(
+                self.knowledge_base.search,
                 text,
                 top_k=config.ai.rag_max_chunks,
                 min_score=config.ai.rag_min_score,

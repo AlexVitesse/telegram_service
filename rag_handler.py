@@ -9,6 +9,7 @@ import os
 import re
 import glob
 import logging
+import threading
 import unicodedata
 import numpy as np
 from dataclasses import dataclass
@@ -36,6 +37,10 @@ TROUBLESHOOTING_BOOST = 0.12  # Suma al score de chunks de troubleshooting
 # Tokens cortos (len < 5) se ignoran para evitar matches ruidosos ("los", "que", "de", "app").
 FILENAME_TOKEN_BOOST = 0.10
 FILENAME_TOKEN_MIN_LEN = 5
+
+#: Techo del embedding de la consulta. El de carga sigue en 30 s: ahi no
+#: espera nadie.
+QUERY_EMBED_TIMEOUT_SEC = 3.0
 
 
 def _is_troubleshooting_query(query: str) -> bool:
@@ -176,7 +181,18 @@ class KnowledgeBase:
         # Precomputado en load(): file -> set de tokens >=MIN_LEN (normalizados+stem).
         self._file_tokens: dict = {}
 
+        # `search` corre en hilos (asyncio.to_thread) y `/reload_kb` vacia y
+        # rehace chunks e indices: sin esto una busqueda puede leer la mitad
+        # vieja y la mitad nueva (IndexError visto en revision).
+        # ponytail: un lock global serializa las busquedas; son milisegundos
+        # con TF-IDF. Si algun dia pesan, publicar el indice como instantanea.
+        self._lock = threading.RLock()
+
     def load(self) -> int:
+        with self._lock:
+            return self._load()
+
+    def _load(self) -> int:
         """
         Carga todos los .md del directorio, los divide en chunks
         y construye el índice (embeddings o TF-IDF).
@@ -215,7 +231,12 @@ class KnowledgeBase:
             logger.warning("📚 No se generaron chunks de los documentos")
             return 0
 
-        # Intentar embeddings, fallback a TF-IDF
+        # TF-IDF se construye SIEMPRE, aunque haya embeddings: es la red cuando
+        # Ollama se cae a media vida del proceso. Sin ella, cada pregunta moria
+        # en el embedding de la query y el usuario leia "tardó demasiado"
+        # aunque el LLM de chat estuviese sano. Con 14 documentos cuesta nada.
+        self._build_tfidf_index()
+
         if self._use_embeddings:
             try:
                 self._build_embeddings_index()
@@ -228,7 +249,6 @@ class KnowledgeBase:
                 logger.warning("📚 Embeddings no disponibles (%s), usando TF-IDF como fallback", e)
                 self._use_embeddings = False
 
-        self._build_tfidf_index()
         logger.info(
             "📚 Knowledge Base cargada: %d chunks de %d archivos (TF-IDF fallback)",
             len(self.chunks), len(md_files),
@@ -236,6 +256,10 @@ class KnowledgeBase:
         return len(self.chunks)
 
     def search(self, query: str, top_k: int = 4, min_score: float = 0.08) -> List[SearchResult]:
+        with self._lock:
+            return self._search(query, top_k, min_score)
+
+    def _search(self, query: str, top_k: int = 4, min_score: float = 0.08) -> List[SearchResult]:
         """
         Busca chunks relevantes para la query.
 
@@ -251,8 +275,13 @@ class KnowledgeBase:
             return []
 
         if self._use_embeddings and self._embeddings is not None:
-            return self._search_embeddings(query, top_k, min_score)
-        elif self._tfidf_matrix is not None:
+            try:
+                return self._search_embeddings(query, top_k, min_score)
+            except Exception as e:
+                # No se apagan los embeddings: la siguiente consulta los vuelve
+                # a intentar, y cuando Ollama vuelva se recupera solo.
+                logger.warning("📚 Embedding de la consulta fallo (%s), buscando con TF-IDF", e)
+        if self._tfidf_matrix is not None:
             return self._search_tfidf(query, top_k, min_score)
         return []
 
@@ -265,9 +294,9 @@ class KnowledgeBase:
     # Embeddings (Ollama)
     # ------------------------------------------------------------------
 
-    def _get_embedding(self, text: str) -> np.ndarray:
+    def _get_embedding(self, text: str, timeout: float = 30.0) -> np.ndarray:
         """Obtiene embedding de un texto via Ollama API (síncrono)."""
-        with httpx.Client(timeout=30.0) as client:
+        with httpx.Client(timeout=timeout) as client:
             response = client.post(
                 f"{self._ollama_url}/api/embeddings",
                 json={"model": self._embed_model, "prompt": text},
@@ -381,7 +410,9 @@ class KnowledgeBase:
         ]
 
     def _search_embeddings(self, query: str, top_k: int, min_score: float) -> List[SearchResult]:
-        query_emb = self._get_embedding(query)
+        # Techo corto: aqui espera un usuario, y si Ollama no contesta en esto
+        # TF-IDF da una respuesta casi igual de buena al instante.
+        query_emb = self._get_embedding(query, timeout=QUERY_EMBED_TIMEOUT_SEC)
         query_emb = query_emb / (np.linalg.norm(query_emb) or 1)
         scores = (self._embeddings @ query_emb).copy()
         self._apply_boosts(query, scores)

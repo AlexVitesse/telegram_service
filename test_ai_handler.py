@@ -289,6 +289,52 @@ def test_ocupado_tampoco_cae_a_la_reserva():
     assert llamadas == ["groq"], llamadas
 
 
+# --------------------------------------------------------------------------
+# Ollama Cloud
+# --------------------------------------------------------------------------
+
+def _payload_enviado(modelo):
+    h = _handler(ollama_model=modelo)
+    enviado = {}
+
+    async def post(url, json):
+        enviado.update(json)
+        return _RespuestaOllama()
+
+    h._http_client = SimpleNamespace(post=post)
+    asyncio.run(h._call_ollama("s", "u"))
+    return enviado
+
+
+def test_gpt_oss_va_con_razonamiento_bajo():
+    """En 'medium' el razonamiento se comia num_predict y content llegaba vacio."""
+    assert _payload_enviado("gpt-oss:20b").get("think") == "low"
+
+
+def test_un_modelo_sin_razonamiento_no_lleva_think():
+    """A un modelo que no razona, Ollama le rechaza el campo."""
+    assert "think" not in _payload_enviado("gemma4:31b")
+
+
+def test_la_api_key_de_ollama_cloud_va_en_la_cabecera():
+    h = _handler(ollama_api_key="clave")
+    asyncio.run(h._ensure_http_client())
+    try:
+        assert h._http_client.headers.get("authorization") == "Bearer clave"
+    finally:
+        asyncio.run(h.close())
+
+
+def test_sin_api_key_no_se_manda_cabecera():
+    """El Ollama local no la necesita, y un 'Bearer ' vacio no aporta nada."""
+    h = _handler()
+    asyncio.run(h._ensure_http_client())
+    try:
+        assert "authorization" not in h._http_client.headers
+    finally:
+        asyncio.run(h.close())
+
+
 if __name__ == "__main__":
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0

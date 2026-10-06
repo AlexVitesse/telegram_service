@@ -141,7 +141,10 @@ async def responder(
         )
 
     try:
-        resultados = knowledge_base.search(
+        # En un hilo: con embeddings la busqueda hace HTTP sincrono y, en el
+        # bucle de eventos, congelaria al bot entero mientras espera.
+        resultados = await asyncio.to_thread(
+            knowledge_base.search,
             pregunta,
             top_k=config.ai.rag_max_chunks,
             min_score=config.ai.rag_min_score,

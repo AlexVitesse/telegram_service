@@ -71,6 +71,8 @@ class AIConfig:
     # Ollama (principal)
     ollama_base_url: str = _get_env("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = _get_env("OLLAMA_MODEL", "gpt-oss:20b")
+    # Solo para Ollama Cloud (OLLAMA_BASE_URL=https://ollama.com). Vacio en local.
+    ollama_api_key: str = _get_env("OLLAMA_API_KEY", "")
     # Modelo para intent parsing (JSON estricto) y para el RAG.
     #
     # Vacio a proposito: `AIHandler` usa el modelo del backend configurado.
