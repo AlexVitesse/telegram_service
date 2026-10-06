@@ -227,6 +227,7 @@ class AIHandler:
         llm_backend: str = "ollama",
         ollama_base_url: str = "http://localhost:11434",
         ollama_model: str = "gpt-oss:20b",
+        ollama_api_key: str = "",
         groq_api_key: str = "",
         groq_model: str = "llama-3.1-8b-instant",
         intent_model: str = "",
@@ -238,6 +239,7 @@ class AIHandler:
         self._backend = llm_backend
         self._ollama_base_url = ollama_base_url.rstrip("/")
         self._ollama_model = ollama_model
+        self._ollama_api_key = ollama_api_key
         self._groq_api_key = groq_api_key
         self._groq_model = groq_model
         # Modelos específicos por tarea (si no se especifican, usan el default del backend)
@@ -293,7 +295,12 @@ class AIHandler:
     async def _ensure_http_client(self):
         """Crea el cliente HTTP async si no existe."""
         if self._http_client is None:
-            self._http_client = httpx.AsyncClient(timeout=self._timeout_sec)
+            # Ollama Cloud pide Bearer; el Ollama local lo ignora.
+            headers = (
+                {"Authorization": f"Bearer {self._ollama_api_key}"}
+                if self._ollama_api_key else None
+            )
+            self._http_client = httpx.AsyncClient(timeout=self._timeout_sec, headers=headers)
 
     @asynccontextmanager
     async def _turno(self):
@@ -335,21 +342,27 @@ class AIHandler:
         """Llama a Ollama REST API."""
         await self._ensure_http_client()
         effective_model = model or self._ollama_model
+        payload = {
+            "model": effective_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            },
+        }
+        # gpt-oss no deja apagar el razonamiento, pero si bajarlo. En "medium"
+        # se comia `num_predict` y `content` llegaba vacio. Solo a gpt-oss:
+        # a un modelo sin razonamiento, Ollama le rechaza el campo `think`.
+        if "gpt-oss" in effective_model:
+            payload["think"] = "low"
         async with self._turno():
             response = await self._http_client.post(
                 f"{self._ollama_base_url}/api/chat",
-                json={
-                    "model": effective_model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "stream": False,
-                    "options": {
-                        "temperature": temperature,
-                        "num_predict": max_tokens,
-                    },
-                },
+                json=payload,
             )
         response.raise_for_status()
         body = response.json()
