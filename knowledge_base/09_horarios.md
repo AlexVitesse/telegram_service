@@ -15,18 +15,20 @@ sobre cual quieres actuar, o si prefieres aplicar el cambio a todos.
 
 ## Configurar horarios desde Telegram
 
-Para configurar, programar, activar o desactivar los horarios automaticos desde el bot de Telegram, usa los siguientes comandos:
+Para configurar, programar, activar o desactivar los horarios automaticos desde el bot de Telegram, usa los siguientes comandos (reservados a administradores):
 
 - **/horarios** - Ver el estado actual de la programacion (habilitada/deshabilitada, horas y dias configurados).
 - **/horarios on** - Habilitar la programacion automatica.
 - **/horarios off** - Deshabilitar la programacion (el sistema no se armara ni desarmara automaticamente).
 - **/horarios activar HH:MM** - Configurar la hora de armado automatico en formato 24 horas (ejemplo: /horarios activar 22:00).
 - **/horarios desactivar HH:MM** - Configurar la hora de desarmado automatico en formato 24 horas (ejemplo: /horarios desactivar 07:00).
-- **/horarios dias** - Configurar los dias activos. Opciones: todos (lunes a domingo), semana (lunes a viernes), finde (sabado y domingo) o personalizado (seleccionar dias individuales).
+- **/horarios dias** - Configurar los dias activos. Opciones: todos (lunes a domingo), semana (lunes a viernes), finde (sabado y domingo) o una lista de dias, por ejemplo /horarios dias L,M,X,J,V.
+
+La hora de armado y la de desarmado no pueden ser la misma.
 
 ## Configurar horarios desde la App
 
-La pantalla "Alarma" en la app movil incluye presets rapidos y configuracion manual.
+La pestaña "Horarios" de la app (titulo "Programar Alarma") incluye presets rapidos y configuracion manual. Tocar un preset solo rellena el formulario; el horario se guarda al tocar "Programar Alarma" y confirmar con "Programar".
 
 Presets rapidos disponibles:
 
@@ -35,11 +37,13 @@ Presets rapidos disponibles:
 - **Fin de Semana**: Arma a las 10:00, desarma a las 23:00, activo sabado y domingo.
 - **Viaje/Vacaciones**: Arma a las 00:00, desarma a las 23:59, activo 24/7 los 7 dias.
 
-La configuracion manual permite seleccionar libremente la hora de activacion, la hora de desactivacion y los dias de la semana (lunes a domingo, seleccionables individualmente).
+La configuracion manual permite seleccionar libremente la hora de activacion, la hora de desactivacion ("Hora exacta" para cualquier hora) y los dias de la semana (seleccionables individualmente). Si tienes varios equipos, el campo "Equipo" permite elegir uno o "Todos mis equipos".
+
+Los horarios guardados aparecen en "Alarmas Programadas", con una papelera para eliminarlos. No se pueden editar: para cambiar uno, programalo de nuevo.
 
 ## Lenguaje natural para horarios
 
-El bot de Telegram entiende instrucciones en lenguaje natural para configurar horarios. Ejemplo: "arma lunes a viernes de 10pm a 6am".
+El bot de Telegram entiende instrucciones en lenguaje natural para configurar horarios. Ejemplo: "arma lunes a viernes de 10pm a 6am". Despues comprueba con /horarios que quedo como querias.
 
 ## Sincronizacion de horarios
 
@@ -51,11 +55,13 @@ Cualquier cambio realizado desde la app o desde Telegram se propaga a todos los 
 
 ## Ejecucion autonoma en el ESP32
 
-El ESP32 puede ejecutar los horarios de forma autonoma, incluso si pierde conexion a internet. Utiliza NTP (protocolo de tiempo de red) para mantener la hora sincronizada. Esto garantiza que la alarma se arme y desarme en horario incluso durante cortes de internet.
+El ESP32 guarda su horario y lo ejecuta de forma autonoma, incluso si pierde conexion a internet. Utiliza NTP (protocolo de tiempo de red) para conocer la hora. Esto garantiza que la alarma se arme y desarme en horario durante cortes de internet.
+
+Limite: el Master no tiene reloj propio. Si se reinicia o se va la luz y vuelve sin internet, no ejecuta los horarios hasta que recupera la conexion y sincroniza la hora. Un armado programado tambien pasa por el tiempo de salida.
 
 ## Notificacion previa
 
-El sistema envia un aviso 5 minutos antes de ejecutar un armado o desarmado programado. Esto permite al usuario cancelar o modificar la accion si es necesario.
+El bot de Telegram envia un aviso "RECORDATORIO" por chat privado 5 minutos antes de ejecutar un armado o desarmado programado. Esto permite al usuario cancelar o modificar la accion si es necesario. Se puede silenciar con el interruptor "Armado y desarmado" de Perfil > Notificaciones.
 
 ## Ejecucion unica por dia
 
