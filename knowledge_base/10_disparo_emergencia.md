@@ -6,39 +6,34 @@ Es una funcion que permite detonar la alarma manualmente en cualquier momento, s
 
 ## Disparo desde la App
 
-En la pantalla principal de la app movil hay un boton "Activar Alarma". Al presionarlo, aparece una ventana de confirmacion para evitar activaciones accidentales por toques involuntarios. Una vez confirmado, el comando se envia al Master.
+En la pantalla Inicio de la app movil hay un boton rojo "Emergencia" (SOS), "Solicitar ayuda inmediata". Al presionarlo aparece la confirmacion "¿Activar la alarma?" con los botones "No" y "Si", para evitar activaciones accidentales. Una vez confirmado, la sirena suena en todos tus equipos ("Alarma activada en todos los dispositivos").
 
 ## Disparo desde Telegram
 
-Usa el comando /disparo en el chat con el bot. Por seguridad, el bot solicita confirmacion antes de ejecutar la accion, mostrando dos botones: "Confirmar" y "Cancelar". Existe un cooldown de 8 segundos entre disparos para evitar activaciones repetidas.
+Usa el comando /disparo en el chat con el bot. Por seguridad, el bot solicita confirmacion antes de ejecutar la accion ("¿Activar alarma manualmente?"), mostrando dos botones: "Confirmar" y "Cancelar". Al confirmar, se activa en todos tus equipos y el bot informa cuales respondieron. Existe un cooldown de 8 segundos entre disparos para evitar activaciones repetidas.
 
 ## Respuesta del sistema al disparo
 
 Al confirmar el disparo de emergencia:
 
 - La sirena se activa inmediatamente a maxima potencia (110dB).
-- La bengala actua segun su configuracion actual. Si esta en modo Auto, el cartucho de humo se dispara de forma instantanea e irreversible.
+- Si la bengala esta habilitada (modo Auto o Pregunta), el Master la detona de inmediato, sin preguntar. Solo con la bengala "Apagada" (deshabilitada) no se dispara.
 - Se envian notificaciones a todos los usuarios autorizados y a todos los grupos de Telegram vinculados al sistema.
 
-## Precaucion con la bengala en modo Auto
+## Precaucion con la bengala en el disparo de emergencia
 
-Si la bengala esta configurada en modo Auto y se ejecuta un disparo de emergencia, el cartucho de humo se detona directa e instantaneamente. Una vez iniciada la secuencia, no se puede cancelar ni revertir. Asegurate de que el modo de la bengala es el adecuado antes de usar esta funcion.
+Si la bengala esta habilitada y se ejecuta un disparo de emergencia, el cartucho de humo se detona directa e instantaneamente, tambien en modo Pregunta. Una vez iniciada la secuencia, no se puede cancelar ni revertir. Si no quieres humo, pon la bengala en "Apagada" antes de usar esta funcion.
 
 ## Lenguaje natural para disparo
 
-El bot de Telegram entiende instrucciones en lenguaje natural para activar el disparo de emergencia. Ejemplos:
-
-- "dispara la alarma"
-- "activa la sirena"
-- "emergencia"
-- "detona la alarma"
+El disparo de emergencia no se puede pedir en lenguaje natural, ni al bot ni a Senti. Usa siempre el comando /disparo o el boton Emergencia de la app.
 
 ## Como detener la alarma tras un disparo
 
 Para detener la sirena y desactivar el sistema despues de un disparo de emergencia:
 
-- Usa el comando /off en Telegram.
-- Usa lenguaje natural: "apaga la alarma", "desactiva la sirena", "para la alarma".
-- Cambia el toggle a "Desarmado" en la app movil.
+- Usa el comando /off en Telegram, o escribe "apaga la alarma".
+- En la app, toca de nuevo el boton Emergencia ("Toca para desactivar"): desactiva la alarma y desarma el sistema. Tambien sirve "Desarmar".
+- Para solo silenciar la sirena y seguir armado, escribe al bot "silencia la alarma".
 
 La bengala, si fue detonada, no se puede detener. El humo se disipara por si solo en 3 a 10 minutos con ventilacion adecuada.

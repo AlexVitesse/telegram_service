@@ -7,7 +7,7 @@ Sentinel Guard entiende mensajes escritos en texto libre, ademas de los comandos
 Funciona en los DOS canales:
 
 - **El bot de Telegram**, escribiendole al chat del bot.
-- **Senti, el asistente dentro de la app**, tocando el boton flotante que aparece en todas las pantallas.
+- **Senti, el asistente dentro de la app**, tocando el boton flotante que aparece en todas las pantallas. Si, puedes darle ordenes al asistente de la app.
 
 Los dos entienden las mismas frases. Lo que cambia es cuanto puede EJECUTAR cada uno, y esta detallado mas abajo: el bot ejecuta todo, y la app ejecuta lo que sabe hacer por si misma y avisa cuando algo hay que hacerlo desde otro sitio.
 
@@ -23,7 +23,7 @@ Cuando Senti va a desarmar, pregunta antes con dos botones y nombra el equipo: "
 | Listar dispositivos | Si | Si, sin salir de la app |
 | Detener la sirena sin desarmar | Si | No: lo dice y remite al bot |
 | Ultimo evento | Si | No: lo dice y remite al bot |
-| Bengala | Si | No desde el chat: se configura en la ficha del equipo |
+| Bengala | Si, pero solo la habilita (ver nota) | No desde el chat: se configura en la ficha del equipo |
 | Horarios | Si | No desde el chat: se configuran en la pantalla Horarios |
 | Preguntas informativas | Si | Si |
 
@@ -75,10 +75,17 @@ Nota: Esto detiene la sirena pero mantiene el sistema armado. Es diferente de de
 - "activa el humo"
 - "lanza la bengala"
 
+Nota: escrito en el chat del bot, esto envia al equipo la orden de habilitar la bengala, no la detona en ese momento. Para dispararla durante una alarma en modo Pregunta usa el boton "Disparar bengala" del aviso. Para cambiar el modo usa /bengala, /auto, /preguntar o /deshabilitar.
+
 ### Horarios
 - "arma lunes a viernes de 10pm a 6am"
 - "que horarios tengo?"
 - "programa la alarma para las noches"
+
+Para ver o cambiar con seguridad el horario de un equipo, usa tambien /horarios o la pantalla Horarios de la app.
+
+### Disparo de emergencia
+No hay frase en lenguaje natural para disparar la sirena a mano. Usa /disparo en el bot o el boton Emergencia (SOS) de la app.
 
 ## Preguntas informativas (RAG)
 
@@ -87,7 +94,7 @@ Ademas de ejecutar comandos, puedes hacer preguntas informativas y el bot buscar
 - "como configuro la bengala?"
 - "que es el modo pregunta?"
 - "como agrego un usuario?"
-- "como vinculo un dispositivo?"
+- "como cambio el nombre de un equipo?"
 - "que hago si la alarma no conecta?"
 - "como cambio la contrasena del teclado?"
 - "como funciona el sistema de horarios?"
@@ -98,5 +105,5 @@ El bot busca la informacion relevante en su documentacion interna y responde de 
 
 - **Habla de forma natural**: El bot entiende contexto y variaciones del lenguaje. No necesitas usar frases exactas.
 - **Especifica el dispositivo**: Si tienes varios dispositivos vinculados, menciona el nombre del dispositivo en tu mensaje. Ejemplo: "arma la de bodega" en lugar de solo "arma".
-- **Usa comandos directos como respaldo**: Si el bot de Telegram no entiende tu mensaje en lenguaje natural, siempre puedes recurrir a los comandos tradicionales (/on, /off, /status, etc.). Dentro de la app no hay comandos con barra: ahi el respaldo son los propios controles de la pantalla, como el toggle de armado o la ficha del equipo.
+- **Usa comandos directos como respaldo**: Si el bot de Telegram no entiende tu mensaje en lenguaje natural, siempre puedes recurrir a los comandos tradicionales (/on, /off, /status, etc.). Dentro de la app no hay comandos con barra: ahi el respaldo son los propios controles de la pantalla, como el boton "Proteger ahora" / "Desarmar" o la ficha del equipo.
 - **Preguntas y acciones**: El bot distingue entre una pregunta informativa ("como configuro la bengala?") y una accion directa ("dispara la bengala"). Ambas funcionan correctamente.
