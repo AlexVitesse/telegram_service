@@ -35,7 +35,7 @@ from telegram.constants import ParseMode
 
 from config import config
 from scheduler import scheduler
-from mqtt_protocol import MqttEvent, EventType
+from mqtt_protocol import MqttEvent, EventType, normalizar_mac
 from device_manager import DeviceManager
 from ai_handler import AIHandler
 import comandos_app
@@ -53,6 +53,25 @@ if TYPE_CHECKING: # ADD THIS BLOCK
     from firebase_manager import FirebaseManager
 
 logger = logging.getLogger(__name__)
+
+
+def teclado_alarma(device_id: str, con_bengala: bool, con_dejar_armado: bool = True) -> InlineKeyboardMarkup:
+    """
+    Botones de un aviso de alarma, todos atados a ESA central. Antes llevaban
+    "bengala_confirm" / "bengala_cancel" / "disarm_all" a secas y el handler
+    actuaba sobre todas las centrales del usuario que estuviesen sonando: con
+    dos alarmas a la vez, "Disparar bengala" disparaba las dos.
+    """
+    mac = normalizar_mac(device_id)
+    filas = []
+    if con_bengala:
+        filas.append([InlineKeyboardButton("🔥 Disparar bengala", callback_data=f"bengala_confirm_{mac}")])
+    abajo = []
+    if con_dejar_armado:
+        abajo.append(InlineKeyboardButton("🔒 Dejar armado", callback_data=f"bengala_cancel_{mac}"))
+    abajo.append(InlineKeyboardButton("🔓 Desactivar sistema", callback_data=f"disarm_{mac}"))
+    filas.append(abajo)
+    return InlineKeyboardMarkup(filas)
 
 
 @dataclass
@@ -2905,9 +2924,10 @@ class TelegramBot:
             await query.edit_message_text("❌ Disparo cancelado.")
 
         # Callbacks para recordatorio de alarma activa
-        elif data == "bengala_confirm":
-            # Disparar bengala en dispositivos en alarma
-            alarming_devices = [d for d in devices if self.device_manager.is_alarming(d)]
+        elif data == "bengala_confirm" or data.startswith("bengala_confirm_"):
+            alarming_devices = await self._centrales_del_aviso(query, data, "bengala_confirm", devices)
+            if alarming_devices is None:
+                return
             if alarming_devices:
                 await query.edit_message_text("🔥 Enviando comando para disparar bengala...")
                 for device_id in alarming_devices:
@@ -2927,19 +2947,22 @@ class TelegramBot:
             else:
                 await query.edit_message_text("ℹ️ No hay dispositivos en alarma activa.")
 
-        elif data == "bengala_cancel":
+        elif data == "bengala_cancel" or data.startswith("bengala_cancel_"):
             # Dejar armado - detener sirena pero mantener armado
+            objetivo = await self._centrales_del_aviso(query, data, "bengala_cancel", devices)
+            if objetivo is None:
+                return
             await query.edit_message_text("🔇 Deteniendo sirena...")
 
-            # Detener la alarma (sirena/buzzer) en dispositivos que están alarmando
             stopped_devices = []
-            for device_id in devices:
-                if self.device_manager.is_alarming(device_id):
-                    self.mqtt_handler.send_stop_alarm(device_id=device_id)
-                    # Reset alarming state to stop reminders
-                    self.device_manager.set_alarming_state(device_id, False)
-                    device_location = self.firebase_manager.get_device_location(device_id) or device_id
-                    stopped_devices.append(device_location)
+            for device_id in objetivo:
+                self.mqtt_handler.send_stop_alarm(device_id=device_id)
+                # Con el id de MQTT: con el de Firebase se creaba una entrada
+                # nueva y la de verdad seguia "sonando" y mandando recordatorios.
+                self.device_manager.set_alarming_state(
+                    self.mqtt_handler.resolve_full_device_id(device_id), False)
+                device_location = self.firebase_manager.get_device_location(device_id) or device_id
+                stopped_devices.append(device_location)
                 self._clear_bengala_confirmation(device_id)
 
             if stopped_devices:
@@ -3091,8 +3114,8 @@ class TelegramBot:
 
         # Desarmar dispositivo específico
         elif data.startswith("disarm_") and data != "disarm_all":
-            target_device = data.replace("disarm_", "")
-            if target_device in devices:
+            target_device = self.firebase_manager.resolver_equipo(data[len("disarm_"):], entre=devices)
+            if target_device:
                 await self._disarm_devices(query, [target_device])
             else:
                 await query.edit_message_text("❌ No tienes acceso a este dispositivo.")
@@ -3385,15 +3408,7 @@ class TelegramBot:
         )
 
         # Teclado con botones para chat privado
-        keyboard_private = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("🔥 Disparar bengala", callback_data="bengala_confirm")
-            ],
-            [
-                InlineKeyboardButton("🔒 Dejar armado", callback_data="bengala_cancel"),
-                InlineKeyboardButton("🔓 Desactivar sistema", callback_data="disarm_all")
-            ]
-        ])
+        keyboard_private = teclado_alarma(device_id, con_bengala=True)
 
         # Enviar a todos los chats autorizados
         for chat_id in chat_ids:
@@ -3460,9 +3475,7 @@ class TelegramBot:
         )
 
         # Teclado solo con botón de desactivar
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔓 Desactivar sistema", callback_data="disarm_all")]
-        ])
+        keyboard = teclado_alarma(device_id, con_bengala=False, con_dejar_armado=False)
 
         # Enviar a todos los chats autorizados
         for chat_id in chat_ids:
@@ -3525,9 +3538,7 @@ class TelegramBot:
                     f"Usa /off para desactivar el sistema."
                 )
 
-                keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔓 Desactivar sistema", callback_data="disarm_all")]
-                ])
+                keyboard = teclado_alarma(device_id, con_bengala=False, con_dejar_armado=False)
 
                 for chat_id in notification["chat_ids"]:
                     try:
@@ -3560,12 +3571,54 @@ class TelegramBot:
         except Exception as e:
             logger.error(f"Error en tarea de recordatorio de alarma para {device_id}: {e}")
 
+    async def _centrales_del_aviso(self, query, data: str, prefijo: str, devices: List[str]) -> Optional[List[str]]:
+        """
+        Sobre que centrales actua un boton de aviso de alarma.
+
+        - `prefijo_<MAC>`: solo esa, si es del chat y esta sonando.
+        - `prefijo` a secas (mensajes enviados antes del cambio): si suena
+          una sola, esa; si suenan varias NO se elige por el usuario, se le
+          ofrece un boton por central.
+
+        Devuelve la lista, o None si ya contesto y no hay que hacer nada.
+        """
+        sonando = [d for d in devices if self.device_manager.is_alarming(d)]
+        if data != prefijo:
+            central = self.firebase_manager.resolver_equipo(data[len(prefijo) + 1:], entre=devices)
+            if not central:
+                await query.edit_message_text("❌ No tienes acceso a este dispositivo.")
+                return None
+            if central not in sonando:
+                await query.edit_message_text("ℹ️ Esa alarma ya no está activa.")
+                return None
+            return [central]
+        if len(sonando) <= 1:
+            return sonando
+        botones = [
+            [InlineKeyboardButton(
+                self.firebase_manager.get_device_location(d) or d,
+                callback_data=f"{prefijo}_{normalizar_mac(d)}")]
+            for d in sonando
+        ]
+        await query.edit_message_text(
+            f"Hay {len(sonando)} alarmas activas. ¿En cuál?",
+            reply_markup=InlineKeyboardMarkup(botones))
+        return None
+
+    @staticmethod
+    def _claves_de(registro: dict, device_id: str) -> List[str]:
+        """Claves de `registro` que son la misma central: se guardan con el id de
+        MQTT y se limpian con el de Firebase, que puede ser otra forma."""
+        mac = normalizar_mac(device_id)
+        return [k for k in list(registro) if normalizar_mac(k) == mac]
+
     def _clear_alarm_notification(self, device_id: str):
         """Limpia el estado de notificación de alarma para un dispositivo."""
-        notification = self._alarm_notifications.pop(device_id, None)
-        if notification and notification.get("reminder_task"):
-            notification["reminder_task"].cancel()
-            logger.debug(f"Notificación de alarma limpiada para {device_id}")
+        for clave in self._claves_de(self._alarm_notifications, device_id):
+            notification = self._alarm_notifications.pop(clave, None)
+            if notification and notification.get("reminder_task"):
+                notification["reminder_task"].cancel()
+            logger.debug(f"Notificación de alarma limpiada para {clave}")
 
     async def _bengala_reminder_task(self, device_id: str):
         """
@@ -3664,10 +3717,11 @@ class TelegramBot:
 
     def _clear_bengala_confirmation(self, device_id: str):
         """Limpia el estado de confirmación de bengala para un dispositivo."""
-        confirmation = self._bengala_confirmations.pop(device_id, None)
-        if confirmation and confirmation.reminder_task:
-            confirmation.reminder_task.cancel()
-            logger.debug(f"Confirmación de bengala limpiada para {device_id}")
+        for clave in self._claves_de(self._bengala_confirmations, device_id):
+            confirmation = self._bengala_confirmations.pop(clave, None)
+            if confirmation and confirmation.reminder_task:
+                confirmation.reminder_task.cancel()
+            logger.debug(f"Confirmación de bengala limpiada para {clave}")
 
     # ========================================
     # Metodos Anti-Spam

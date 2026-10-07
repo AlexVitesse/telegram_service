@@ -762,6 +762,24 @@ class FirebaseManager:
         # [:-1]: listas viejas con un caracter de mas (la app las corrige al cargar).
         return guardada == mac or guardada[:-1] == mac
 
+    def resolver_equipo(self, raw: str, entre=None) -> Optional[str]:
+        """
+        La clave real de una central a partir de lo que llegue: MAC con `:` o
+        `_`, de 17 caracteres, o la legacy de 16. `entre` limita la busqueda
+        (p. ej. a las centrales de un chat, y asi sirve de control de acceso).
+
+        Coincidencia exacta primero, sea cual sea el largo. Las parciales solo
+        con una MAC completa: un "/join_6" no puede casar con media flota.
+        """
+        pool = list(entre if entre is not None else (self._get_all_devices() or {}))
+        texto = str(raw or "").strip()
+        if texto in pool:
+            return texto
+        mac = normalizar_mac(texto)
+        if len(mac) < 14:
+            return None
+        return next((k for k in pool if self._misma_mac(k, mac)), None)
+
     def _quitar_de_listas(self, mac: str, excepto: Optional[str] = None) -> List[str]:
         """Quita la MAC de `Usuarios/*/Dispositivos` (menos la de `excepto`). Devuelve a quien se la quito."""
         usuarios = self.db.reference("Usuarios").get() or {}
