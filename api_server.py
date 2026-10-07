@@ -523,7 +523,10 @@ class ApiSenti:
             return web.json_response({"error": "No se pudo borrar. Inténtalo de nuevo."}, status=503)
         if r == "no_es_dueno":
             return web.json_response({"error": "Solo el dueño de la central puede borrarla."}, status=403)
-        return web.json_response({"ok": True})
+        # "quitado": era de otra cuenta y solo se saco de la lista de quien pide.
+        # Para la app es un exito igual -la tarjeta desaparece-; el campo es
+        # para quien quiera decirlo distinto.
+        return web.json_response({"ok": True, "quitado": r == "quitado"})
 
     async def _avisar_dueno_anterior(self, mac: str, r: dict) -> None:
         """Que el dueno anterior no se entere porque su central desaparecio de la app."""

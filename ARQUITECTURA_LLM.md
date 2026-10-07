@@ -10,7 +10,28 @@ Ninguna necesita las siguientes para tener sentido.
 
 ---
 
-## Antes de nada: el backend de hoy NO es local
+## Produccion desde 2026-10-06: Ollama Cloud + Groq de reserva
+
+Lo de la seccion siguiente ya no es el estado del VPS. Desde 2026-10-06:
+
+    LLM_BACKEND=ollama
+    OLLAMA_BASE_URL=https://ollama.com
+    OLLAMA_MODEL=gpt-oss:20b        # con think=low
+    OLLAMA_API_KEY=...              # va como Bearer; solo en el .env del VPS
+    USE_EMBEDDINGS=false
+
+- **Primario: Ollama Cloud** (`gpt-oss:20b`, `think=low`). **Reserva: Groq.**
+- **RAG solo con TF-IDF.** Ollama Cloud devuelve 401 en `/api/embed`, asi que
+  no hay embeddings. Y si algun dia se encienden y fallan a mitad de vida, la
+  consulta cae a TF-IDF en vez de quedarse vacia (`test_rag_sin_ollama.py`).
+- Con TF-IDF solo casan palabras exactas, sin sinonimos: una pregunta que use
+  palabras que la KB no tiene no encuentra nada. Por eso la FAQ repite las
+  formas que usa la gente ("doy de alta", "agrego", "emparejo"); lo vigila
+  `test_kb_alta_dispositivo.py`.
+
+---
+
+## Antes de nada: el backend de hoy NO es local (historico, hasta 2026-10)
 
 En el `.env` de este repo:
 
@@ -62,7 +83,7 @@ Tres cosas mal, por orden de gravedad:
    estaba disponible": ya te gastaste el presupuesto esperando.
 
 Y un cabo suelto: `telegram_bot.py:1727` llama a `parse_intent` **sin
-`wait_for`**. El endpoint si lo lleva; el bot no.
+`wait_for`**. El endpoint si lo lleva; el bot no. *(Resuelto en 8fee2e2, ver Fase 2.)*
 
 ---
 
@@ -216,8 +237,10 @@ corte es la red de seguridad, no el camino normal.
 **Prueba:** un `parse_intent` falso que tarda 9 s deja al RAG con ~21 s, no con
 45. Y la suma total nunca pasa de `API_BUDGET_SEC`.
 
-**De paso:** `telegram_bot.py:1727` recibe el mismo trato — `parse_intent` con
-techo, como en el endpoint.
+**De paso:** el bot de Telegram tenia que recibir el mismo trato y no lo
+recibio con esta fase: `parse_intent` siguio sin techo hasta 8fee2e2
+(2026-10-06). Hoy lleva `asyncio.wait_for` (`telegram_bot.py`, `parse_intent
+expiro` en el log), como el endpoint.
 
 ---
 
