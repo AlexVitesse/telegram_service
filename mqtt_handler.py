@@ -6,6 +6,7 @@ Usa Firebase para buscar chats autorizados por dispositivo.
 """
 import json
 import logging
+import os
 import ssl
 import time
 from typing import Callable, Dict, Any, Optional, List, TYPE_CHECKING
@@ -23,6 +24,16 @@ if TYPE_CHECKING:
     from firebase_manager import FirebaseManager
 
 logger = logging.getLogger(__name__)
+
+#: Donde sobrevive la cola de comandos pendientes a un reinicio del VPS. Antes
+#: vivia solo en memoria: un reinicio con una central offline perdia el horario
+#: que le tocaba recibir (y el "apaga tu horario" de una central borrada).
+PENDING_FILE = "pending_commands.json"
+
+#: Configuracion que gana la ultima y que se puede repetir sin efectos: no
+#: caduca. Una central que vuelve a los 3 dias tiene que recibir el horario
+#: que se le cambio, no el que tenia. El resto sigue caducando a las 24 h.
+COMANDOS_CONFIG = (Command.SET_SCHEDULE.value, Command.SET_BENGALA_MODE.value)
 
 
 class MqttHandler:
@@ -68,6 +79,8 @@ class MqttHandler:
         # Cola de comandos pendientes para dispositivos offline
         # Estructura: {device_id: [(command, args, timestamp), ...]}
         self._pending_commands: Dict[str, List[tuple]] = {}
+        self.pending_file = PENDING_FILE
+        self._load_pending()
         # MAC normalizada -> cuando se vio por ultima vez un boton largo o un
         # arranque (ver _handle_event y api_server /equipos/reclamar).
         self.prueba_fisica: Dict[str, float] = {}
@@ -197,6 +210,10 @@ class MqttHandler:
             # mientras estaba apagada, se quedaba con el viejo.
             if tipo == "system_boot" and self.firebase_manager.is_available():
                 self.firebase_manager.enviar_horario(event.device_id)
+            if tipo == "system_boot":
+                # Esta suscrita (se suscribe antes de anunciar el arranque) aunque
+                # aun no haya mandado telemetria: es el primer momento util.
+                self.process_pending_commands(event.device_id)
 
             if self._on_event_callback:
                 self._on_event_callback(event)
@@ -233,10 +250,13 @@ class MqttHandler:
 
             # Actualizar tiempo de telemetría y verificar reconexión
             reconnected = self.device_manager.update_telemetry_time(telemetry.device_id)
+            # Con CUALQUIER telemetria, no solo al "reconectar": la cola empieza
+            # a llenarse a los 60 s sin telemetria y la reconexion no se marca
+            # hasta los 90 s, asi que un corte de 60-90 s dejaba la cola sin
+            # enviar. Tras un reinicio del VPS ni siquiera hay reconexion.
+            # Si la cola esta vacia, sale enseguida.
+            self.process_pending_commands(telemetry.device_id)
             if reconnected:
-                # Procesar comandos pendientes que se encolaron mientras estaba offline
-                self.process_pending_commands(telemetry.device_id)
-
                 # Notificar reconexión via callback
                 if hasattr(self, '_on_reconnect_callback') and self._on_reconnect_callback:
                     self._on_reconnect_callback(telemetry.device_id)
@@ -394,6 +414,11 @@ class MqttHandler:
             logger.info(f"Dispositivo {target_device} offline. Comando {cmd} encolado para envío posterior.")
             return True  # Retornamos True porque se encoló exitosamente
 
+        # Se envia directo: un pendiente del mismo tipo es mas viejo y, si se
+        # mandase despues al vaciar la cola, pisaria a este.
+        if cmd in COMANDOS_CONFIG:
+            self._descartar_pendiente(target_device, cmd)
+
         command = MqttCommand(
             command=cmd,
             args=args or {}
@@ -431,7 +456,52 @@ class MqttHandler:
             ]
 
         self._pending_commands[device_id].append((cmd, args, time.time()))
+        self._save_pending()
         logger.info(f"Comando {cmd} encolado para {device_id}. Total pendientes: {len(self._pending_commands[device_id])}")
+
+    def _descartar_pendiente(self, device_id: str, cmd: str):
+        mac = normalizar_mac(device_id)
+        cambio = False
+        for clave in list(self._pending_commands):
+            if normalizar_mac(clave) != mac:
+                continue
+            quedan = [(c, a, t) for c, a, t in self._pending_commands[clave] if c != cmd]
+            if len(quedan) != len(self._pending_commands[clave]):
+                cambio = True
+                if quedan:
+                    self._pending_commands[clave] = quedan
+                else:
+                    del self._pending_commands[clave]
+        if cambio:
+            self._save_pending()
+
+    def _load_pending(self):
+        try:
+            with open(self.pending_file, encoding="utf-8") as f:
+                datos = json.load(f).get("devices", {})
+            self._pending_commands = {
+                d: [(c, a, t) for c, a, t in cmds] for d, cmds in datos.items()
+            }
+            if self._pending_commands:
+                logger.info(f"Cola de comandos pendientes cargada: {self._pending_commands_resumen()}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.error(f"No se pudo leer {self.pending_file}: {e}")
+
+    def _save_pending(self):
+        # Escribir aparte y renombrar: un corte a mitad no deja el archivo roto.
+        tmp = self.pending_file + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"devices": {d: [list(x) for x in cmds]
+                                       for d, cmds in self._pending_commands.items()}}, f)
+            os.replace(tmp, self.pending_file)
+        except Exception as e:
+            logger.error(f"No se pudo guardar {self.pending_file}: {e}")
+
+    def _pending_commands_resumen(self) -> str:
+        return ", ".join(f"{d}: {[c for c, _, _ in cmds]}" for d, cmds in self._pending_commands.items())
 
     def process_pending_commands(self, device_id: str):
         """
@@ -452,19 +522,22 @@ class MqttHandler:
                     ids_to_check.append(pending_id)
 
         now = time.time()
-        max_age = 24 * 60 * 60  # 24 horas
+        max_age = 24 * 60 * 60  # 24 horas (no aplica a COMANDOS_CONFIG)
         total_sent = 0
+        cambio = False
 
         for check_id in ids_to_check:
             if check_id not in self._pending_commands:
                 continue
 
-            pending = self._pending_commands[check_id]
+            pending = self._pending_commands.pop(check_id)
+            cambio = True
             if not pending:
                 continue
 
             # Filtrar comandos viejos
-            valid_commands = [(cmd, args, ts) for cmd, args, ts in pending if now - ts < max_age]
+            valid_commands = [(cmd, args, ts) for cmd, args, ts in pending
+                              if cmd in COMANDOS_CONFIG or now - ts < max_age]
             expired_count = len(pending) - len(valid_commands)
             if expired_count > 0:
                 logger.info(f"Descartados {expired_count} comandos expirados para {check_id}")
@@ -475,9 +548,8 @@ class MqttHandler:
                 self.send_command(cmd, args, device_id, queue_if_offline=False)
                 total_sent += 1
 
-            # Limpiar la cola
-            del self._pending_commands[check_id]
-
+        if cambio:
+            self._save_pending()
         if total_sent > 0:
             logger.info(f"Cola de comandos pendientes para {device_id} procesada. Enviados: {total_sent}")
 
