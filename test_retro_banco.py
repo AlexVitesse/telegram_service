@@ -225,6 +225,60 @@ def test_endpoint_borrar_no_dueno_es_403_y_mac_rara_400():
     assert MAC in fm.db.datos["ESP32"]
 
 
+
+def _horarios_aislados(fn):
+    """El scheduler es global y guarda en disco: aqui se trabaja sobre uno vacio."""
+    import scheduler as sch
+    guardadas, guardar = sch.scheduler.configs, sch.scheduler._save_configs
+    sch.scheduler.configs, sch.scheduler._save_configs = {}, lambda: None
+    try:
+        return fn(sch)
+    finally:
+        sch.scheduler.configs, sch.scheduler._save_configs = guardadas, guardar
+
+
+def test_central_borrada_que_arranca_recibe_el_horario_apagado():
+    """
+    Se borro estando offline y el "apagado" encolado se perdio: al volver a
+    conectarse seguia armandose sola con su NVS. Ahora, sin nodo, se le apaga.
+    """
+    def caso(sch):
+        datos = _arbol_jose()
+        fm = _fm(datos)
+        fm.enviar_horario("AB_CD_EF_01_23_45")  # ni nodo ni horario
+        kw = fm.mqtt_handler.send_set_schedule.call_args.kwargs
+        assert kw["enabled"] is False and kw["queue_if_offline"] is True, kw
+    _horarios_aislados(caso)
+
+
+def test_central_con_nodo_y_sin_horario_no_recibe_nada():
+    def caso(sch):
+        fm = _fm(_arbol_jose())
+        fm.enviar_horario(MAC + "_B2")
+        fm.mqtt_handler.send_set_schedule.assert_not_called()
+    _horarios_aislados(caso)
+
+
+def test_sin_cache_de_firebase_no_se_decide_nada():
+    def caso(sch):
+        fm = _fm(_arbol_jose())
+        fm._get_all_devices = lambda: None
+        fm.enviar_horario("AB_CD_EF_01_23_45")
+        fm.mqtt_handler.send_set_schedule.assert_not_called()
+    _horarios_aislados(caso)
+
+
+def test_el_id_largo_de_mqtt_encuentra_el_horario_de_la_clave_corta():
+    """Al arrancar llega el id de MQTT (17); el scheduler usa la clave de Firebase (14)."""
+    def caso(sch):
+        sch.scheduler.configs[MAC] = sch.ScheduleConfig(enabled=True, on_hour=22)
+        fm = _fm(_arbol_jose())
+        fm.enviar_horario(MAC + "_B2")
+        kw = fm.mqtt_handler.send_set_schedule.call_args.kwargs
+        assert kw["enabled"] is True and kw["on_hour"] == 22, kw
+    _horarios_aislados(caso)
+
+
 def test_horario_de_quien_no_es_el_dueno_no_cuenta():
     """El caso de los recordatorios cruzados: la entrada de otro no arma la central."""
     import scheduler as sch
