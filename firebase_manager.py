@@ -365,6 +365,7 @@ class FirebaseManager:
                     self.mqtt_handler.send_command(cmd=Command.SET_BENGALA_MODE.value, args={"mode": 1}, device_id=device_id)
 
             elif command_key == 'Tiempo_Bomba':
+                self._avisar_tiempo_fuera_de_rango(device_id, event.data)
                 if isinstance(event.data, (int, float)) and event.data >= 10:
                     seconds = int(event.data)
                     logger.info(f"Comando de App: TIEMPO DE SALIDA {seconds}s para {device_id}")
@@ -379,6 +380,7 @@ class FirebaseManager:
                 # Procesar Tiempo_Bomba si viene en el diccionario Y cambió
                 if 'Tiempo_Bomba' in event.data:
                     tiempo_bomba = event.data['Tiempo_Bomba']
+                    self._avisar_tiempo_fuera_de_rango(device_id, tiempo_bomba)
                     last_tiempo = self._last_known_values[device_id].get('Tiempo_Bomba')
                     if isinstance(tiempo_bomba, (int, float)) and tiempo_bomba >= 10:
                         if last_tiempo != tiempo_bomba:
@@ -524,6 +526,17 @@ class FirebaseManager:
         except Exception as e:
             logger.error(f"Error recalculando horarios: {e}")
 
+    @staticmethod
+    def _avisar_tiempo_fuera_de_rango(device_id: str, valor) -> None:
+        """La app deja elegir 0-180 s; aqui se descarta lo menor de 10 y el
+        firmware solo acepta 10-300. Antes se descartaba en silencio: la app
+        decia "guardado" y la central seguia con el valor anterior."""
+        if isinstance(valor, (int, float)) and not 10 <= valor <= 300:
+            logger.warning(
+                f"Tiempo_Bomba={valor} para {device_id} fuera del rango del firmware "
+                f"(10-300 s): no se aplica, la central conserva el anterior"
+            )
+
     def enviar_horario(self, device_id: str) -> None:
         """
         Manda a la central el horario que tiene el scheduler para ella.
@@ -531,10 +544,33 @@ class FirebaseManager:
         Se usa al cambiar el horario y cuando la central arranca: sin eso, una
         central que estaba apagada al cambiarlo se quedaba con el viejo en NVS.
         Encola si esta desconectada.
+
+        El id llega como lo manda la central por MQTT (puede ser la MAC de 17
+        caracteres) y el scheduler usa la clave de Firebase: se busca por MAC.
+
+        Una central SIN nodo en ESP32 (borrada) recibe el horario apagado. Al
+        borrarla solo se le encolaba ese "apagado"; si estaba offline y la cola
+        se perdia o caducaba, seguia armandose sola con el horario de su NVS
+        para siempre, sin dueno que la viera.
         """
-        if not self.mqtt_handler or device_id not in scheduler.configs:
+        if not self.mqtt_handler:
             return
-        cfg = scheduler.configs[device_id]
+        mac = normalizar_mac(device_id)
+        # Primero si existe: un horario que quedase en el scheduler local de una
+        # central ya borrada (caida a mitad de la limpieza) no debe reactivarla.
+        nodos = self._get_all_devices()
+        # Sin cache (Firebase caido) no se decide nada: mejor no tocar.
+        if nodos and not any(self._misma_mac(k, mac) for k in nodos):
+            logger.warning(f"{device_id} sin nodo en ESP32 (central borrada): se le apaga el horario")
+            self.mqtt_handler.send_set_schedule(
+                enabled=False, on_hour=0, on_minute=0, off_hour=0, off_minute=0,
+                device_id=device_id, queue_if_offline=True,
+            )
+            return
+        clave = next((k for k in scheduler.configs if self._misma_mac(k, mac)), None)
+        if clave is None:
+            return
+        cfg = scheduler.configs[clave]
         logger.info(
             f"Horario a {device_id}: enabled={cfg.enabled}, on={cfg.format_on_time()}, "
             f"off={cfg.format_off_time()}, dias={cfg.days_indices()}"
