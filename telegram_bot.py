@@ -35,7 +35,7 @@ from telegram.constants import ParseMode
 
 from config import config
 from scheduler import scheduler
-from mqtt_protocol import MqttEvent, EventType
+from mqtt_protocol import MqttEvent, EventType, escape_md
 from device_manager import DeviceManager
 from ai_handler import AIHandler
 import comandos_app
@@ -1711,11 +1711,17 @@ class TelegramBot:
         else:
             devices = target_devices
 
+        sin_conexion = []
         for device_id in devices:
             cfg = scheduler.cfg(device_id)
 
-            # 1. Enviar al ESP32
+            # 1. Enviar al ESP32. Encolado si esta offline: antes se publicaba
+            # y ya, el broker lo tiraba (la central usa sesion limpia) y la
+            # central seguia armandose con su horario viejo mientras el bot
+            # decia "deshabilitado".
             if self.mqtt_handler:
+                if not self.mqtt_handler.is_device_online(device_id):
+                    sin_conexion.append(device_id)
                 self.mqtt_handler.send_set_schedule(
                     cfg.enabled,
                     cfg.on_hour,
@@ -1723,7 +1729,8 @@ class TelegramBot:
                     cfg.off_hour,
                     cfg.off_minute,
                     days=cfg.days_indices(),
-                    device_id=device_id
+                    device_id=device_id,
+                    queue_if_offline=True,
                 )
 
             # 2. Actualizar Firebase (con nombres de días para la App)
@@ -1758,6 +1765,16 @@ class TelegramBot:
                     logger.info(f"Horario sincronizado a Firebase: {schedule_path} (días: {cfg.format_days()})")
                 except Exception as e:
                     logger.error(f"Error sincronizando horario a Firebase: {e}")
+
+        # Que el "✅" que viene detras no se lea como "ya esta aplicado".
+        for device_id in sin_conexion:
+            nombre = self.firebase_manager.get_device_location(device_id) or device_id
+            await self.send_message(
+                chat_id,
+                f"⏳ *{escape_md(nombre)}* está sin conexión: el horario se "
+                f"aplicará cuando la central se conecte.",
+                "Markdown",
+            )
 
     @require_admin
     async def _cmd_adduser(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2151,15 +2168,13 @@ class TelegramBot:
                 scheduler.set_on_time(dev_id, params["on_hour"], params["on_minute"])
                 scheduler.set_off_time(dev_id, params["off_hour"], params["off_minute"])
                 scheduler.set_enabled(dev_id, enabled)
-                self.mqtt_handler.send_set_schedule(
-                    enabled=enabled,
-                    on_hour=params["on_hour"],
-                    on_minute=params["on_minute"],
-                    off_hour=params["off_hour"],
-                    off_minute=params["off_minute"],
-                    days=days,
-                    device_id=dev_id,
-                )
+            # Por el mismo camino que /horarios: encola si esta offline y lo
+            # escribe en Firebase. Antes se mandaba directo, no llegaba a la
+            # app y el usuario no recibia ninguna respuesta.
+            await self._sync_schedule_to_devices(chat_id, target_ids)
+            await update.message.reply_text(
+                "📅 Horario configurado.\n\n" + self._schedule_status_text(target_ids),
+                parse_mode=ParseMode.MARKDOWN, reply_markup=self._get_keyboard())
             logger.info(f"🤖 IA → SCHEDULE en {target_ids}: {params}")
             _log_action(f"schedule aplicado → {target_ids} params={params}")
 
