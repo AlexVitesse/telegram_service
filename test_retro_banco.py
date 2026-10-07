@@ -279,6 +279,30 @@ def test_el_id_largo_de_mqtt_encuentra_el_horario_de_la_clave_corta():
     _horarios_aislados(caso)
 
 
+def test_central_legacy_de_16_que_arranca_no_se_toma_por_borrada():
+    """Clave Firebase `AC_15_18_D4_47_4`, id de MQTT `AC_15_18_D4_47_4F`."""
+    def caso(sch):
+        legacy = "AC_15_18_D4_47_4"
+        datos = _arbol_jose()
+        datos["ESP32"][legacy] = {"ownerUid": "jose"}
+        sch.scheduler.configs[legacy] = sch.ScheduleConfig(enabled=True, on_hour=21)
+        fm = _fm(datos)
+        fm.enviar_horario("AC_15_18_D4_47_4F")
+        kw = fm.mqtt_handler.send_set_schedule.call_args.kwargs
+        assert kw["enabled"] is True and kw["on_hour"] == 21, kw
+    _horarios_aislados(caso)
+
+
+def test_horario_local_de_una_central_borrada_no_la_reactiva():
+    def caso(sch):
+        sch.scheduler.configs["AB_CD_EF_01_23"] = sch.ScheduleConfig(enabled=True, on_hour=22)
+        fm = _fm(_arbol_jose())
+        fm.enviar_horario("AB_CD_EF_01_23_45")
+        kw = fm.mqtt_handler.send_set_schedule.call_args.kwargs
+        assert kw["enabled"] is False, kw
+    _horarios_aislados(caso)
+
+
 def test_horario_de_quien_no_es_el_dueno_no_cuenta():
     """El caso de los recordatorios cruzados: la entrada de otro no arma la central."""
     import scheduler as sch

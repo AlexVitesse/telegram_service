@@ -548,16 +548,19 @@ class FirebaseManager:
         if not self.mqtt_handler:
             return
         mac = normalizar_mac(device_id)
+        # Primero si existe: un horario que quedase en el scheduler local de una
+        # central ya borrada (caida a mitad de la limpieza) no debe reactivarla.
+        nodos = self._get_all_devices()
+        # Sin cache (Firebase caido) no se decide nada: mejor no tocar.
+        if nodos and not any(self._misma_mac(k, mac) for k in nodos):
+            logger.warning(f"{device_id} sin nodo en ESP32 (central borrada): se le apaga el horario")
+            self.mqtt_handler.send_set_schedule(
+                enabled=False, on_hour=0, on_minute=0, off_hour=0, off_minute=0,
+                device_id=device_id, queue_if_offline=True,
+            )
+            return
         clave = next((k for k in scheduler.configs if self._misma_mac(k, mac)), None)
         if clave is None:
-            nodos = self._get_all_devices()
-            # Sin cache (Firebase caido) no se decide nada: mejor no tocar.
-            if nodos and not any(self._misma_mac(k, mac) for k in nodos):
-                logger.warning(f"{device_id} sin nodo en ESP32 (central borrada): se le apaga el horario")
-                self.mqtt_handler.send_set_schedule(
-                    enabled=False, on_hour=0, on_minute=0, off_hour=0, off_minute=0,
-                    device_id=device_id, queue_if_offline=True,
-                )
             return
         cfg = scheduler.configs[clave]
         logger.info(
@@ -793,7 +796,12 @@ class FirebaseManager:
     def _misma_mac(guardada: str, mac: str) -> bool:
         guardada = normalizar_mac(guardada)
         # [:-1]: listas viejas con un caracter de mas (la app las corrige al cargar).
-        return guardada == mac or guardada[:-1] == mac
+        # [:14] con 16: las claves legacy `AA_BB_CC_DD_EE_F` (medio octeto de mas),
+        # que con [:-1] quedaban en `AA_BB_CC_DD_EE_` y no casaban con nada.
+        # (Mismo cambio que en el PR #11: aqui hace falta para no tomar por
+        # borrada una central legacy valida al arrancar.)
+        return (guardada == mac or guardada[:-1] == mac
+                or (len(guardada) == 16 and guardada[14] == "_" and guardada[:14] == mac))
 
     def _quitar_de_listas(self, mac: str, excepto: Optional[str] = None) -> List[str]:
         """Quita la MAC de `Usuarios/*/Dispositivos` (menos la de `excepto`). Devuelve a quien se la quito."""
