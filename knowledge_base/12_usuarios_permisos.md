@@ -6,12 +6,12 @@ Los permisos de usuario se configuran (o programan) desde Telegram. Configurar o
 
 ### Pasos para configurar un nuevo permiso
 
-1. Paso 1: El administrador envia /adduser al bot de Telegram.
+1. Paso 1: El dueño de la central envia /adduser al bot de Telegram, en chat privado.
 2. Paso 2: El bot genera un codigo de invitacion con el formato /join_DEVICE_ID.
 3. Paso 3: El administrador comparte ese codigo con el nuevo usuario por un medio externo (WhatsApp, SMS, correo).
-4. Paso 4: El nuevo usuario envia /join_DEVICE_ID al bot desde su Telegram.
+4. Paso 4: El nuevo usuario envia /join_DEVICE_ID al bot desde un chat privado (no desde un grupo).
 5. Paso 5: El bot notifica al dueño del equipo con la solicitud del nuevo usuario. La solicitud expira en 5 minutos.
-6. Paso 6: El administrador aprueba el permiso ejecutando /approve_CHATID.
+6. Paso 6: El dueño aprueba el permiso con el comando que le llega en el aviso (/approve_CHATID_CENTRAL). Solo el dueño de esa central puede aprobarlo.
 7. Paso 7: El nuevo usuario queda registrado con permisos de acceso configurados.
 
 Asi se configura un permiso nuevo en el sistema. Como se configuran los permisos: con los comandos /adduser, /approve_CHATID, /desvincular y /permisos desde Telegram. Para revisar quien recibe los avisos de cada equipo, mira la ficha del equipo en la app (Ajustes > Avisos de Telegram).

@@ -124,18 +124,28 @@ def test_borrar_no_limpia_el_master():
         assert "memoria" in kb[f], f
 
 
-def test_botones_bengala_actuan_en_todas():
-    # bengala_confirm / bengala_cancel recorren todos los equipos en alarma.
+def test_botones_bengala_solo_en_su_central():
+    # Desde el 7-oct (#11) los botones llevan la MAC y actuan solo sobre ella.
     t = _kb_texto()["08_bengala.md"]
-    assert "todas tus centrales que esten sonando" in t
-    assert "desarma todos tus equipos" in t
+    assert "solo sobre la central del aviso" in t
+    assert "todas tus centrales que esten sonando" not in t
+    assert "desarma todos tus equipos" not in t
     assert "120" not in t and "tiempo agotado" not in t  # timeout del bot: codigo muerto
 
 
-def test_horarios_telegram_sin_cola():
+def test_horarios_offline_se_aplican_al_conectarse():
+    # Desde el 7-oct (#12, #13) Telegram tambien encola y la cola no caduca.
     t = _kb_texto()["09_horarios.md"]
     assert "se propaga a todos los componentes" not in t
-    assert "en linea" in t
+    assert "se aplicara cuando la central se conecte" in t
+    assert "no se guardan para despues" not in t
+    assert "24 horas" not in t.split("## sincronizacion de horarios")[1].split("##")[0]
+
+
+def test_invitaciones_solo_el_dueno():
+    kb = _kb_texto()
+    assert "solo el dueño de la central" in kb["05_comandos_telegram.md"]
+    assert "chat privado" in kb["12_usuarios_permisos.md"]
 
 
 def test_bengala_sin_datos_inventados():

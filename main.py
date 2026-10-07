@@ -55,6 +55,10 @@ logging.basicConfig(
         )
     ]
 )
+# httpx registra en INFO cada peticion con su URL completa, y en la API de
+# Telegram la URL lleva el token del bot (api.telegram.org/bot<TOKEN>/...):
+# quedaba escrito en alarm_service.log cada pocos segundos.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 

@@ -38,14 +38,14 @@ La pregunta del modo Pregunta se contesta con los botones del propio mensaje de 
 
 - **/permisos** - Solo para administradores. En la version actual el bot responde que la lista de usuarios no esta disponible; los destinatarios de cada equipo se ven en la ficha del equipo en la app.
 - **/horarios** - Solo para administradores. Gestion de la programacion automatica de armado y desarmado: on, off, activar HH:MM, desactivar HH:MM y dias. Con varios equipos pregunta primero sobre cual actuar. Consulta la documentacion de horarios para el detalle.
-- **/adduser** - Solo para administradores. Genera un codigo de invitacion con el formato /join_DEVICE_ID para compartir con un nuevo usuario.
+- **/adduser** - Solo el dueño de la central (no el "Usuario 2" ni un grupo). Genera un codigo de invitacion con el formato /join_DEVICE_ID para compartir con un nuevo usuario. Si eres dueño de varias centrales, el bot te pregunta para cual.
 - **/desvincular** - Quita tu Telegram de los destinatarios de un equipo ("Ya no podras controlarlo desde Telegram"). Requiere confirmacion con "Si, desvincular". No borra el equipo de la app. Para volver, pide al administrador un nuevo codigo de invitacion o que te agregue de nuevo en la ficha del equipo.
 - **/reload_kb** - Solo para administradores. Recarga la base de conocimiento del asistente IA sin reiniciar el servicio.
 
 ## Comandos dinamicos
 
-- **/join_XXXXX** - Comando que usa el nuevo usuario para solicitar acceso. XXXXX es el codigo generado por el admin con /adduser. La solicitud expira en 5 minutos.
-- **/approve_XXXXX** - Comando que usa el administrador para aprobar la solicitud de un nuevo usuario. XXXXX corresponde al ChatID del solicitante.
+- **/join_XXXXX** - Comando que usa el nuevo usuario para solicitar acceso, en un chat privado con el bot (en grupos no funciona). XXXXX es el codigo generado por el dueño con /adduser; si el codigo no corresponde a ninguna central, el bot responde "Codigo no valido". La solicitud expira en 5 minutos.
+- **/approve_XXXXX** - Comando que usa el dueño de la central para aprobar la solicitud de un nuevo usuario. El bot se lo manda ya escrito en el aviso de la solicitud (/approve_CHATID_CENTRAL). Solo lo puede aprobar el dueño de esa central.
 
 ## Teclado permanente
 
