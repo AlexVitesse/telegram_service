@@ -1730,11 +1730,21 @@ class TelegramBot:
         else:
             devices = target_devices
 
+        sin_conexion = []
+        cambios = {}  # rutas bajo /Horarios -> valor, escritas de una vez al final
         for device_id in devices:
             cfg = scheduler.cfg(device_id)
 
-            # 1. Enviar al ESP32
+            # 1. Enviar al ESP32. Encolado si esta offline: antes se publicaba
+            # y ya, el broker lo tiraba (la central usa sesion limpia) y la
+            # central seguia armandose con su horario viejo mientras el bot
+            # decia "deshabilitado".
             if self.mqtt_handler:
+                # Con el id resuelto, el mismo que usara send_command: la
+                # telemetria llega con la MAC de 17 y la clave es la de 14.
+                if not self.mqtt_handler.is_device_online(
+                        self.mqtt_handler.resolve_full_device_id(device_id)):
+                    sin_conexion.append(device_id)
                 self.mqtt_handler.send_set_schedule(
                     cfg.enabled,
                     cfg.on_hour,
@@ -1742,10 +1752,11 @@ class TelegramBot:
                     cfg.off_hour,
                     cfg.off_minute,
                     days=cfg.days_indices(),
-                    device_id=device_id
+                    device_id=device_id,
+                    queue_if_offline=True,
                 )
 
-            # 2. Actualizar Firebase (con nombres de días para la App)
+            # 2. Preparar Firebase (con nombres de días para la App)
             if self.firebase_manager.is_available():
                 try:
                     # Usar el Telegram_ID del propietario del dispositivo, no el chat_id
@@ -1763,7 +1774,7 @@ class TelegramBot:
                         owner_id = chat_id
                         logger.warning(f"No se encontró propietario para {device_id}, usando chat_id: {chat_id}")
 
-                    schedule_path = f"Horarios/{owner_id}/devices/{device_id}"
+                    schedule_path = f"{owner_id}/devices/{device_id}"
                     schedule_data = {
                         "activationTime": cfg.format_on_time(),
                         "deactivationTime": cfg.format_off_time(),
@@ -1773,10 +1784,43 @@ class TelegramBot:
                         # Numerico, como la app: se usa para desempatar entre entradas.
                         "lastUpdated": int(time.time() * 1000),
                     }
-                    self.firebase_manager.db.reference(schedule_path).set(schedule_data)
-                    logger.info(f"Horario sincronizado a Firebase: {schedule_path} (días: {cfg.format_days()})")
+                    cambios[schedule_path] = schedule_data
                 except Exception as e:
-                    logger.error(f"Error sincronizando horario a Firebase: {e}")
+                    logger.error(f"Error preparando horario de {device_id}: {e}")
+
+        # Todo en UNA escritura, por dos motivos:
+        # - Con varias centrales, escribir una a una dejaba al listener ver la
+        #   primera ya nueva y las demas aun viejas, y devolvia esas al
+        #   scheduler (y a la cola) con el horario anterior.
+        # - Se borran las entradas viejas de la misma central bajo otra clave
+        #   del dueno (el Telegram_ID de antes de migrar): si estaban
+        #   habilitadas, "habilitado gana" (elegir_por_dispositivo) las elegia
+        #   y un /horarios off se deshacia solo.
+        if cambios:
+            try:
+                todos = self.firebase_manager.db.reference("Horarios").get() or {}
+                for ruta in list(cambios):
+                    owner_id, _, device_id = ruta.split("/", 2)
+                    for clave, datos in todos.items():
+                        devs = datos.get("devices") if isinstance(datos, dict) else None
+                        if (str(clave) != owner_id and isinstance(devs, dict)
+                                and device_id in devs
+                                and self.firebase_manager._horario_aplica(str(clave), device_id)):
+                            cambios[f"{clave}/devices/{device_id}"] = None
+                self.firebase_manager.db.reference("Horarios").update(cambios)
+                logger.info(f"Horarios sincronizados a Firebase: {sorted(cambios)}")
+            except Exception as e:
+                logger.error(f"Error sincronizando horarios a Firebase: {e}")
+
+        # Que el "✅" que viene detras no se lea como "ya esta aplicado".
+        for device_id in sin_conexion:
+            nombre = self.firebase_manager.get_device_location(device_id) or device_id
+            await self.send_message(
+                chat_id,
+                f"⏳ *{escape_md(nombre)}* está sin conexión: el horario se "
+                f"aplicará cuando la central se conecte.",
+                "Markdown",
+            )
 
     @require_admin
     async def _cmd_adduser(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2184,6 +2228,23 @@ class TelegramBot:
                 _log_action(msg, ok=False, error="schedule_missing_params")
                 return
             days = params.get("days", [0, 1, 2, 3, 4, 5, 6])
+            # Validar TODO antes de tocar nada: un null del LLM acababa como
+            # `enabled: null` en Firebase, y unos dias con nombre reventaban
+            # sin respuesta.
+            def _hora_ok(h, m):
+                return isinstance(h, int) and isinstance(m, int) and 0 <= h <= 23 and 0 <= m <= 59
+            if (enabled is None
+                    or not _hora_ok(params["on_hour"], params["on_minute"])
+                    or not _hora_ok(params["off_hour"], params["off_minute"])
+                    or not isinstance(days, list) or not days
+                    or not all(isinstance(d, int) and 0 <= d <= 6 for d in days)):
+                msg = (
+                    "No pude interpretar el horario completo.\n"
+                    "Ejemplo: \"arma lunes a viernes de 10pm a 6am\""
+                )
+                await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+                _log_action(msg, ok=False, error="schedule_invalid_params")
+                return
             for dev_id in target_ids:
                 # El scheduler local tambien debe conocerlo: es quien manda los
                 # recordatorios y arma si el ESP32 no lo hace por su cuenta.
@@ -2191,15 +2252,13 @@ class TelegramBot:
                 scheduler.set_on_time(dev_id, params["on_hour"], params["on_minute"])
                 scheduler.set_off_time(dev_id, params["off_hour"], params["off_minute"])
                 scheduler.set_enabled(dev_id, enabled)
-                self.mqtt_handler.send_set_schedule(
-                    enabled=enabled,
-                    on_hour=params["on_hour"],
-                    on_minute=params["on_minute"],
-                    off_hour=params["off_hour"],
-                    off_minute=params["off_minute"],
-                    days=days,
-                    device_id=dev_id,
-                )
+            # Por el mismo camino que /horarios: encola si esta offline y lo
+            # escribe en Firebase. Antes se mandaba directo, no llegaba a la
+            # app y el usuario no recibia ninguna respuesta.
+            await self._sync_schedule_to_devices(chat_id, target_ids)
+            await update.message.reply_text(
+                "📅 Horario configurado.\n\n" + self._schedule_status_text(target_ids),
+                parse_mode=ParseMode.MARKDOWN, reply_markup=self._get_keyboard())
             logger.info(f"🤖 IA → SCHEDULE en {target_ids}: {params}")
             _log_action(f"schedule aplicado → {target_ids} params={params}")
 
