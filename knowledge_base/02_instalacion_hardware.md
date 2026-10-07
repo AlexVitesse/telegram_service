@@ -4,7 +4,7 @@
 
 El Master debe colocarse cerca del modem o router de internet, en un punto lo mas central posible del lugar a proteger. Requiere alimentacion electrica permanente. Puede montarse en pared o colocarse sobre un estante.
 
-Al encender el Master por primera vez, se observara un parpadeo de LEDs acompañado de un pitido. En aproximadamente 10 segundos el equipo confirma que ha iniciado correctamente. Antes de montar el Master en su ubicacion definitiva, se recomienda completar la configuracion inicial (conexion WiFi y ubicacion via BLE).
+Al encender el Master, los LEDs y el zumbador se activan durante un segundo como prueba. Despues el LED de estado parpadea rapido mientras se conecta a la red WiFi y queda encendido fijo cuando ya esta conectado. Si el equipo estaba armado antes de apagarse, vuelve armado. Antes de montar el Master en su ubicacion definitiva, se recomienda emparejarlo desde la app por Bluetooth (red WiFi de 2.4 GHz y nombre del dispositivo).
 
 ## Instalacion del Sensor PIR (movimiento)
 
@@ -38,15 +38,15 @@ La sirena emite una alerta sonora de 110dB y tiene proteccion IP65 contra polvo 
 
 ## Instalacion de la Bengala de Humo
 
-La bengala genera humo no toxico con una cobertura de 20 metros cuadrados. Es un elemento disuasivo que dificulta la vision del intruso.
+La bengala libera una cortina de humo que dificulta la vision del intruso. Para los datos del cartucho (composicion, cobertura, duracion), consulta su ficha tecnica.
 
 - Colocar el modulo a un maximo de 1 metro de un enchufe electrico.
 - Instalar a altura baja o media, ya que el humo sube naturalmente y asi se logra mejor cobertura.
 - Fijar firmemente el modulo a la superficie, ya que el cartucho genera un leve retroceso al detonarse.
 - LED verde encendido: indica que el cartucho de bengala esta correctamente instalado.
 - LED rojo encendido: indica que no se detecta cartucho de bengala (falta o mal colocado).
-- El humo tiene una duracion de 10 a 20 segundos.
-- Importante: despues de una detonacion, esperar al menos 10 minutos antes de tocar el cartucho usado, ya que estara caliente.
+- Mantener el modulo alejado de cortinas, papel y otros materiales inflamables.
+- Importante: despues de una detonacion, no tocar el cartucho usado hasta que se haya enfriado.
 
 ## Instalacion del Teclado
 
