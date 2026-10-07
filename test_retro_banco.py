@@ -126,6 +126,12 @@ class _Ref:
             d = d.setdefault(p, {})
         d[self.partes[-1]] = copy.deepcopy(valor)
 
+    def transaction(self, fn):
+        """Como la de firebase_admin: aplica fn al valor actual; None borra."""
+        nuevo = fn(self.get())
+        self.set(nuevo)
+        return nuevo
+
     def update(self, cambios):
         for k, v in cambios.items():
             _Ref(self.arbol, self.partes + k.split("/")).set(v)
@@ -243,6 +249,62 @@ def test_endpoint_borrar_la_ajena_de_mi_lista_es_ok_y_no_toca_la_central():
     assert MAC in d["ESP32"] and d["ESP32"][MAC]["ownerUid"] == "jose"
     assert "Dispositivos" not in d["Usuarios"]["pedro"]
     assert MAC in d["Usuarios"]["jose"]["Dispositivos"]
+
+
+def test_quitar_la_ajena_no_toca_horarios_ni_central_del_dueno():
+    fm = _fm(_arbol_jose())
+    horarios_antes = fm.db.datos["Horarios"]
+    assert fm.borrar_equipo("pedro", MAC) == "quitado"
+    assert fm.db.datos["Horarios"] == horarios_antes
+    fm.mqtt_handler.send_set_schedule.assert_not_called()
+
+
+def test_si_el_nodo_no_existe_solo_se_limpia_mi_lista():
+    """
+    Estar en una lista que escribe el cliente no autoriza a tocar las de otros:
+    cualquiera puede meterse una MAC en su propia lista.
+    """
+    datos = _arbol_jose()
+    del datos["ESP32"][MAC]
+    fm = _fm(datos)
+    assert fm.borrar_equipo("pedro", MAC) == "quitado"
+    d = fm.db.datos
+    assert "Dispositivos" not in d["Usuarios"]["pedro"]
+    assert MAC in d["Usuarios"]["jose"]["Dispositivos"]
+    assert MAC in d["Horarios"]["jose"]["devices"]
+    fm.mqtt_handler.send_set_schedule.assert_not_called()
+
+
+def test_quitar_la_ajena_conserva_las_otras_de_mi_lista():
+    datos = _arbol_jose()
+    datos["Usuarios"]["pedro"]["Dispositivos"] = [MAC, "BB_BB_BB_BB_BB"]
+    fm = _fm(datos)
+    assert fm.borrar_equipo("pedro", MAC) == "quitado"
+    assert fm.db.datos["Usuarios"]["pedro"]["Dispositivos"] == ["BB_BB_BB_BB_BB"]
+
+
+def test_reclamar_y_borrar_no_se_pisan():
+    """Los dos pasan por el mismo lock: un borrado no corre con la foto vieja."""
+    import threading
+    from firebase_manager import FirebaseManager
+    fm = _fm(_arbol_jose())
+    dentro = threading.Event()
+    soltar = threading.Event()
+    original = fm._borrar_equipo
+
+    def borrar_lento(uid, mac):
+        dentro.set()
+        soltar.wait(5)
+        return original(uid, mac)
+
+    fm._borrar_equipo = borrar_lento
+    hilo = threading.Thread(target=fm.borrar_equipo, args=("jose", MAC))
+    hilo.start()
+    dentro.wait(5)
+    assert FirebaseManager._lock_propiedad.locked(), "el borrado tenia que tener el lock"
+    soltar.set()
+    hilo.join(5)
+    assert not FirebaseManager._lock_propiedad.locked()
 
 
 def test_horario_de_quien_no_es_el_dueno_no_cuenta():

@@ -6,6 +6,7 @@ Maneja la conexion con Firebase Realtime Database (RTDB) para:
 - Obtener la informacion de un dispositivo
 """
 import logging
+import threading
 import time
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from mqtt_protocol import Command, normalizar_mac # Importar el Enum de Comandos
@@ -59,6 +60,13 @@ class UserInfo:
         self.authorized_devices = authorized_devices
 
 class FirebaseManager:
+    #: Serializa `reclamar_equipo` y `borrar_equipo`: los dos leen `ownerUid` y
+    #: luego escriben listas y nodo, y la API los corre en hilos. Sin esto un
+    #: borrado con la foto vieja podia deshacer un traspaso recien hecho.
+    # ponytail: lock global de un solo proceso (hoy hay uno). Con varias
+    # instancias haria falta una transaccion RTDB que recompruebe ownerUid.
+    _lock_propiedad = threading.Lock()
+
     """Gestor de conexion con Firebase Realtime Database"""
 
     # TTL del caché en segundos (60 segundos)
@@ -797,8 +805,12 @@ class FirebaseManager:
                 device_id=mac, queue_if_offline=True
             )
 
-    def reclamar_equipo(self, uid: str, mac: str, nombre: str = "",
-                        telegram_id: str = "", group_id: str = "") -> Dict[str, Any]:
+    def reclamar_equipo(self, *args, **kwargs) -> Dict[str, Any]:
+        with self._lock_propiedad:
+            return self._reclamar_equipo(*args, **kwargs)
+
+    def _reclamar_equipo(self, uid: str, mac: str, nombre: str = "",
+                         telegram_id: str = "", group_id: str = "") -> Dict[str, Any]:
         """
         Da la central a `uid`. La prueba de que la tiene en la mano la comprueba
         quien llama (api_server); aqui solo se ejecuta.
@@ -859,6 +871,30 @@ class FirebaseManager:
         }
 
     def borrar_equipo(self, uid: str, mac: str) -> str:
+        with self._lock_propiedad:
+            return self._borrar_equipo(uid, mac)
+
+    def _quitar_de_mi_lista(self, uid: str, mac: str) -> bool:
+        """
+        Quita la MAC solo de `Usuarios/{uid}/Dispositivos`. En transaccion: la
+        app escribe esa lista directamente, y un get+set perderia un alta que
+        entrase entre medias.
+        """
+        quitada = False
+
+        def quitar(actual):
+            nonlocal quitada
+            macs = lista_macs(actual)
+            quedan = [m for m in macs if not self._misma_mac(m, mac)]
+            quitada = len(quedan) != len(macs)
+            if not quitada:
+                return actual
+            return quedan or None  # None borra el nodo
+
+        self.db.reference(f"Usuarios/{uid}/Dispositivos").transaction(quitar)
+        return quitada
+
+    def _borrar_equipo(self, uid: str, mac: str) -> str:
         """
         Borra la central para todos: listas, horarios bajo cualquier clave, el
         nodo y el horario de la central. Antes la app borraba el nodo y nada
@@ -866,6 +902,8 @@ class FirebaseManager:
 
         Devuelve "ok", "quitado" o "no_es_dueno". Un nodo sin `ownerUid` (sin
         migrar) lo puede borrar quien lo tenga en su lista, como hasta ahora.
+        Si el nodo NO existe, solo se limpia la lista de quien pide: estar en
+        una lista que el cliente escribe no autoriza a tocar las de otros.
 
         "quitado": la central es de OTRA cuenta pero sigue en la lista de quien
         pide borrarla (traspasos de antes de la migracion, o una app vieja que
@@ -876,14 +914,10 @@ class FirebaseManager:
         """
         nodo = self.db.reference(f"ESP32/{mac}").get()
         dueno = str(nodo.get("ownerUid") or "") if isinstance(nodo, dict) else ""
-        if dueno and dueno != uid:
-            ref = self.db.reference(f"Usuarios/{uid}/Dispositivos")
-            mias = lista_macs(ref.get())
-            quedan = [m for m in mias if not self._misma_mac(m, mac)]
-            if len(quedan) == len(mias):
+        if (dueno and dueno != uid) or not isinstance(nodo, dict):
+            if not self._quitar_de_mi_lista(uid, mac):
                 return "no_es_dueno"
-            ref.set(quedan) if quedan else ref.delete()
-            logger.info(f"{mac} quitado de la lista de {uid} (la central es de otra cuenta)")
+            logger.info(f"{mac} quitado de la lista de {uid} (central ajena o inexistente)")
             return "quitado"
         if not dueno:
             mias = lista_macs(self.db.reference(f"Usuarios/{uid}/Dispositivos").get())
@@ -892,8 +926,7 @@ class FirebaseManager:
 
         self._quitar_de_listas(mac)
         self._borrar_horarios_de(mac)
-        if isinstance(nodo, dict):
-            self.db.reference(f"ESP32/{mac}").delete()
+        self.db.reference(f"ESP32/{mac}").delete()
         self._apagar_horario_central(mac)
         self.invalidate_cache()
         logger.info(f"{mac} borrado por {uid}")
