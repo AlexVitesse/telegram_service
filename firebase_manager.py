@@ -6,6 +6,7 @@ Maneja la conexion con Firebase Realtime Database (RTDB) para:
 - Obtener la informacion de un dispositivo
 """
 import logging
+import threading
 import time
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from mqtt_protocol import Command, normalizar_mac # Importar el Enum de Comandos
@@ -59,6 +60,13 @@ class UserInfo:
         self.authorized_devices = authorized_devices
 
 class FirebaseManager:
+    #: Serializa `reclamar_equipo` y `borrar_equipo`: los dos leen `ownerUid` y
+    #: luego escriben listas y nodo, y la API los corre en hilos. Sin esto un
+    #: borrado con la foto vieja podia deshacer un traspaso recien hecho.
+    # ponytail: lock global de un solo proceso (hoy hay uno). Con varias
+    # instancias haria falta una transaccion RTDB que recompruebe ownerUid.
+    _lock_propiedad = threading.Lock()
+
     """Gestor de conexion con Firebase Realtime Database"""
 
     # TTL del caché en segundos (60 segundos)
@@ -760,7 +768,54 @@ class FirebaseManager:
     def _misma_mac(guardada: str, mac: str) -> bool:
         guardada = normalizar_mac(guardada)
         # [:-1]: listas viejas con un caracter de mas (la app las corrige al cargar).
-        return guardada == mac or guardada[:-1] == mac
+        # [:14] con 16: las claves legacy `AA_BB_CC_DD_EE_F` (medio octeto de mas),
+        # que con [:-1] quedaban en `AA_BB_CC_DD_EE_` y no casaban con nada.
+        return (guardada == mac or guardada[:-1] == mac
+                or (len(guardada) == 16 and guardada[14] == "_" and guardada[:14] == mac))
+
+    def resolver_equipo(self, raw: str, entre=None) -> Optional[str]:
+        """
+        La clave real de una central a partir de lo que llegue: MAC con `:` o
+        `_`, de 17 caracteres, o la legacy de 16. `entre` limita la busqueda
+        (p. ej. a las centrales de un chat, y asi sirve de control de acceso).
+
+        Coincidencia exacta primero, sea cual sea el largo. Las parciales solo
+        con una MAC completa: un "/join_6" no puede casar con media flota.
+        """
+        pool = list(entre if entre is not None else (self._get_all_devices() or {}))
+        texto = str(raw or "").strip()
+        if texto in pool:
+            return texto
+        mac = normalizar_mac(texto)
+        if len(mac) < 14:
+            return None
+        candidatas = [k for k in pool if self._misma_mac(k, mac)]
+        # Dos centrales que casan con la misma MAC: no se elige ninguna. Un
+        # boton de bengala no puede acabar en la central equivocada.
+        if len(candidatas) != 1:
+            if candidatas:
+                logger.warning(f"{texto} es ambiguo entre {candidatas}: no se actua")
+            return None
+        return candidatas[0]
+
+    def es_dueno(self, device_id: str, chat_id: str) -> bool:
+        """
+        Si el chat es el del dueno de la central: solo el puede invitar y
+        aprobar. Ser "Usuario 2" o grupo no basta.
+
+        Con `ownerUid` (la cuenta de la app) manda la cuenta vinculada a este
+        chat; un Telegram_ID viejo de otro dueno no basta. `Telegram_ID` solo
+        decide en nodos sin migrar o si el chat no tiene cuenta vinculada.
+        """
+        if not chat_id or str(chat_id).startswith("-"):
+            return False
+        nodo = self._nodo(device_id) or {}
+        dueno = str(nodo.get("ownerUid") or "")
+        if dueno:
+            uid = self._uid_por_chat_id(str(chat_id))
+            if uid:
+                return uid == dueno
+        return str(nodo.get("Telegram_ID") or "") == str(chat_id)
 
     def _quitar_de_listas(self, mac: str, excepto: Optional[str] = None) -> List[str]:
         """Quita la MAC de `Usuarios/*/Dispositivos` (menos la de `excepto`). Devuelve a quien se la quito."""
@@ -797,8 +852,12 @@ class FirebaseManager:
                 device_id=mac, queue_if_offline=True
             )
 
-    def reclamar_equipo(self, uid: str, mac: str, nombre: str = "",
-                        telegram_id: str = "", group_id: str = "") -> Dict[str, Any]:
+    def reclamar_equipo(self, *args, **kwargs) -> Dict[str, Any]:
+        with self._lock_propiedad:
+            return self._reclamar_equipo(*args, **kwargs)
+
+    def _reclamar_equipo(self, uid: str, mac: str, nombre: str = "",
+                         telegram_id: str = "", group_id: str = "") -> Dict[str, Any]:
         """
         Da la central a `uid`. La prueba de que la tiene en la mano la comprueba
         quien llama (api_server); aqui solo se ejecuta.
@@ -859,18 +918,54 @@ class FirebaseManager:
         }
 
     def borrar_equipo(self, uid: str, mac: str) -> str:
+        with self._lock_propiedad:
+            return self._borrar_equipo(uid, mac)
+
+    def _quitar_de_mi_lista(self, uid: str, mac: str) -> bool:
+        """
+        Quita la MAC solo de `Usuarios/{uid}/Dispositivos`. En transaccion: la
+        app escribe esa lista directamente, y un get+set perderia un alta que
+        entrase entre medias.
+        """
+        quitada = False
+
+        def quitar(actual):
+            nonlocal quitada
+            macs = lista_macs(actual)
+            quedan = [m for m in macs if not self._misma_mac(m, mac)]
+            quitada = len(quedan) != len(macs)
+            if not quitada:
+                return actual
+            return quedan or None  # None borra el nodo
+
+        self.db.reference(f"Usuarios/{uid}/Dispositivos").transaction(quitar)
+        return quitada
+
+    def _borrar_equipo(self, uid: str, mac: str) -> str:
         """
         Borra la central para todos: listas, horarios bajo cualquier clave, el
         nodo y el horario de la central. Antes la app borraba el nodo y nada
         mas: los horarios seguian armandola y otras cuentas la seguian viendo.
 
-        Devuelve "ok" o "no_es_dueno". Un nodo sin `ownerUid` (sin migrar) lo
-        puede borrar quien lo tenga en su lista, como hasta ahora.
+        Devuelve "ok", "quitado" o "no_es_dueno". Un nodo sin `ownerUid` (sin
+        migrar) lo puede borrar quien lo tenga en su lista, como hasta ahora.
+        Si el nodo NO existe, solo se limpia la lista de quien pide: estar en
+        una lista que el cliente escribe no autoriza a tocar las de otros.
+
+        "quitado": la central es de OTRA cuenta pero sigue en la lista de quien
+        pide borrarla (traspasos de antes de la migracion, o una app vieja que
+        la volvio a escribir). Las reglas no le dejan leer el nodo, asi que la
+        app la pinta como "Error al cargar", y antes tampoco podia borrarla: se
+        le quedaba para siempre. Se le quita solo de SU lista; la central y la
+        cuenta del dueno no se tocan.
         """
         nodo = self.db.reference(f"ESP32/{mac}").get()
         dueno = str(nodo.get("ownerUid") or "") if isinstance(nodo, dict) else ""
-        if dueno and dueno != uid:
-            return "no_es_dueno"
+        if (dueno and dueno != uid) or not isinstance(nodo, dict):
+            if not self._quitar_de_mi_lista(uid, mac):
+                return "no_es_dueno"
+            logger.info(f"{mac} quitado de la lista de {uid} (central ajena o inexistente)")
+            return "quitado"
         if not dueno:
             mias = lista_macs(self.db.reference(f"Usuarios/{uid}/Dispositivos").get())
             if not any(self._misma_mac(m, mac) for m in mias):
@@ -878,8 +973,7 @@ class FirebaseManager:
 
         self._quitar_de_listas(mac)
         self._borrar_horarios_de(mac)
-        if isinstance(nodo, dict):
-            self.db.reference(f"ESP32/{mac}").delete()
+        self.db.reference(f"ESP32/{mac}").delete()
         self._apagar_horario_central(mac)
         self.invalidate_cache()
         logger.info(f"{mac} borrado por {uid}")
@@ -1219,6 +1313,12 @@ class FirebaseManager:
             if not all_devices:
                 return None
 
+            # La clave exacta primero: con prefijos, una clave de 14 y otra de
+            # 17 de distintos duenos daban el dueno de la que saliese antes.
+            exacto = all_devices.get(device_id)
+            if isinstance(exacto, dict):
+                return str(exacto.get('Telegram_ID')) if exacto.get('Telegram_ID') else None
+
             # Buscar en todas las variantes del device_id
             for dev_id, dev_data in all_devices.items():
                 if not isinstance(dev_data, dict):
@@ -1490,6 +1590,11 @@ class FirebaseManager:
                     continue
                 if existing_id.startswith(device_id) or device_id.startswith(existing_id):
                     matching_devices.append((existing_id, dev_data))
+
+            # La clave exacta, si existe, es la UNICA: con prefijos el chat podia
+            # acabar autorizado en la variante larga de OTRA central.
+            if isinstance(all_devices.get(device_id), dict):
+                matching_devices = [(device_id, all_devices[device_id])]
 
             if not matching_devices:
                 logger.warning(f"Dispositivo {device_id} no encontrado en Firebase")
