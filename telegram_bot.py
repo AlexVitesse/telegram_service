@@ -35,7 +35,7 @@ from telegram.constants import ParseMode
 
 from config import config
 from scheduler import scheduler
-from mqtt_protocol import MqttEvent, EventType
+from mqtt_protocol import MqttEvent, EventType, normalizar_mac, escape_md
 from device_manager import DeviceManager
 from ai_handler import AIHandler
 import comandos_app
@@ -53,6 +53,25 @@ if TYPE_CHECKING: # ADD THIS BLOCK
     from firebase_manager import FirebaseManager
 
 logger = logging.getLogger(__name__)
+
+
+def teclado_alarma(device_id: str, con_bengala: bool, con_dejar_armado: bool = True) -> InlineKeyboardMarkup:
+    """
+    Botones de un aviso de alarma, todos atados a ESA central. Antes llevaban
+    "bengala_confirm" / "bengala_cancel" / "disarm_all" a secas y el handler
+    actuaba sobre todas las centrales del usuario que estuviesen sonando: con
+    dos alarmas a la vez, "Disparar bengala" disparaba las dos.
+    """
+    mac = normalizar_mac(device_id)
+    filas = []
+    if con_bengala:
+        filas.append([InlineKeyboardButton("🔥 Disparar bengala", callback_data=f"bengala_confirm_{mac}")])
+    abajo = []
+    if con_dejar_armado:
+        abajo.append(InlineKeyboardButton("🔒 Dejar armado", callback_data=f"bengala_cancel_{mac}"))
+    abajo.append(InlineKeyboardButton("🔓 Desactivar sistema", callback_data=f"disarm_{mac}"))
+    filas.append(abajo)
+    return InlineKeyboardMarkup(filas)
 
 
 @dataclass
@@ -1711,11 +1730,21 @@ class TelegramBot:
         else:
             devices = target_devices
 
+        sin_conexion = []
+        cambios = {}  # rutas bajo /Horarios -> valor, escritas de una vez al final
         for device_id in devices:
             cfg = scheduler.cfg(device_id)
 
-            # 1. Enviar al ESP32
+            # 1. Enviar al ESP32. Encolado si esta offline: antes se publicaba
+            # y ya, el broker lo tiraba (la central usa sesion limpia) y la
+            # central seguia armandose con su horario viejo mientras el bot
+            # decia "deshabilitado".
             if self.mqtt_handler:
+                # Con el id resuelto, el mismo que usara send_command: la
+                # telemetria llega con la MAC de 17 y la clave es la de 14.
+                if not self.mqtt_handler.is_device_online(
+                        self.mqtt_handler.resolve_full_device_id(device_id)):
+                    sin_conexion.append(device_id)
                 self.mqtt_handler.send_set_schedule(
                     cfg.enabled,
                     cfg.on_hour,
@@ -1723,10 +1752,11 @@ class TelegramBot:
                     cfg.off_hour,
                     cfg.off_minute,
                     days=cfg.days_indices(),
-                    device_id=device_id
+                    device_id=device_id,
+                    queue_if_offline=True,
                 )
 
-            # 2. Actualizar Firebase (con nombres de días para la App)
+            # 2. Preparar Firebase (con nombres de días para la App)
             if self.firebase_manager.is_available():
                 try:
                     # Usar el Telegram_ID del propietario del dispositivo, no el chat_id
@@ -1744,7 +1774,7 @@ class TelegramBot:
                         owner_id = chat_id
                         logger.warning(f"No se encontró propietario para {device_id}, usando chat_id: {chat_id}")
 
-                    schedule_path = f"Horarios/{owner_id}/devices/{device_id}"
+                    schedule_path = f"{owner_id}/devices/{device_id}"
                     schedule_data = {
                         "activationTime": cfg.format_on_time(),
                         "deactivationTime": cfg.format_off_time(),
@@ -1754,30 +1784,84 @@ class TelegramBot:
                         # Numerico, como la app: se usa para desempatar entre entradas.
                         "lastUpdated": int(time.time() * 1000),
                     }
-                    self.firebase_manager.db.reference(schedule_path).set(schedule_data)
-                    logger.info(f"Horario sincronizado a Firebase: {schedule_path} (días: {cfg.format_days()})")
+                    cambios[schedule_path] = schedule_data
                 except Exception as e:
-                    logger.error(f"Error sincronizando horario a Firebase: {e}")
+                    logger.error(f"Error preparando horario de {device_id}: {e}")
+
+        # Todo en UNA escritura, por dos motivos:
+        # - Con varias centrales, escribir una a una dejaba al listener ver la
+        #   primera ya nueva y las demas aun viejas, y devolvia esas al
+        #   scheduler (y a la cola) con el horario anterior.
+        # - Se borran las entradas viejas de la misma central bajo otra clave
+        #   del dueno (el Telegram_ID de antes de migrar): si estaban
+        #   habilitadas, "habilitado gana" (elegir_por_dispositivo) las elegia
+        #   y un /horarios off se deshacia solo.
+        if cambios:
+            try:
+                todos = self.firebase_manager.db.reference("Horarios").get() or {}
+                for ruta in list(cambios):
+                    owner_id, _, device_id = ruta.split("/", 2)
+                    for clave, datos in todos.items():
+                        devs = datos.get("devices") if isinstance(datos, dict) else None
+                        if (str(clave) != owner_id and isinstance(devs, dict)
+                                and device_id in devs
+                                and self.firebase_manager._horario_aplica(str(clave), device_id)):
+                            cambios[f"{clave}/devices/{device_id}"] = None
+                self.firebase_manager.db.reference("Horarios").update(cambios)
+                logger.info(f"Horarios sincronizados a Firebase: {sorted(cambios)}")
+            except Exception as e:
+                logger.error(f"Error sincronizando horarios a Firebase: {e}")
+
+        # Que el "✅" que viene detras no se lea como "ya esta aplicado".
+        for device_id in sin_conexion:
+            nombre = self.firebase_manager.get_device_location(device_id) or device_id
+            await self.send_message(
+                chat_id,
+                f"⏳ *{escape_md(nombre)}* está sin conexión: el horario se "
+                f"aplicará cuando la central se conecte.",
+                "Markdown",
+            )
 
     @require_admin
     async def _cmd_adduser(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler para /adduser - Generar codigo de invitacion"""
         user = update.effective_user
+        chat_id = str(update.effective_chat.id)
         logger.info(f"/adduser de {user.first_name}")
 
-        # Generar codigo de invitacion basado en device_id
-        device_id = self.mqtt_handler.device_id if self.mqtt_handler else "ALARMA"
-        device_id = device_id or "ALARMA"
-        invite_code = f"/join_{device_id}"
+        # Solo las centrales de las que el chat es DUENO. Antes el codigo salia
+        # de mqtt_handler.device_id -la primera central que reporto desde el
+        # arranque, de cualquier cliente-, asi que la invitacion podia ser a
+        # la central de otra persona.
+        mias = [d for d in self.firebase_manager.get_authorized_devices(chat_id)
+                if self.firebase_manager.es_dueno(d, chat_id)]
+        if not mias:
+            await update.message.reply_text(
+                "❌ Solo el dueño de la central puede invitar a otras personas.")
+            return
+        if len(mias) == 1:
+            await update.message.reply_text(
+                self._texto_invitacion(mias[0]), parse_mode=ParseMode.MARKDOWN)
+            return
+        botones = [
+            [InlineKeyboardButton(self.firebase_manager.get_device_location(d) or d,
+                                  callback_data=f"adduser_{normalizar_mac(d)}")]
+            for d in mias
+        ]
+        await update.message.reply_text(
+            "¿A qué central quieres invitar?",
+            reply_markup=InlineKeyboardMarkup(botones))
 
-        msg = (
-            "📱 *AGREGAR NUEVO USUARIO*\n\n"
+    def _texto_invitacion(self, device_id: str) -> str:
+        nombre = self.firebase_manager.get_device_location(device_id) or device_id
+        return (
+            "📱 *AGREGAR NUEVO USUARIO*\n"
+            f"📍 {escape_md(nombre)}\n\n"
             "Envia este codigo al usuario que quieres agregar:\n\n"
-            f"`{invite_code}`\n\n"
+            f"`/join_{device_id}`\n\n"
             "El usuario debe enviarlo al bot y luego tu "
             "recibiras una notificacion para aprobarlo."
         )
-        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
     async def _handle_unknown_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler para mensajes de texto que no son comandos.
@@ -2144,6 +2228,23 @@ class TelegramBot:
                 _log_action(msg, ok=False, error="schedule_missing_params")
                 return
             days = params.get("days", [0, 1, 2, 3, 4, 5, 6])
+            # Validar TODO antes de tocar nada: un null del LLM acababa como
+            # `enabled: null` en Firebase, y unos dias con nombre reventaban
+            # sin respuesta.
+            def _hora_ok(h, m):
+                return isinstance(h, int) and isinstance(m, int) and 0 <= h <= 23 and 0 <= m <= 59
+            if (enabled is None
+                    or not _hora_ok(params["on_hour"], params["on_minute"])
+                    or not _hora_ok(params["off_hour"], params["off_minute"])
+                    or not isinstance(days, list) or not days
+                    or not all(isinstance(d, int) and 0 <= d <= 6 for d in days)):
+                msg = (
+                    "No pude interpretar el horario completo.\n"
+                    "Ejemplo: \"arma lunes a viernes de 10pm a 6am\""
+                )
+                await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+                _log_action(msg, ok=False, error="schedule_invalid_params")
+                return
             for dev_id in target_ids:
                 # El scheduler local tambien debe conocerlo: es quien manda los
                 # recordatorios y arma si el ESP32 no lo hace por su cuenta.
@@ -2151,15 +2252,13 @@ class TelegramBot:
                 scheduler.set_on_time(dev_id, params["on_hour"], params["on_minute"])
                 scheduler.set_off_time(dev_id, params["off_hour"], params["off_minute"])
                 scheduler.set_enabled(dev_id, enabled)
-                self.mqtt_handler.send_set_schedule(
-                    enabled=enabled,
-                    on_hour=params["on_hour"],
-                    on_minute=params["on_minute"],
-                    off_hour=params["off_hour"],
-                    off_minute=params["off_minute"],
-                    days=days,
-                    device_id=dev_id,
-                )
+            # Por el mismo camino que /horarios: encola si esta offline y lo
+            # escribe en Firebase. Antes se mandaba directo, no llegaba a la
+            # app y el usuario no recibia ninguna respuesta.
+            await self._sync_schedule_to_devices(chat_id, target_ids)
+            await update.message.reply_text(
+                "📅 Horario configurado.\n\n" + self._schedule_status_text(target_ids),
+                parse_mode=ParseMode.MARKDOWN, reply_markup=self._get_keyboard())
             logger.info(f"🤖 IA → SCHEDULE en {target_ids}: {params}")
             _log_action(f"schedule aplicado → {target_ids} params={params}")
 
@@ -2732,52 +2831,53 @@ class TelegramBot:
 
         logger.info(f"{text} de {user.first_name}")
 
-        # Extraer device_id del comando
-        device_id = text.replace("/join_", "")
+        # Solo en privado: pegada en un grupo, la aprobacion metia el GRUPO
+        # como Group_ID y cualquiera de sus miembros manejaba la alarma.
+        if chat_id.startswith("-"):
+            await update.message.reply_text(
+                "ℹ️ Envía el código en un chat privado con el bot, no en un grupo.")
+            return
 
+        # Una central concreta, no un prefijo: con prefijos "/join_6" casaba
+        # con media flota y la solicitud le llegaba a un dueno cualquiera.
+        device_id = self.firebase_manager.resolver_equipo(text.replace("/join_", "", 1))
         if not device_id:
             await update.message.reply_text(
-                "❌ Formato incorrecto. Usa: `/join_ID_DEL_DISPOSITIVO`",
-                parse_mode=ParseMode.MARKDOWN
+                "❌ Código no válido. Pídele al dueño de la central que te lo "
+                "mande otra vez con /adduser."
             )
             return
 
         # Verificar si ya tiene acceso a ESTE dispositivo específico
-        authorized_devices = self.firebase_manager.get_authorized_devices(chat_id)
-        for auth_dev in authorized_devices:
-            # Comparar considerando IDs truncados
-            if auth_dev.startswith(device_id) or device_id.startswith(auth_dev):
-                device_name = self.firebase_manager.get_device_location(auth_dev) or auth_dev
-                await update.message.reply_text(
-                    f"ℹ️ *Ya tienes acceso* a este dispositivo ({device_name}).",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-                return
+        if device_id in self.firebase_manager.get_authorized_devices(chat_id):
+            await update.message.reply_text("ℹ️ Ya tienes acceso a esa central.")
+            return
 
         # Agregar solicitud pendiente en Firebase
         self.firebase_manager.add_pending_request(chat_id, user.first_name, device_id)
 
-        # Obtener nombre del dispositivo si existe
-        device_name = self.firebase_manager.get_device_location(device_id) or device_id
-
+        # Sin nombre ni MAC: quien prueba codigos no debe saber de quien es la
+        # central. El dueno si la ve en su aviso.
         await update.message.reply_text(
-            f"⏳ *Solicitud enviada* al administrador.\n"
-            f"📱 Dispositivo: *{device_name}*\n\n"
-            f"⏰ La solicitud expira en *5 minutos*.\n"
-            f"Recibirás una notificación cuando seas autorizado.",
+            "⏳ *Solicitud enviada* al dueño de la central.\n\n"
+            "⏰ La solicitud expira en *5 minutos*.\n"
+            "Recibirás una notificación cuando seas autorizado.",
             parse_mode=ParseMode.MARKDOWN
         )
 
         # Notificar solo al dueño del dispositivo
         owner_id = self.firebase_manager.get_device_owner(device_id)
         if owner_id:
+            device_name = self.firebase_manager.get_device_location(device_id) or device_id
+            # La central va en el codigo de aprobacion: si el mismo chat pide
+            # luego OTRA central, este codigo no aprueba la otra.
             admin_msg = (
                 "🔔 *NUEVA SOLICITUD DE ACCESO*\n\n"
-                f"👤 Usuario: *{user.first_name}*\n"
+                f"👤 Usuario: *{escape_md(user.first_name or '')}*\n"
                 f"🆔 Chat ID: `{chat_id}`\n"
-                f"📱 Dispositivo: *{device_name}* (`{device_id}`)\n\n"
+                f"📱 Dispositivo: *{escape_md(device_name)}*\n\n"
                 f"⏰ Expira en 5 minutos\n\n"
-                f"✅ Para aprobar, envía:\n`/approve_{chat_id}`"
+                f"✅ Para aprobar, envía:\n`/approve_{chat_id}_{device_id}`"
             )
             await self.send_message(owner_id, admin_msg, "Markdown")
         else:
@@ -2791,8 +2891,9 @@ class TelegramBot:
 
         logger.info(f"{text} de {user.first_name}")
 
-        # Extraer chat_id del comando
-        target_chat_id = text.replace("/approve_", "")
+        # /approve_<chat>[_<central>]: la central es opcional para no romper
+        # los avisos ya enviados, pero si viene tiene que coincidir.
+        target_chat_id, _, central_codigo = text.replace("/approve_", "", 1).partition("_")
 
         if not target_chat_id:
             await update.message.reply_text(
@@ -2815,14 +2916,29 @@ class TelegramBot:
                 )
                 return
 
+            if central_codigo and normalizar_mac(central_codigo) != normalizar_mac(device_id):
+                await update.message.reply_text(
+                    "❌ Esa solicitud ya no es para esa central: el usuario pidió "
+                    "acceso a otra. Espera su nuevo aviso.")
+                return
+
+            # Solo el dueno de ESA central. Antes bastaba con tener cualquier
+            # central (is_user_admin es eso): cualquiera aprobaba a cualquiera
+            # en la central de otro. No se borra la solicitud: el dueno de
+            # verdad aun puede aprobarla.
+            if not self.firebase_manager.es_dueno(device_id, str(update.effective_chat.id)):
+                await update.message.reply_text(
+                    "❌ Esa solicitud es para una central que no es tuya.")
+                return
+
             # Agregar autorización en Firebase
             success = self.firebase_manager.add_authorized_chat(device_id, target_chat_id)
 
-            # Eliminar solicitud pendiente
-            self.firebase_manager.remove_pending_request(target_chat_id)
-
             if success:
-                device_name = self.firebase_manager.get_device_location(device_id) or device_id
+                # Solo si salio: si no, el dueno puede reintentar.
+                self.firebase_manager.remove_pending_request(target_chat_id)
+                device_name = escape_md(self.firebase_manager.get_device_location(device_id) or device_id)
+                approved_name = escape_md(approved_name)
 
                 await update.message.reply_text(
                     f"✅ *Usuario aprobado*\n\n"
@@ -2874,6 +2990,17 @@ class TelegramBot:
             await self._handle_sales_callback(query, chat_id, user_name, data)
             return
 
+        # Invitar solo necesita Firebase, no MQTT.
+        if data and data.startswith("adduser_"):
+            mias = self.firebase_manager.get_authorized_devices(chat_id)
+            central = self.firebase_manager.resolver_equipo(data[len("adduser_"):], entre=mias)
+            if not central or not self.firebase_manager.es_dueno(central, chat_id):
+                await query.edit_message_text("❌ Solo el dueño de la central puede invitar.")
+            else:
+                await query.edit_message_text(
+                    self._texto_invitacion(central), parse_mode=ParseMode.MARKDOWN)
+            return
+
         if not self.mqtt_handler:
             await query.edit_message_text("❌ Error: Sistema no conectado")
             return
@@ -2905,9 +3032,10 @@ class TelegramBot:
             await query.edit_message_text("❌ Disparo cancelado.")
 
         # Callbacks para recordatorio de alarma activa
-        elif data == "bengala_confirm":
-            # Disparar bengala en dispositivos en alarma
-            alarming_devices = [d for d in devices if self.device_manager.is_alarming(d)]
+        elif data == "bengala_confirm" or data.startswith("bengala_confirm_"):
+            alarming_devices = await self._centrales_del_aviso(query, data, "bengala_confirm", devices)
+            if alarming_devices is None:
+                return
             if alarming_devices:
                 await query.edit_message_text("🔥 Enviando comando para disparar bengala...")
                 for device_id in alarming_devices:
@@ -2927,19 +3055,22 @@ class TelegramBot:
             else:
                 await query.edit_message_text("ℹ️ No hay dispositivos en alarma activa.")
 
-        elif data == "bengala_cancel":
+        elif data == "bengala_cancel" or data.startswith("bengala_cancel_"):
             # Dejar armado - detener sirena pero mantener armado
+            objetivo = await self._centrales_del_aviso(query, data, "bengala_cancel", devices)
+            if objetivo is None:
+                return
             await query.edit_message_text("🔇 Deteniendo sirena...")
 
-            # Detener la alarma (sirena/buzzer) en dispositivos que están alarmando
             stopped_devices = []
-            for device_id in devices:
-                if self.device_manager.is_alarming(device_id):
-                    self.mqtt_handler.send_stop_alarm(device_id=device_id)
-                    # Reset alarming state to stop reminders
-                    self.device_manager.set_alarming_state(device_id, False)
-                    device_location = self.firebase_manager.get_device_location(device_id) or device_id
-                    stopped_devices.append(device_location)
+            for device_id in objetivo:
+                self.mqtt_handler.send_stop_alarm(device_id=device_id)
+                # Con el id de MQTT: con el de Firebase se creaba una entrada
+                # nueva y la de verdad seguia "sonando" y mandando recordatorios.
+                self.device_manager.set_alarming_state(
+                    self.mqtt_handler.resolve_full_device_id(device_id), False)
+                device_location = self.firebase_manager.get_device_location(device_id) or device_id
+                stopped_devices.append(device_location)
                 self._clear_bengala_confirmation(device_id)
 
             if stopped_devices:
@@ -3091,8 +3222,8 @@ class TelegramBot:
 
         # Desarmar dispositivo específico
         elif data.startswith("disarm_") and data != "disarm_all":
-            target_device = data.replace("disarm_", "")
-            if target_device in devices:
+            target_device = self.firebase_manager.resolver_equipo(data[len("disarm_"):], entre=devices)
+            if target_device:
                 await self._disarm_devices(query, [target_device])
             else:
                 await query.edit_message_text("❌ No tienes acceso a este dispositivo.")
@@ -3385,15 +3516,7 @@ class TelegramBot:
         )
 
         # Teclado con botones para chat privado
-        keyboard_private = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("🔥 Disparar bengala", callback_data="bengala_confirm")
-            ],
-            [
-                InlineKeyboardButton("🔒 Dejar armado", callback_data="bengala_cancel"),
-                InlineKeyboardButton("🔓 Desactivar sistema", callback_data="disarm_all")
-            ]
-        ])
+        keyboard_private = teclado_alarma(device_id, con_bengala=True)
 
         # Enviar a todos los chats autorizados
         for chat_id in chat_ids:
@@ -3460,9 +3583,7 @@ class TelegramBot:
         )
 
         # Teclado solo con botón de desactivar
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔓 Desactivar sistema", callback_data="disarm_all")]
-        ])
+        keyboard = teclado_alarma(device_id, con_bengala=False, con_dejar_armado=False)
 
         # Enviar a todos los chats autorizados
         for chat_id in chat_ids:
@@ -3525,9 +3646,7 @@ class TelegramBot:
                     f"Usa /off para desactivar el sistema."
                 )
 
-                keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔓 Desactivar sistema", callback_data="disarm_all")]
-                ])
+                keyboard = teclado_alarma(device_id, con_bengala=False, con_dejar_armado=False)
 
                 for chat_id in notification["chat_ids"]:
                     try:
@@ -3560,12 +3679,54 @@ class TelegramBot:
         except Exception as e:
             logger.error(f"Error en tarea de recordatorio de alarma para {device_id}: {e}")
 
+    async def _centrales_del_aviso(self, query, data: str, prefijo: str, devices: List[str]) -> Optional[List[str]]:
+        """
+        Sobre que centrales actua un boton de aviso de alarma.
+
+        - `prefijo_<MAC>`: solo esa, si es del chat y esta sonando.
+        - `prefijo` a secas (mensajes enviados antes del cambio): si suena
+          una sola, esa; si suenan varias NO se elige por el usuario, se le
+          ofrece un boton por central.
+
+        Devuelve la lista, o None si ya contesto y no hay que hacer nada.
+        """
+        sonando = [d for d in devices if self.device_manager.is_alarming(d)]
+        if data != prefijo:
+            central = self.firebase_manager.resolver_equipo(data[len(prefijo) + 1:], entre=devices)
+            if not central:
+                await query.edit_message_text("❌ No tienes acceso a este dispositivo.")
+                return None
+            if central not in sonando:
+                await query.edit_message_text("ℹ️ Esa alarma ya no está activa.")
+                return None
+            return [central]
+        if len(sonando) <= 1:
+            return sonando
+        botones = [
+            [InlineKeyboardButton(
+                self.firebase_manager.get_device_location(d) or d,
+                callback_data=f"{prefijo}_{normalizar_mac(d)}")]
+            for d in sonando
+        ]
+        await query.edit_message_text(
+            f"Hay {len(sonando)} alarmas activas. ¿En cuál?",
+            reply_markup=InlineKeyboardMarkup(botones))
+        return None
+
+    @staticmethod
+    def _claves_de(registro: dict, device_id: str) -> List[str]:
+        """Claves de `registro` que son la misma central: se guardan con el id de
+        MQTT y se limpian con el de Firebase, que puede ser otra forma."""
+        mac = normalizar_mac(device_id)
+        return [k for k in list(registro) if normalizar_mac(k) == mac]
+
     def _clear_alarm_notification(self, device_id: str):
         """Limpia el estado de notificación de alarma para un dispositivo."""
-        notification = self._alarm_notifications.pop(device_id, None)
-        if notification and notification.get("reminder_task"):
-            notification["reminder_task"].cancel()
-            logger.debug(f"Notificación de alarma limpiada para {device_id}")
+        for clave in self._claves_de(self._alarm_notifications, device_id):
+            notification = self._alarm_notifications.pop(clave, None)
+            if notification and notification.get("reminder_task"):
+                notification["reminder_task"].cancel()
+            logger.debug(f"Notificación de alarma limpiada para {clave}")
 
     async def _bengala_reminder_task(self, device_id: str):
         """
@@ -3664,10 +3825,11 @@ class TelegramBot:
 
     def _clear_bengala_confirmation(self, device_id: str):
         """Limpia el estado de confirmación de bengala para un dispositivo."""
-        confirmation = self._bengala_confirmations.pop(device_id, None)
-        if confirmation and confirmation.reminder_task:
-            confirmation.reminder_task.cancel()
-            logger.debug(f"Confirmación de bengala limpiada para {device_id}")
+        for clave in self._claves_de(self._bengala_confirmations, device_id):
+            confirmation = self._bengala_confirmations.pop(clave, None)
+            if confirmation and confirmation.reminder_task:
+                confirmation.reminder_task.cancel()
+            logger.debug(f"Confirmación de bengala limpiada para {clave}")
 
     # ========================================
     # Metodos Anti-Spam

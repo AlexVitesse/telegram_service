@@ -48,3 +48,5 @@ esp32_simulator.py
 # lo revertia al formato viejo, forzando una migracion y una resincronizacion
 # desde Firebase que no hacian falta.
 schedule_config.json
+pending_commands.json
+pending_commands.json.tmp

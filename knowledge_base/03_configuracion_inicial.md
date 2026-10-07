@@ -12,68 +12,92 @@ Se recomienda ver el video antes de comenzar la configuracion. Muestra como empe
 
 Antes de comenzar la configuracion, asegurese de tener:
 
-- Un telefono con Telegram instalado.
-- La app Sentinel Guard descargada en el telefono.
+- La app Sentinel Guard descargada en el telefono, con el Bluetooth activado.
 - El Modulo Master encendido y alimentado.
-- Acceso a la red WiFi donde se conectara el Master (nombre de red y contrasena).
+- El nombre (SSID) y la contrasena de la red WiFi de 2.4 GHz donde se conectara el Master. El equipo no se conecta a redes de 5 GHz.
+- Opcional: Telegram instalado y tu ID de Telegram, si quieres recibir los avisos por Telegram.
 
 ## Registro en la App Sentinel Guard
 
 Para crear una cuenta en la app:
 
 1. Abrir la app Sentinel Guard.
-2. Seleccionar la opcion de registro.
-3. Ingresar nombre completo, correo electronico y contrasena.
-4. La contrasena debe tener entre 4 y 8 caracteres. Puede incluir letras mayusculas, minusculas, numeros y caracteres especiales.
+2. Tocar "Registrate" (debajo de "¿No tienes cuenta?").
+3. En "Crear Cuenta" ingresar nombre de usuario (minimo 3 caracteres), correo electronico y contrasena.
+4. La contrasena debe tener entre 6 y 20 caracteres.
+5. Tocar "Crear Cuenta" y luego iniciar sesion con ese correo y contrasena.
+
+Tambien se puede entrar con Google o Apple sin crear una cuenta aparte.
 
 ## Configuracion del Master via Bluetooth (BLE)
 
-Este paso permite conectar el Master a la red WiFi y asignarle un nombre de ubicacion. La configuracion BLE solo transmite tres datos: SSID, contrasena WiFi y ubicacion.
+Asi se da de alta, se agrega, se registra o se vincula el Master a tu cuenta: se empareja desde la app por Bluetooth. En un solo paso el Master recibe la red WiFi y su nombre, y queda registrado en tu cuenta. La app lo muestra en 3 pasos: "PASO 1 Conexion", "PASO 2 Red Wi-Fi" y "PASO 3 Alertas".
 
-### Paso 1: Entrar en modo configuracion
+### Paso 1: Abrir la pantalla Agregar
 
-Insertar un clip o alfiler en el orificio trasero del Modulo Master y mantener presionado entre 5 y 8 segundos hasta escuchar un pitido. Esto indica que el Master entro en modo configuracion.
+En la app toca "Agregar" en la barra inferior, o el boton "Agregar" (o el icono +) en la pantalla Inicio. Si todavia no tienes ningun equipo, el boton principal dice "Vincular un equipo". La tarjeta "Antes de empezar" resume lo que necesitas.
 
-Precaucion: si se mantiene presionado por mas de 10 segundos, se ejecutara un reset de fabrica que borra toda la configuracion almacenada.
+### Paso 2: Poner el Master en modo emparejamiento
 
-### Paso 2: Conectar desde la app
+Insertar un clip en el orificio trasero del Modulo Master y mantenerlo pulsado unos 3 segundos y soltar al oir los cinco pitidos cortos; no llegar a 10 segundos (eso borra el equipo). Desde ese momento el LED de estado del Master parpadea: el equipo esta en modo emparejamiento.
 
-1. Activar Bluetooth en el telefono.
-2. Abrir la app Sentinel Guard.
-3. La app escanea automaticamente los dispositivos cercanos.
-4. Presionar el boton "Conectar dispositivo" cuando aparezca el Master.
+Precaucion: si se mantiene pulsado 10 segundos o mas, se ejecuta un reset de fabrica que borra toda la configuracion guardada en el Master: red WiFi, nombre, modo de bengala, tiempo de salida, horarios y estado de armado.
 
-### Paso 3: Configurar WiFi y ubicacion
+### Paso 3: Conectar desde la app
 
-1. Seleccionar la red WiFi (SSID) de la lista que muestra la app.
-2. Ingresar la contrasena de la red WiFi.
-3. Ingresar un nombre descriptivo para identificar al Master, por ejemplo: "Recepcion", "Pasillo", "Oficina principal", "Casa playa".
+1. Acercate al Master: el Bluetooth alcanza unos 10 metros.
+2. La app busca sola ("Buscando dispositivos cercanos…"). El equipo aparece como "Sentinel Master" con el texto "Listo para vincular".
+3. Toca el equipo. Si solo hay uno cerca, la app se conecta sola ("Conectando con la central…").
 
-### Paso 4: Guardar configuracion
+### Paso 4: Configurar dispositivo (WiFi, Telegram y nombre)
 
-Presionar el boton "Aceptar". El equipo se reiniciara automaticamente, se conectara a la red WiFi configurada y quedara listo para operar.
+Se abre "Configurar dispositivo" (PASO 2 DE 3):
 
-## Vinculacion con Telegram (paso posterior)
+1. **SSID (Requerido)**: elige tu red de la lista. Si no aparece, elige "Ingresar manualmente..." y escribela en "Ingresar SSID". Si no aparece en la lista puede ser de 5 GHz. Tambien puedes usar "Escanear el QR de la red".
+2. **Password (Requerido)**: la contrasena de la red WiFi.
+3. **Avisos por Telegram (opcional)**: tu CHATID y, si quieres avisos en un grupo, el CHATID GRUPAL.
+4. **Nombre del dispositivo (Requerido)**: un nombre para identificar al Master, por ejemplo "Recepcion", "Oficina principal" o "Casa playa".
 
-La vinculacion con Telegram NO se realiza durante la configuracion BLE. Es un proceso totalmente digital que se hace despues de que el Master ya esta conectado a WiFi:
+Toca "Confirmar". Por Bluetooth solo viajan al Master la red WiFi, la contrasena y el nombre; los IDs de Telegram los guarda la app en tu cuenta.
 
-1. Abrir Telegram y buscar el chatbot de Sentinel Guard (escaneando el QR del instructivo impreso o buscando el bot directamente).
-2. Enviar el comando /start al bot. El primer usuario que lo haga quedara registrado como Administrador Principal.
-3. El bot vincula automaticamente el dispositivo con tu cuenta de Telegram usando el ID de tu chat.
-4. Para agregar mas usuarios, el administrador usa el comando /adduser para generar un codigo de invitacion.
+### Paso 5: Conexion y registro
+
+El Master intenta conectarse a la red WiFi. La app espera hasta 50 segundos. Si conecta, muestra "Conectado a Wi-Fi exitosamente.", registra el equipo en tu cuenta y espera a que se reinicie ("Dispositivo reiniciando en: N segundos"). Al final aparece "CONFIGURACION COMPLETA - Tu Sentinel ya esta en linea" y el boton "Ir al inicio".
+
+Si el equipo ya estaba en otra cuenta, al emparejarlo pasa a la tuya; la app puede mostrar "Esperando a que la central se conecte…" mientras tanto.
+
+## Si el emparejamiento falla
+
+Mensajes que puede mostrar la app y que hacer:
+
+- "La central no pudo conectarse a la red": revisa la contrasena y que la red sea de 2.4 GHz. Si estan bien, apaga y enciende la central y vuelve a empezar.
+- "La conexion tardo demasiado": puede ser una red de 5 GHz, un SSID o contrasena incorrectos, o que la central ya salio del modo emparejamiento.
+- "Se perdio la conexion con la central" o "No hay conexion con la central": vuelve a ponerla en modo emparejamiento con el clip e intentalo otra vez.
+
+Si la contrasena WiFi esta mal, el Master no vuelve solo al modo emparejamiento: sigue en emparejamiento hasta que se acaban los 5 minutos y se reinicia. Repite el proceso desde el Paso 2.
+
+## Tiempo limite de emparejamiento
+
+El modo emparejamiento dura 5 minutos desde los pitidos. Si no se completa en ese tiempo, el Master apaga el Bluetooth, sale del modo emparejamiento y se reinicia solo. Sera necesario repetir el proceso desde el Paso 2 (clip unos 3 segundos, hasta los cinco pitidos).
+
+## Vinculacion con Telegram
+
+Telegram es opcional y se vincula dentro del mismo emparejamiento, en "Avisos por Telegram (opcional)":
+
+1. Para conocer tu ID de Telegram, toca "Obtenerlo ahora" en la tarjeta "Antes de empezar" (abre el bot de Sentinel Guard, @esp32_space_bot, que te muestra tu ID), o envia /id al bot. El bot contesta "Tu Chat ID es: ...".
+2. Escribe ese numero en CHATID al configurar el dispositivo.
+3. Si lo agregas mas tarde, se hace en la ficha del equipo ("Ver detalles y ajustes" > "Editar" > "Agregar usuario o grupo"), o en Perfil > "Chat ID de Telegram" para tu cuenta.
+
+Cada equipo admite hasta tres destinatarios de Telegram: dos usuarios y un grupo. Para que otra persona controle el equipo desde Telegram, el administrador usa /adduser (ver Usuarios y Permisos).
 
 ## Configuracion de grupo de Telegram (opcional)
 
 Si se desea que varias personas reciban notificaciones de alarma en un grupo compartido:
 
 1. Crear un grupo en Telegram.
-2. Agregar al chatbot de Sentinel Guard como miembro del grupo.
-3. El grupo solo recibe alertas y notificaciones. No es posible enviar comandos al sistema desde el grupo, solo desde el chat directo con el bot.
-4. El ID del grupo se puede configurar desde la app en la pantalla de Dispositivos, editando los datos del dispositivo.
-
-## Tiempo limite de configuracion
-
-El modo configuracion BLE tiene un timeout de 5 minutos. Si no se completa la configuracion dentro de ese tiempo, el Master sale automaticamente del modo configuracion y vuelve a su operacion normal. Sera necesario repetir el proceso desde el Paso 1.
+2. Agregar al bot de Sentinel Guard como miembro del grupo y escribir /id en el grupo. El bot contesta con el numero del grupo (empieza por -).
+3. Copiar ese numero en "CHATID GRUPAL" al emparejar, o en la ficha del equipo con "Agregar usuario o grupo" > "Grupo".
+4. El grupo solo recibe alertas y notificaciones. No es posible enviar comandos al sistema desde el grupo, solo desde el chat directo con el bot.
 
 ## Configuracion del kit completo paso a paso
 
@@ -82,41 +106,35 @@ El kit Sentinel Guard incluye el Modulo Master (ESP32 + LoRa), sensores PIR, sen
 ### Paso 1: Encender el Master
 
 1. Conectar el Master a su fuente de alimentacion 12V.
-2. Esperar a que el LED del Master indique que esta encendido.
+2. Al encender, los LEDs y el zumbador se activan un segundo como prueba.
 3. Verificar que no haya interferencias fisicas en su ubicacion.
 
-### Paso 2: Configurar WiFi y ubicacion del Master
+### Paso 2: Crear la cuenta y emparejar el Master
 
-Seguir el procedimiento BLE descrito arriba en la seccion "Configuracion del Master via Bluetooth". Solo se envian SSID, contrasena WiFi y nombre de ubicacion. Luego el Master se reinicia y conecta a la red.
+Crear la cuenta en la app (si no existe) y seguir el procedimiento de la seccion "Configuracion del Master via Bluetooth (BLE)". Al terminar, el Master queda conectado a WiFi y registrado en tu cuenta; no hay que agregarlo otra vez.
 
 ### Paso 3: Encender los modulos secundarios (slaves)
 
-Los sensores PIR, magneticos, la sirena, la bengala y el teclado vienen ya emparejados de fabrica con el Master incluido en el kit. No requieren configuracion adicional. Solo hay que:
+Los sensores PIR, magneticos, la sirena, la bengala y el teclado vienen ya emparejados de fabrica con el Master incluido en el kit. No se dan de alta desde la app. Solo hay que:
 
 1. Colocar cada modulo en su ubicacion fisica definitiva.
 2. Conectar o insertar sus pilas segun el caso.
 3. Verificar que cada modulo parpadee su LED de encendido.
 
-La comunicacion entre el Master y los slaves usa LoRa con un canal preconfigurado, por eso no se requiere emparejamiento manual.
+La comunicacion entre el Master y los slaves usa LoRa con un canal preconfigurado: el Master reconoce cada modulo la primera vez que lo escucha, por eso no se requiere emparejamiento manual.
 
-### Paso 4: Vincular con Telegram
+### Paso 4: Telegram (opcional)
 
-Seguir la seccion "Vinculacion con Telegram" de este documento. Enviar /start al bot desde Telegram para registrarse como Administrador Principal.
+Si no pusiste tu ID de Telegram al emparejar, agregalo despues como se explica en "Vinculacion con Telegram".
 
-### Paso 5: Vincular con la app Sentinel Guard
+### Paso 5: Probar el sistema
 
-1. Crear cuenta en la app (si no existe).
-2. Entrar a la pantalla Dispositivos.
-3. Presionar el boton para agregar dispositivo.
-4. La app detectara el Master ya conectado a la nube y lo asociara a la cuenta.
-
-### Paso 6: Probar el sistema
-
-1. Armar la alarma con el comando /on en Telegram o desde la app.
-2. Activar un sensor (abrir una puerta con sensor magnetico o pasar frente a un PIR).
-3. Confirmar que la sirena suena y que el bot notifica el evento.
-4. Desarmar con /off o desde la app.
+1. Armar la alarma desde la app ("Proteger ahora") o con /on en Telegram.
+2. Esperar a que termine el tiempo de salida (60 segundos por defecto).
+3. Activar un sensor (abrir una puerta con sensor magnetico o pasar frente a un PIR).
+4. Confirmar que la sirena suena y que llega el aviso.
+5. Desarmar desde la app ("Desarmar") o con /off.
 
 ### Sincronizacion automatica
 
-Los horarios, configuracion de bengala, codigo del teclado y demas ajustes se sincronizan automaticamente entre la app, Telegram y el Master. No es necesario repetir la configuracion en cada canal.
+Los horarios, la configuracion de bengala, el tiempo de salida y demas ajustes se guardan en la nube y llegan al Master cuando esta en linea. No es necesario repetir la configuracion en cada canal. La contrasena del teclado es la excepcion: se guarda solo en el teclado.

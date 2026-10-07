@@ -4,53 +4,64 @@
 
 La app Sentinel Guard esta disponible para Android e iOS. Permite controlar todo el sistema de alarma desde el telefono movil.
 
+La barra inferior tiene cuatro pestañas: "Inicio" (tus equipos), "Agregar" (emparejar un equipo nuevo), "Horarios" y "Perfil" (configuracion de la cuenta).
+
 ## Pantalla Login
 
 La pantalla de inicio de sesion ofrece las siguientes opciones:
 
-- **Registro**: Crear cuenta con nombre, email y contrasena.
-- **Inicio de sesion**: Ingresar con email y contrasena, Google o Apple.
-- **Recuperar contrasena**: Enviar enlace de recuperacion al email registrado.
-- **Recordarme**: Opcion para mantener la sesion abierta y no tener que ingresar credenciales cada vez.
+- **Registro**: "Registrate" abre "Crear Cuenta": nombre de usuario, correo y contrasena de 6 a 20 caracteres.
+- **Inicio de sesion**: Ingresar con correo y contrasena, con Google o con Apple.
+- **Olvide mi contrasena**: Envia un enlace de recuperacion al correo. Si no llega, revisa la carpeta de SPAM.
+- **Mantener sesion iniciada**: Casilla para no tener que ingresar las credenciales cada vez.
 
-## Pantalla Dispositivos (principal)
+## Pantalla Inicio (dispositivos)
 
 Esta es la pantalla principal de la app y funciona como dashboard central:
 
-- **Toggle armar/desarmar**: Control rapido para activar o desactivar el sistema de alarma.
-- **Boton Activar Alarma**: Disparo manual de la alarma (sirena) desde la app.
-- **Informacion del dispositivo**: Nombre, direccion MAC, senal WiFi (dBm), memoria libre, sensores LoRa activos y tiempo encendido (uptime).
-- **Editar nombre**: Puedes cambiar el nombre del dispositivo para identificarlo facilmente.
-- **Configurar bengala**: Tres modos disponibles: Auto (se dispara sola), Pregunta (te consulta antes de disparar) y Deshabilitada.
-- **Horarios activos**: Ver los horarios de armado/desarmado programados.
-- **Senti, el asistente**: Un boton flotante presente en todas las pantallas. Abre un chat donde puedes preguntar dudas sobre el sistema y tambien dar ordenes escritas: "arma la alarma", "esta armada?", "cuantos equipos tengo?". Arma y desarma de verdad, con el mismo camino que el toggle; antes de desarmar pregunta con dos botones y dice que equipo va a desarmar. Lo que todavia no hace desde ahi -silenciar una sirena, la bengala, los horarios, el historial- lo dice y remite a donde se hace. Se puede ocultar desde Configuracion.
-- **Gestionar IDs de Telegram**: Configurar multiples usuarios de Telegram para recibir notificaciones y controlar el dispositivo.
-- **Tiempo de salida**: Configurable de 0 a 180 segundos. Es el tiempo que tienes para salir despues de armar el sistema.
-- **Estado en tiempo real**: La informacion se actualiza en tiempo real desde Firebase.
+- **Boton de armado**: "Proteger ahora" arma y "Desarmar" desarma. Actua sobre todas tus centrales a la vez. El titulo muestra "Proteccion activa" o "Sistema desarmado".
+- **Atajos**: "Salir" (arma), "En casa" (desarma) y "Programar" (abre Horarios).
+- **Boton Emergencia (SOS)**: Activa la alarma (sirena) manualmente en todos tus equipos, con confirmacion previa.
+- **Conexion**: "Central en linea" o "Central sin conexion". Una central cuenta como en linea si mando datos en los ultimos 90 segundos.
+- **Tarjeta de cada equipo**: nombre, estado ("Armado", "Desarmado" o "Sin conexion") y el boton "Ver detalles y ajustes", que abre la ficha del equipo.
+- **Seguridad Programada**: Ver los horarios de armado/desarmado activos.
+- **Avisos**: La campana guarda el historial de notificaciones recibidas.
+- **Senti, el asistente**: Un boton flotante presente en todas las pantallas. Abre un chat donde puedes preguntar dudas sobre el sistema y tambien dar ordenes escritas: "arma la alarma", "esta armada?", "cuantos equipos tengo?". Arma y desarma de verdad, con el mismo camino que el boton de armado; antes de desarmar pregunta con dos botones y dice que equipo va a desarmar. Lo que todavia no hace desde ahi -silenciar una sirena, la bengala, los horarios, el historial- lo dice y remite a donde se hace. Se puede ocultar desde Perfil > Notificaciones > Senti.
 
-## Pantalla Alarma (horarios)
+## Ficha del equipo
 
-Permite programar el armado y desarmado automatico del sistema:
+Se abre tocando la tarjeta del equipo o "Ver detalles y ajustes":
 
-- **Presets rapidos**:
-  - Trabajo: 7:00 a 18:00, lunes a viernes.
-  - Dormir: 22:00 a 7:00, todos los dias.
-  - Finde: 10:00 a 23:00, sabado y domingo.
-  - Vacaciones: 24/7, armado permanente.
-- **Configuracion manual**: Seleccionar hora de armado, hora de desarmado y dias de la semana.
-- **Gestion de horarios**: Ver, editar o eliminar horarios existentes.
+- **Estado**: senal WiFi (Excelente, Buena, Regular o Debil, con su valor en dBm), numero de sensores LoRa y tiempo activo.
+- **Proteger equipo / Desarmar equipo**: arma o desarma solo ese equipo.
+- **Bengala**: tres modos: "Auto" (se dispara sola), "Pregunta" (Telegram pregunta antes de dispararla) y "Apagada" (no se dispara nunca).
+- **Modo de prueba**: "Simular disparo" muestra como se veria una alarma sin enviar nada a la central.
+- **Sensores LoRa**: lista de modulos, cada uno "Activo" u "Offline".
+- **Ajustes**: direccion MAC, destinatarios de Telegram y tiempo de salida.
+- **Editar**: cambiar el "Nombre del equipo", agregar o quitar destinatarios de Telegram ("Agregar usuario o grupo", hasta dos usuarios y un grupo) y ajustar el "Tiempo de salida" (60 por defecto). El rango util es de 10 a 180 segundos: la app deja elegir menos de 10, pero ese valor no se aplica y el Master conserva el que tenia. Se guarda con "Guardar cambios".
+- **Borrar dispositivo**: borra el equipo de tu cuenta y su configuracion en la nube, pero no la memoria del propio Master; para dejarlo limpio hay que hacer el reset de fabrica (ver "Como desvinculo, quito o borro un dispositivo" en Preguntas Frecuentes).
 
-## Pantalla Configuracion
+## Pantalla Horarios
+
+La pestaña "Horarios" (titulo "Programar Alarma") permite programar el armado y desarmado automatico del sistema:
+
+- **Configuracion Rapida (presets)**:
+  - Salida al Trabajo: 7:00 a 18:00, lunes a viernes.
+  - Hora de Dormir: 22:00 a 7:00, todos los dias.
+  - Fin de Semana: 10:00 a 23:00, sabado y domingo.
+  - Viaje/Vacaciones: 00:00 a 23:59, todos los dias (proteccion 24 horas).
+- **Configuracion manual**: elegir "Equipo" (si tienes varios, uno o "Todos mis equipos"), "Hora de Activacion", "Hora de Desactivacion" y los dias, y tocar "Programar Alarma".
+- **Alarmas Programadas**: lista de horarios con un icono de papelera para eliminarlos. No hay boton de editar: para cambiar un horario se programa de nuevo.
+
+## Pantalla Perfil (Configuracion)
 
 Opciones generales de la app y la cuenta:
 
-- **Perfil**: Cambiar nombre, email o contrasena.
-- **Notificaciones push**: Activar o desactivar las notificaciones en el telefono.
-- **Informacion de la app**: Version y datos de la aplicacion.
-- **FAQ**: Preguntas frecuentes sobre el sistema.
-- **Contacto soporte**: Comunicarse con el equipo de soporte tecnico.
-- **Cerrar sesion**: Salir de la cuenta actual.
-- **Eliminar cuenta**: Eliminacion permanente de la cuenta y todos los datos asociados.
+- **Editar Informacion**: "Cambiar Nombre", "Chat ID de Telegram", "Cambiar Correo" y "Cambiar Contrasena" (pide la contrasena actual).
+- **Notificaciones**: "Notificaciones Push", "Armado y desarmado", "Conexion de la central", "Avisos por Telegram" y "Senti" (mostrar u ocultar el asistente).
+- **Cerrar Sesion**: Salir de la cuenta actual.
+- **Eliminar Cuenta**: Eliminacion permanente de la cuenta, de sus equipos y de todos los datos asociados.
+- **Acerca de**: version de la app, "Contacto y Soporte" (correo, WhatsApp y sitio web) y "Preguntas Frecuentes".
 
 ## Notificaciones Push
 
@@ -59,18 +70,19 @@ La app envia alertas en tiempo real al telefono:
 - Alarma activada (intrusion detectada).
 - Sistema armado o desarmado.
 - Bengala disparada.
-- Sensor offline o sin respuesta.
+- Central sin conexion o que vuelve a conectarse.
 
-Al tocar una notificacion se abre directamente la pantalla de dispositivos para ver el estado actual.
+Los avisos de alarma y de bengala no se pueden apagar. Los de armado/desarmado y de conexion se activan o desactivan en Perfil > Notificaciones.
+
+Al tocar una notificacion se abre la pantalla Inicio; si el aviso es de un equipo sin conexion, se abre directamente la ficha de ese equipo.
 
 ## Vinculacion de dispositivo
 
-El proceso de vinculacion se realiza desde la pantalla Home de la app:
+Para dar de alta, agregar, registrar o vincular un equipo se usa la pestaña "Agregar":
 
-1. La app escanea dispositivos Bluetooth cercanos.
-2. Seleccionar el ESP32 (Master) de la lista.
-3. Conectar via Bluetooth Low Energy (BLE).
-4. Configurar la red WiFi (nombre y contrasena) y la ubicacion del dispositivo.
-5. El dispositivo se reinicia, se conecta a WiFi y queda registrado en la cuenta.
+1. Poner el Master en modo emparejamiento: clip en el orificio trasero, mantener pulsado unos 3 segundos y soltar al oir los cinco pitidos; no llegar a 10 segundos (eso borra el equipo).
+2. La app busca por Bluetooth y encuentra "Sentinel Master".
+3. En "Configurar dispositivo" se ingresa la red WiFi de 2.4 GHz (SSID y Password), los avisos por Telegram (opcional) y el nombre del dispositivo.
+4. Al tocar "Confirmar", el dispositivo se conecta a WiFi, queda registrado en la cuenta y se reinicia.
 
-La vinculacion con Telegram es un paso posterior y digital: el usuario debe enviar /start al bot de Telegram para registrarse. Los Chat IDs de Telegram se pueden configurar despues desde la pantalla de Dispositivos, editando la informacion del dispositivo.
+Los detalles estan en "Configuracion del Master via Bluetooth (BLE)". Los Chat IDs de Telegram se pueden cambiar despues desde la ficha del equipo.
