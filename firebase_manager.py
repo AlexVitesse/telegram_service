@@ -790,6 +790,11 @@ class FirebaseManager:
             return None
         return candidatas[0]
 
+    def es_dueno(self, device_id: str, chat_id: str) -> bool:
+        """Si el chat es el del dueno de la central (su Telegram_ID): solo el
+        puede invitar y aprobar. Ser "Usuario 2" o grupo no basta."""
+        return bool(chat_id) and str((self._nodo(device_id) or {}).get("Telegram_ID") or "") == str(chat_id)
+
     def _quitar_de_listas(self, mac: str, excepto: Optional[str] = None) -> List[str]:
         """Quita la MAC de `Usuarios/*/Dispositivos` (menos la de `excepto`). Devuelve a quien se la quito."""
         usuarios = self.db.reference("Usuarios").get() or {}

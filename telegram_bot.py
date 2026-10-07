@@ -35,7 +35,7 @@ from telegram.constants import ParseMode
 
 from config import config
 from scheduler import scheduler
-from mqtt_protocol import MqttEvent, EventType, normalizar_mac
+from mqtt_protocol import MqttEvent, EventType, normalizar_mac, escape_md
 from device_manager import DeviceManager
 from ai_handler import AIHandler
 import comandos_app
@@ -1782,21 +1782,42 @@ class TelegramBot:
     async def _cmd_adduser(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler para /adduser - Generar codigo de invitacion"""
         user = update.effective_user
+        chat_id = str(update.effective_chat.id)
         logger.info(f"/adduser de {user.first_name}")
 
-        # Generar codigo de invitacion basado en device_id
-        device_id = self.mqtt_handler.device_id if self.mqtt_handler else "ALARMA"
-        device_id = device_id or "ALARMA"
-        invite_code = f"/join_{device_id}"
+        # Solo las centrales de las que el chat es DUENO. Antes el codigo salia
+        # de mqtt_handler.device_id -la primera central que reporto desde el
+        # arranque, de cualquier cliente-, asi que la invitacion podia ser a
+        # la central de otra persona.
+        mias = [d for d in self.firebase_manager.get_authorized_devices(chat_id)
+                if self.firebase_manager.es_dueno(d, chat_id)]
+        if not mias:
+            await update.message.reply_text(
+                "❌ Solo el dueño de la central puede invitar a otras personas.")
+            return
+        if len(mias) == 1:
+            await update.message.reply_text(
+                self._texto_invitacion(mias[0]), parse_mode=ParseMode.MARKDOWN)
+            return
+        botones = [
+            [InlineKeyboardButton(self.firebase_manager.get_device_location(d) or d,
+                                  callback_data=f"adduser_{normalizar_mac(d)}")]
+            for d in mias
+        ]
+        await update.message.reply_text(
+            "¿A qué central quieres invitar?",
+            reply_markup=InlineKeyboardMarkup(botones))
 
-        msg = (
-            "📱 *AGREGAR NUEVO USUARIO*\n\n"
+    def _texto_invitacion(self, device_id: str) -> str:
+        nombre = self.firebase_manager.get_device_location(device_id) or device_id
+        return (
+            "📱 *AGREGAR NUEVO USUARIO*\n"
+            f"📍 {escape_md(nombre)}\n\n"
             "Envia este codigo al usuario que quieres agregar:\n\n"
-            f"`{invite_code}`\n\n"
+            f"`/join_{device_id}`\n\n"
             "El usuario debe enviarlo al bot y luego tu "
             "recibiras una notificacion para aprobarlo."
         )
-        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
     async def _handle_unknown_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handler para mensajes de texto que no son comandos.
@@ -2751,27 +2772,24 @@ class TelegramBot:
 
         logger.info(f"{text} de {user.first_name}")
 
-        # Extraer device_id del comando
-        device_id = text.replace("/join_", "")
-
+        # Una central concreta, no un prefijo: con prefijos "/join_6" casaba
+        # con media flota y la solicitud le llegaba a un dueno cualquiera.
+        device_id = self.firebase_manager.resolver_equipo(text.replace("/join_", "", 1))
         if not device_id:
             await update.message.reply_text(
-                "❌ Formato incorrecto. Usa: `/join_ID_DEL_DISPOSITIVO`",
-                parse_mode=ParseMode.MARKDOWN
+                "❌ Código no válido. Pídele al dueño de la central que te lo "
+                "mande otra vez con /adduser."
             )
             return
 
         # Verificar si ya tiene acceso a ESTE dispositivo específico
-        authorized_devices = self.firebase_manager.get_authorized_devices(chat_id)
-        for auth_dev in authorized_devices:
-            # Comparar considerando IDs truncados
-            if auth_dev.startswith(device_id) or device_id.startswith(auth_dev):
-                device_name = self.firebase_manager.get_device_location(auth_dev) or auth_dev
-                await update.message.reply_text(
-                    f"ℹ️ *Ya tienes acceso* a este dispositivo ({device_name}).",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-                return
+        if device_id in self.firebase_manager.get_authorized_devices(chat_id):
+            device_name = self.firebase_manager.get_device_location(device_id) or device_id
+            await update.message.reply_text(
+                f"ℹ️ *Ya tienes acceso* a este dispositivo ({escape_md(device_name)}).",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
 
         # Agregar solicitud pendiente en Firebase
         self.firebase_manager.add_pending_request(chat_id, user.first_name, device_id)
@@ -2832,6 +2850,15 @@ class TelegramBot:
                     "❌ *Error:* La solicitud no tiene dispositivo asociado.",
                     parse_mode=ParseMode.MARKDOWN
                 )
+                return
+
+            # Solo el dueno de ESA central. Antes bastaba con tener cualquier
+            # central (is_user_admin es eso): cualquiera aprobaba a cualquiera
+            # en la central de otro. No se borra la solicitud: el dueno de
+            # verdad aun puede aprobarla.
+            if not self.firebase_manager.es_dueno(device_id, str(update.effective_chat.id)):
+                await update.message.reply_text(
+                    "❌ Esa solicitud es para una central que no es tuya.")
                 return
 
             # Agregar autorización en Firebase
@@ -2924,6 +2951,14 @@ class TelegramBot:
             await query.edit_message_text("❌ Disparo cancelado.")
 
         # Callbacks para recordatorio de alarma activa
+        elif data.startswith("adduser_"):
+            central = self.firebase_manager.resolver_equipo(data[len("adduser_"):], entre=devices)
+            if not central or not self.firebase_manager.es_dueno(central, chat_id):
+                await query.edit_message_text("❌ Solo el dueño de la central puede invitar.")
+            else:
+                await query.edit_message_text(
+                    self._texto_invitacion(central), parse_mode=ParseMode.MARKDOWN)
+
         elif data == "bengala_confirm" or data.startswith("bengala_confirm_"):
             alarming_devices = await self._centrales_del_aviso(query, data, "bengala_confirm", devices)
             if alarming_devices is None:
