@@ -145,6 +145,22 @@ def test_teclado_atado_a_la_central_y_dentro_del_limite():
         assert "disarm_all" not in datos
 
 
+
+def test_dos_centrales_que_casan_con_la_misma_mac_no_se_elige_ninguna():
+    """Si la MAC del boton encaja con dos centrales, no se dispara en ninguna."""
+    bot = _bot(sonando=(A,), devices=(A, A + "_7"))
+    q = _pulsar(bot, f"bengala_confirm_{A}_B2")
+    assert _disparadas(bot) == []
+    assert "No tienes acceso" in q.edit_message_text.call_args.args[0]
+
+
+def test_clave_legacy_de_16_resuelve_desde_la_mac_completa():
+    legacy = "AC_15_18_D4_47_4"
+    bot = _bot(devices=(legacy,))
+    _pulsar(bot, "disarm_AC_15_18_D4_47_4F")
+    assert bot._disarm_devices.call_args.args[1] == [legacy]
+
+
 if __name__ == "__main__":
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0
