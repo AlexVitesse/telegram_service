@@ -26,14 +26,13 @@ from typing import Dict, Any, Optional
 from config import config
 from device_manager import DeviceManager
 from mqtt_handler import MqttHandler
-from telegram_bot import TelegramBot
+from telegram_bot import TelegramBot, teclado_alarma
 from api_server import ApiSenti
 from scheduler import scheduler
 from fcm_handler import FCMHandler
 
 from firebase_manager import firebase_manager
 from mqtt_protocol import MqttEvent, MqttTelemetry, EventType, escape_md
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 # Configurar logging con rotación automática
 from logging.handlers import RotatingFileHandler
@@ -336,27 +335,14 @@ class AlarmBridgeService:
                             "🚨 *ALARMA SIGUE ACTIVA*\n\n"
                             f"📍 *{display_name}*"
                         )
-                        keyboard = InlineKeyboardMarkup([
-                            [
-                                InlineKeyboardButton("🔥 Disparar bengala", callback_data="bengala_confirm")
-                            ],
-                            [
-                                InlineKeyboardButton("🔒 Dejar armado", callback_data="bengala_cancel"),
-                                InlineKeyboardButton("🔓 Desactivar sistema", callback_data="disarm_all")
-                            ]
-                        ])
+                        keyboard = teclado_alarma(device_id, con_bengala=True)
                     else:
                         # Modo automático (bengala_mode=0): solo botones de dejar armado y desactivar
                         message = (
                             "🚨 *ALARMA SIGUE ACTIVA*\n\n"
                             f"📍 *{display_name}*"
                         )
-                        keyboard = InlineKeyboardMarkup([
-                            [
-                                InlineKeyboardButton("🔒 Dejar armado", callback_data="bengala_cancel"),
-                                InlineKeyboardButton("🔓 Desactivar sistema", callback_data="disarm_all")
-                            ]
-                        ])
+                        keyboard = teclado_alarma(device_id, con_bengala=False)
 
                     # Enviar solo a chats privados (no a grupos)
                     self._schedule_telegram_reminder_private_only(device_id, message, keyboard)

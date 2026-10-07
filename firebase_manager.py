@@ -768,7 +768,35 @@ class FirebaseManager:
     def _misma_mac(guardada: str, mac: str) -> bool:
         guardada = normalizar_mac(guardada)
         # [:-1]: listas viejas con un caracter de mas (la app las corrige al cargar).
-        return guardada == mac or guardada[:-1] == mac
+        # [:14] con 16: las claves legacy `AA_BB_CC_DD_EE_F` (medio octeto de mas),
+        # que con [:-1] quedaban en `AA_BB_CC_DD_EE_` y no casaban con nada.
+        return (guardada == mac or guardada[:-1] == mac
+                or (len(guardada) == 16 and guardada[14] == "_" and guardada[:14] == mac))
+
+    def resolver_equipo(self, raw: str, entre=None) -> Optional[str]:
+        """
+        La clave real de una central a partir de lo que llegue: MAC con `:` o
+        `_`, de 17 caracteres, o la legacy de 16. `entre` limita la busqueda
+        (p. ej. a las centrales de un chat, y asi sirve de control de acceso).
+
+        Coincidencia exacta primero, sea cual sea el largo. Las parciales solo
+        con una MAC completa: un "/join_6" no puede casar con media flota.
+        """
+        pool = list(entre if entre is not None else (self._get_all_devices() or {}))
+        texto = str(raw or "").strip()
+        if texto in pool:
+            return texto
+        mac = normalizar_mac(texto)
+        if len(mac) < 14:
+            return None
+        candidatas = [k for k in pool if self._misma_mac(k, mac)]
+        # Dos centrales que casan con la misma MAC: no se elige ninguna. Un
+        # boton de bengala no puede acabar en la central equivocada.
+        if len(candidatas) != 1:
+            if candidatas:
+                logger.warning(f"{texto} es ambiguo entre {candidatas}: no se actua")
+            return None
+        return candidatas[0]
 
     def _quitar_de_listas(self, mac: str, excepto: Optional[str] = None) -> List[str]:
         """Quita la MAC de `Usuarios/*/Dispositivos` (menos la de `excepto`). Devuelve a quien se la quito."""
