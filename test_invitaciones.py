@@ -121,6 +121,65 @@ def test_approve_del_dueno_aprueba():
     bot.firebase_manager.remove_pending_request.assert_called_once()
 
 
+
+def test_join_desde_un_grupo_no_crea_solicitud():
+    bot = _bot({})
+    texto, _ = _comando(bot, "_cmd_join", "-100123", f"/join_{A}")
+    assert "chat privado" in texto, texto
+    bot.firebase_manager.add_pending_request.assert_not_called()
+
+
+def test_join_no_revela_nombre_ni_mac_al_que_pide():
+    bot = _bot({})
+    texto, _ = _comando(bot, "_cmd_join", EXTRANO, f"/join_{A}")
+    assert "casa" not in texto and A not in texto, texto
+    aviso = bot.send_message.call_args.args[1]
+    assert f"/approve_{EXTRANO}_{A}" in aviso, aviso
+
+
+def test_approve_con_codigo_de_otra_central_no_aprueba():
+    """Pidio A, el dueno tiene el aviso de A; luego pidio B y la solicitud cambio."""
+    bot = _bot({JOSE: [A, B]})
+    bot.firebase_manager.get_pending_request.return_value = {"name": "x", "device_id": B}
+    texto, _ = _comando(bot, "_cmd_approve", JOSE, f"/approve_{EXTRANO}_{A}")
+    assert "ya no es para esa central" in texto, texto
+    bot.firebase_manager.add_authorized_chat.assert_not_called()
+
+
+def test_si_no_se_pudo_autorizar_la_solicitud_sigue_viva():
+    bot = _bot({JOSE: [A]})
+    bot.firebase_manager.get_pending_request.return_value = {"name": "x", "device_id": A}
+    bot.firebase_manager.add_authorized_chat.return_value = False
+    _comando(bot, "_cmd_approve", JOSE, f"/approve_{EXTRANO}_{A}")
+    bot.firebase_manager.remove_pending_request.assert_not_called()
+
+
+def test_con_ownerUid_un_telegram_id_viejo_no_es_dueno():
+    bot = _bot({JOSE: [A]})
+    fm = bot.firebase_manager
+    fm.db.datos["ESP32"][A]["ownerUid"] = "alice"
+    fm._uid_por_chat_id = lambda chat: {JOSE: "bob"}.get(chat)
+    assert not fm.es_dueno(A, JOSE)
+    fm._uid_por_chat_id = lambda chat: {JOSE: "alice"}.get(chat)
+    assert fm.es_dueno(A, JOSE)
+
+
+def test_autorizar_usa_la_clave_exacta_y_no_la_larga_de_otro():
+    """Clave de 14 de Jose y clave de 17 de Maria: el prefijo elegia la larga."""
+    from firebase_manager import FirebaseManager
+    import test_retro_banco as trb
+    if not hasattr(trb._Ref, "child"):  # la RTDB falsa no lo trae
+        trb._Ref.child = lambda self, k: trb._Ref(self.arbol, self.partes + [k])
+    fm = _fm({"ESP32": {A: {"Telegram_ID": JOSE}, A + "_FF": {"Telegram_ID": "777"}},
+              "Usuarios": {}, "Horarios": {}})
+    fm._is_cache_valid = lambda: False
+    nuevo = "5544332211"  # uno realista: "999" se descarta como relleno
+    assert FirebaseManager.add_authorized_chat(fm, A, nuevo)
+    assert str(fm.db.datos["ESP32"][A].get("Telegram_ID_2")) == nuevo
+    assert "Telegram_ID_2" not in fm.db.datos["ESP32"][A + "_FF"]
+    assert FirebaseManager.get_device_owner(fm, A) == JOSE
+
+
 if __name__ == "__main__":
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0

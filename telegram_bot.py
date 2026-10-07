@@ -2772,6 +2772,13 @@ class TelegramBot:
 
         logger.info(f"{text} de {user.first_name}")
 
+        # Solo en privado: pegada en un grupo, la aprobacion metia el GRUPO
+        # como Group_ID y cualquiera de sus miembros manejaba la alarma.
+        if chat_id.startswith("-"):
+            await update.message.reply_text(
+                "ℹ️ Envía el código en un chat privado con el bot, no en un grupo.")
+            return
+
         # Una central concreta, no un prefijo: con prefijos "/join_6" casaba
         # con media flota y la solicitud le llegaba a un dueno cualquiera.
         device_id = self.firebase_manager.resolver_equipo(text.replace("/join_", "", 1))
@@ -2784,37 +2791,34 @@ class TelegramBot:
 
         # Verificar si ya tiene acceso a ESTE dispositivo específico
         if device_id in self.firebase_manager.get_authorized_devices(chat_id):
-            device_name = self.firebase_manager.get_device_location(device_id) or device_id
-            await update.message.reply_text(
-                f"ℹ️ *Ya tienes acceso* a este dispositivo ({escape_md(device_name)}).",
-                parse_mode=ParseMode.MARKDOWN
-            )
+            await update.message.reply_text("ℹ️ Ya tienes acceso a esa central.")
             return
 
         # Agregar solicitud pendiente en Firebase
         self.firebase_manager.add_pending_request(chat_id, user.first_name, device_id)
 
-        # Obtener nombre del dispositivo si existe
-        device_name = self.firebase_manager.get_device_location(device_id) or device_id
-
+        # Sin nombre ni MAC: quien prueba codigos no debe saber de quien es la
+        # central. El dueno si la ve en su aviso.
         await update.message.reply_text(
-            f"⏳ *Solicitud enviada* al administrador.\n"
-            f"📱 Dispositivo: *{device_name}*\n\n"
-            f"⏰ La solicitud expira en *5 minutos*.\n"
-            f"Recibirás una notificación cuando seas autorizado.",
+            "⏳ *Solicitud enviada* al dueño de la central.\n\n"
+            "⏰ La solicitud expira en *5 minutos*.\n"
+            "Recibirás una notificación cuando seas autorizado.",
             parse_mode=ParseMode.MARKDOWN
         )
 
         # Notificar solo al dueño del dispositivo
         owner_id = self.firebase_manager.get_device_owner(device_id)
         if owner_id:
+            device_name = self.firebase_manager.get_device_location(device_id) or device_id
+            # La central va en el codigo de aprobacion: si el mismo chat pide
+            # luego OTRA central, este codigo no aprueba la otra.
             admin_msg = (
                 "🔔 *NUEVA SOLICITUD DE ACCESO*\n\n"
-                f"👤 Usuario: *{user.first_name}*\n"
+                f"👤 Usuario: *{escape_md(user.first_name or '')}*\n"
                 f"🆔 Chat ID: `{chat_id}`\n"
-                f"📱 Dispositivo: *{device_name}* (`{device_id}`)\n\n"
+                f"📱 Dispositivo: *{escape_md(device_name)}*\n\n"
                 f"⏰ Expira en 5 minutos\n\n"
-                f"✅ Para aprobar, envía:\n`/approve_{chat_id}`"
+                f"✅ Para aprobar, envía:\n`/approve_{chat_id}_{device_id}`"
             )
             await self.send_message(owner_id, admin_msg, "Markdown")
         else:
@@ -2828,8 +2832,9 @@ class TelegramBot:
 
         logger.info(f"{text} de {user.first_name}")
 
-        # Extraer chat_id del comando
-        target_chat_id = text.replace("/approve_", "")
+        # /approve_<chat>[_<central>]: la central es opcional para no romper
+        # los avisos ya enviados, pero si viene tiene que coincidir.
+        target_chat_id, _, central_codigo = text.replace("/approve_", "", 1).partition("_")
 
         if not target_chat_id:
             await update.message.reply_text(
@@ -2852,6 +2857,12 @@ class TelegramBot:
                 )
                 return
 
+            if central_codigo and normalizar_mac(central_codigo) != normalizar_mac(device_id):
+                await update.message.reply_text(
+                    "❌ Esa solicitud ya no es para esa central: el usuario pidió "
+                    "acceso a otra. Espera su nuevo aviso.")
+                return
+
             # Solo el dueno de ESA central. Antes bastaba con tener cualquier
             # central (is_user_admin es eso): cualquiera aprobaba a cualquiera
             # en la central de otro. No se borra la solicitud: el dueno de
@@ -2864,11 +2875,11 @@ class TelegramBot:
             # Agregar autorización en Firebase
             success = self.firebase_manager.add_authorized_chat(device_id, target_chat_id)
 
-            # Eliminar solicitud pendiente
-            self.firebase_manager.remove_pending_request(target_chat_id)
-
             if success:
-                device_name = self.firebase_manager.get_device_location(device_id) or device_id
+                # Solo si salio: si no, el dueno puede reintentar.
+                self.firebase_manager.remove_pending_request(target_chat_id)
+                device_name = escape_md(self.firebase_manager.get_device_location(device_id) or device_id)
+                approved_name = escape_md(approved_name)
 
                 await update.message.reply_text(
                     f"✅ *Usuario aprobado*\n\n"
@@ -2920,6 +2931,17 @@ class TelegramBot:
             await self._handle_sales_callback(query, chat_id, user_name, data)
             return
 
+        # Invitar solo necesita Firebase, no MQTT.
+        if data and data.startswith("adduser_"):
+            mias = self.firebase_manager.get_authorized_devices(chat_id)
+            central = self.firebase_manager.resolver_equipo(data[len("adduser_"):], entre=mias)
+            if not central or not self.firebase_manager.es_dueno(central, chat_id):
+                await query.edit_message_text("❌ Solo el dueño de la central puede invitar.")
+            else:
+                await query.edit_message_text(
+                    self._texto_invitacion(central), parse_mode=ParseMode.MARKDOWN)
+            return
+
         if not self.mqtt_handler:
             await query.edit_message_text("❌ Error: Sistema no conectado")
             return
@@ -2951,14 +2973,6 @@ class TelegramBot:
             await query.edit_message_text("❌ Disparo cancelado.")
 
         # Callbacks para recordatorio de alarma activa
-        elif data.startswith("adduser_"):
-            central = self.firebase_manager.resolver_equipo(data[len("adduser_"):], entre=devices)
-            if not central or not self.firebase_manager.es_dueno(central, chat_id):
-                await query.edit_message_text("❌ Solo el dueño de la central puede invitar.")
-            else:
-                await query.edit_message_text(
-                    self._texto_invitacion(central), parse_mode=ParseMode.MARKDOWN)
-
         elif data == "bengala_confirm" or data.startswith("bengala_confirm_"):
             alarming_devices = await self._centrales_del_aviso(query, data, "bengala_confirm", devices)
             if alarming_devices is None:

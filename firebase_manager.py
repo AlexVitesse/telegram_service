@@ -791,9 +791,23 @@ class FirebaseManager:
         return candidatas[0]
 
     def es_dueno(self, device_id: str, chat_id: str) -> bool:
-        """Si el chat es el del dueno de la central (su Telegram_ID): solo el
-        puede invitar y aprobar. Ser "Usuario 2" o grupo no basta."""
-        return bool(chat_id) and str((self._nodo(device_id) or {}).get("Telegram_ID") or "") == str(chat_id)
+        """
+        Si el chat es el del dueno de la central: solo el puede invitar y
+        aprobar. Ser "Usuario 2" o grupo no basta.
+
+        Con `ownerUid` (la cuenta de la app) manda la cuenta vinculada a este
+        chat; un Telegram_ID viejo de otro dueno no basta. `Telegram_ID` solo
+        decide en nodos sin migrar o si el chat no tiene cuenta vinculada.
+        """
+        if not chat_id or str(chat_id).startswith("-"):
+            return False
+        nodo = self._nodo(device_id) or {}
+        dueno = str(nodo.get("ownerUid") or "")
+        if dueno:
+            uid = self._uid_por_chat_id(str(chat_id))
+            if uid:
+                return uid == dueno
+        return str(nodo.get("Telegram_ID") or "") == str(chat_id)
 
     def _quitar_de_listas(self, mac: str, excepto: Optional[str] = None) -> List[str]:
         """Quita la MAC de `Usuarios/*/Dispositivos` (menos la de `excepto`). Devuelve a quien se la quito."""
@@ -1252,6 +1266,12 @@ class FirebaseManager:
             if not all_devices:
                 return None
 
+            # La clave exacta primero: con prefijos, una clave de 14 y otra de
+            # 17 de distintos duenos daban el dueno de la que saliese antes.
+            exacto = all_devices.get(device_id)
+            if isinstance(exacto, dict):
+                return str(exacto.get('Telegram_ID')) if exacto.get('Telegram_ID') else None
+
             # Buscar en todas las variantes del device_id
             for dev_id, dev_data in all_devices.items():
                 if not isinstance(dev_data, dict):
@@ -1523,6 +1543,11 @@ class FirebaseManager:
                     continue
                 if existing_id.startswith(device_id) or device_id.startswith(existing_id):
                     matching_devices.append((existing_id, dev_data))
+
+            # La clave exacta, si existe, es la UNICA: con prefijos el chat podia
+            # acabar autorizado en la variante larga de OTRA central.
+            if isinstance(all_devices.get(device_id), dict):
+                matching_devices = [(device_id, all_devices[device_id])]
 
             if not matching_devices:
                 logger.warning(f"Dispositivo {device_id} no encontrado en Firebase")
