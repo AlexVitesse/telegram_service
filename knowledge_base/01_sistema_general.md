@@ -10,7 +10,7 @@ Sentinel Guard (tambien escrito SentinelGuard) es un sistema de alarma IoT profe
 - **Sensores PIR (movimiento)**: Detectan presencia mediante infrarrojo. Angulo de deteccion de 110 grados y alcance de 7 metros.
 - **Sensores Magneticos**: Detectan apertura de puertas y ventanas. Constan de dos piezas: la pieza principal y un iman.
 - **Sirena**: Actuador sonoro de 110dB con proteccion IP65 contra polvo y agua.
-- **Bengala de humo**: Actuador que genera humo no toxico con cobertura de 20 metros cuadrados. Duracion del humo: 10 a 20 segundos.
+- **Bengala de humo**: Actuador que libera una cortina de humo disuasoria. Para los datos del cartucho, consulta su ficha tecnica.
 - **Teclado**: Control local inalambrico para armar y desarmar el sistema. Acepta codigos de 4 a 6 digitos.
 
 ## Arquitectura del sistema
