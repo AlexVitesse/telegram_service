@@ -144,6 +144,68 @@ def test_archivo_roto_no_tumba_el_arranque():
     assert h.get_pending_commands_count() == 0
 
 
+
+def test_si_mqtt_no_acepta_la_publicacion_se_queda_en_la_cola():
+    """Antes se sacaba de la cola ANTES de publicar: un fallo la perdia."""
+    f = _archivo()
+    h = _handler(f)
+    h.send_command("set_schedule", HORARIO, device_id=MAC, queue_if_offline=True)
+    h.client.publish.return_value = SimpleNamespace(rc=4)  # MQTT_ERR_NO_CONN
+    _telemetria(h)
+    assert h.get_pending_commands_count(MAC) == 1
+    assert _handler(f).get_pending_commands_count(MAC) == 1, "no quedo en disco"
+
+
+def test_con_variantes_de_id_gana_la_mas_reciente():
+    h = _handler(_archivo())
+    ahora = time.time()
+    h._pending_commands = {
+        MAC + "_B2": [("set_schedule", dict(HORARIO, on_hour=22), ahora)],
+        MAC: [("set_schedule", dict(HORARIO, on_hour=7), ahora - 60)],
+    }
+    _telemetria(h)
+    enviados = [json.loads(c.args[1]) for c in h.client.publish.call_args_list]
+    horas = {e["args"]["on_hour"] for e in enviados if e["command"] == "set_schedule"}
+    assert horas == {22}, horas
+    assert h.get_pending_commands_count() == 0
+
+
+def test_hilos_a_la_vez_no_rompen_la_cola_ni_el_archivo():
+    """Paho (telemetria) y asyncio/API (send_command) tocan la cola a la vez."""
+    import threading
+    f = _archivo()
+    h = _handler(f)
+    errores = []
+
+    def encolar(i):
+        try:
+            for n in range(30):
+                h.send_command("set_schedule", dict(HORARIO, on_hour=n % 24),
+                               device_id=f"AA_BB_CC_DD_{i:02d}", queue_if_offline=True)
+        except Exception as e:
+            errores.append(e)
+
+    def vaciar(i):
+        try:
+            for _ in range(30):
+                h.process_pending_commands(f"AA_BB_CC_DD_{i:02d}")
+        except Exception as e:
+            errores.append(e)
+
+    hilos = [threading.Thread(target=fn, args=(i,)) for i in range(4) for fn in (encolar, vaciar)]
+    for t in hilos:
+        t.start()
+    for t in hilos:
+        t.join(10)
+    assert not errores, errores
+    json.load(open(f))  # el archivo sigue siendo JSON valido
+
+
+def test_el_archivo_no_depende_del_directorio_de_trabajo():
+    import mqtt_handler
+    assert os.path.isabs(mqtt_handler.PENDING_FILE)
+
+
 if __name__ == "__main__":
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0
@@ -151,8 +213,8 @@ if __name__ == "__main__":
         try:
             t()
             print(f"  ok  {t.__name__}")
-        except AssertionError as e:
+        except Exception as e:  # no solo AssertionError: un error no corta la suite
             fallos += 1
-            print(f"FALLO  {t.__name__}: {e}")
+            print(f"FALLO  {t.__name__}: {type(e).__name__}: {e}")
     print(f"\n{len(pruebas) - fallos}/{len(pruebas)} pruebas pasan")
     sys.exit(1 if fallos else 0)
