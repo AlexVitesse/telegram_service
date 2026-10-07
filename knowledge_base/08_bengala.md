@@ -2,7 +2,7 @@
 
 ## Que es la bengala
 
-La bengala es un dispositivo de disuasion visual que libera una cortina de humo no toxico con cobertura de 20 metros cuadrados. Esta diseñada para desorientar a intrusos y dificultar la vision dentro del area protegida. Requiere alimentacion electrica continua para funcionar correctamente.
+La bengala es un dispositivo de disuasion visual que libera una cortina de humo. Para los datos del cartucho (composicion, cobertura, duracion), consulta su ficha tecnica. Esta diseñada para desorientar a intrusos y dificultar la vision dentro del area protegida. Requiere alimentacion electrica continua para funcionar correctamente.
 
 ## Modos de configuracion
 
@@ -22,7 +22,9 @@ Selecciona "Pregunta" en la app o usa el comando /preguntar en Telegram. Al dete
 - "Dejar armado": detiene la sirena sin disparar la bengala y el sistema sigue armado.
 - "Desactivar sistema": desarma el sistema.
 
-Este modo permite evaluar la situacion antes de actuar, por ejemplo revisando camaras de seguridad. La sirena si suena inmediatamente independientemente de la decision sobre la bengala. La respuesta se da tocando uno de los botones del propio mensaje de Telegram; NO existen los comandos /si ni /no. Mientras la alarma siga activa, el bot repite el aviso "ALARMA SIGUE ACTIVA" con los mismos botones cada minuto en el chat privado. Si nadie contesta en 3 minutos, el Master apaga la sirena, el sistema sigue armado y la bengala no se dispara. En los grupos de Telegram el aviso llega sin botones.
+Importante si tienes varias centrales: los botones no actuan solo sobre la central del aviso. "Disparar bengala" y "Dejar armado" actuan sobre todas tus centrales que esten sonando en ese momento: si varias suenan a la vez, el boton dispara la bengala (o apaga la sirena) en todas ellas. "Desactivar sistema" desarma todos tus equipos, esten sonando o no.
+
+Este modo permite evaluar la situacion antes de actuar, por ejemplo revisando camaras de seguridad. La sirena si suena inmediatamente independientemente de la decision sobre la bengala. La respuesta se da tocando uno de los botones del propio mensaje de Telegram; NO existen los comandos /si ni /no. Mientras la alarma siga activa, el bot repite el aviso "ALARMA SIGUE ACTIVA" con los mismos botones cada minuto en el chat privado, y los botones siguen sirviendo mientras la central este sonando. Si nadie contesta en 3 minutos, el Master apaga la sirena por su cuenta, el sistema sigue armado y la bengala no se dispara. A partir de ahi, si tocas "Disparar bengala" en un aviso antiguo, el bot responde "No hay dispositivos en alarma activa". En los grupos de Telegram el aviso llega sin botones.
 
 ## Modo Deshabilitado
 
@@ -40,10 +42,11 @@ El comando /bengala muestra el modo actual de la bengala y los botones "Modo Aut
 
 ## Precauciones de seguridad
 
-- Una vez activada, la bengala no se puede detener. El cartucho se consume completamente en 10 a 20 segundos.
-- No tocar el cartucho usado por al menos 10 minutos, ya que queda muy caliente.
-- Si la bengala se activa por error: agacharse, cubrir boca y nariz, y buscar la salida mas cercana.
-- Para disipar el humo, abrir puertas y ventanas. El humo se disipa en 3 a 10 minutos dependiendo de la ventilacion.
+- Una vez activada, la bengala no se puede detener: el cartucho se consume entero.
+- Consulta la ficha tecnica del cartucho para sus datos y advertencias.
+- No tocar el cartucho usado hasta que se haya enfriado.
+- Mantener el modulo alejado de materiales inflamables.
+- Si la bengala se activa por error: cubrir boca y nariz, salir de la zona y ventilar abriendo puertas y ventanas.
 - El humo de la bengala puede activar detectores de humo convencionales instalados en el area.
 
 ## Persistencia de configuracion

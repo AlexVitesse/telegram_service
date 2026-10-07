@@ -36,4 +36,4 @@ Para detener la sirena y desactivar el sistema despues de un disparo de emergenc
 - En la app, toca de nuevo el boton Emergencia ("Toca para desactivar"): desactiva la alarma y desarma el sistema. Tambien sirve "Desarmar".
 - Para solo silenciar la sirena y seguir armado, escribe al bot "silencia la alarma".
 
-La bengala, si fue detonada, no se puede detener. El humo se disipara por si solo en 3 a 10 minutos con ventilacion adecuada.
+La bengala, si fue detonada, no se puede detener. Para despejar el humo, ventila abriendo puertas y ventanas; los datos del cartucho estan en su ficha tecnica.

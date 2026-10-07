@@ -11,6 +11,7 @@ Sin red: solo TF-IDF, como corre hoy en produccion.
     python test_kb_alta_dispositivo.py
 """
 import os
+import re
 import sys
 
 from config import AIConfig
@@ -83,6 +84,64 @@ def test_borrar_o_quitar():
 
 def test_para_que_sirve_la_app():
     assert _buscar("para que sirve esta app"), "sin resultados"
+
+
+# --- Hechos: la KB dice lo que hace el codigo (revision Codex del PR #9) ---
+
+def _kb_texto():
+    """{archivo: texto en minusculas} de toda la KB."""
+    out = {}
+    for f in sorted(os.listdir(KB_DIR)):
+        if f.endswith(".md"):
+            with open(os.path.join(KB_DIR, f), encoding="utf-8") as fh:
+                out[f] = fh.read().lower()
+    return out
+
+
+def test_clip_3_segundos():
+    # config.h: LONG_PRESS_TIME 3000; alarma_modulos.ino: beep(5) al entrar.
+    kb = _kb_texto()
+    for f, t in kb.items():
+        assert "5 a 8 segundos" not in t, f
+    todo = " ".join(kb.values())
+    assert "3 segundos" in todo and "cinco pitidos" in todo
+
+
+def test_tiempo_de_salida_10_a_180():
+    # El VPS solo reenvia >= 10 (firebase_manager.py); el firmware acepta 10-300.
+    kb = _kb_texto()
+    for f, t in kb.items():
+        assert not re.search(r"(?<!1)0 (a|y) 180|(?<!1)0[-–]180", t), f
+    assert "10 y 180" in kb["14_faq.md"]
+    assert "10 a 180" in kb["04_app_sentinel_guard.md"]
+
+
+def test_borrar_no_limpia_el_master():
+    # borrar_equipo borra la nube y apaga el horario; la NVS del Master queda.
+    kb = _kb_texto()
+    for f in ("14_faq.md", "04_app_sentinel_guard.md"):
+        assert "reset de fabrica" in kb[f], f
+        assert "memoria" in kb[f], f
+
+
+def test_botones_bengala_actuan_en_todas():
+    # bengala_confirm / bengala_cancel recorren todos los equipos en alarma.
+    t = _kb_texto()["08_bengala.md"]
+    assert "todas tus centrales que esten sonando" in t
+    assert "desarma todos tus equipos" in t
+    assert "120" not in t and "tiempo agotado" not in t  # timeout del bot: codigo muerto
+
+
+def test_horarios_telegram_sin_cola():
+    t = _kb_texto()["09_horarios.md"]
+    assert "se propaga a todos los componentes" not in t
+    assert "en linea" in t
+
+
+def test_bengala_sin_datos_inventados():
+    for f, t in _kb_texto().items():
+        assert "no toxico" not in t and "no tóxico" not in t, f
+        assert "20 metros cuadrados" not in t, f
 
 
 if __name__ == "__main__":

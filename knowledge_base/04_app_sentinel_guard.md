@@ -38,8 +38,8 @@ Se abre tocando la tarjeta del equipo o "Ver detalles y ajustes":
 - **Modo de prueba**: "Simular disparo" muestra como se veria una alarma sin enviar nada a la central.
 - **Sensores LoRa**: lista de modulos, cada uno "Activo" u "Offline".
 - **Ajustes**: direccion MAC, destinatarios de Telegram y tiempo de salida.
-- **Editar**: cambiar el "Nombre del equipo", agregar o quitar destinatarios de Telegram ("Agregar usuario o grupo", hasta dos usuarios y un grupo) y ajustar el "Tiempo de salida" de 0 a 180 segundos (60 por defecto). Se guarda con "Guardar cambios".
-- **Borrar dispositivo**: borra el equipo de tu cuenta con toda su configuracion (ver "Como desvinculo, quito o borro un dispositivo" en Preguntas Frecuentes).
+- **Editar**: cambiar el "Nombre del equipo", agregar o quitar destinatarios de Telegram ("Agregar usuario o grupo", hasta dos usuarios y un grupo) y ajustar el "Tiempo de salida" (60 por defecto). El rango util es de 10 a 180 segundos: la app deja elegir menos de 10, pero ese valor no se aplica y el Master conserva el que tenia. Se guarda con "Guardar cambios".
+- **Borrar dispositivo**: borra el equipo de tu cuenta y su configuracion en la nube, pero no la memoria del propio Master; para dejarlo limpio hay que hacer el reset de fabrica (ver "Como desvinculo, quito o borro un dispositivo" en Preguntas Frecuentes).
 
 ## Pantalla Horarios
 
@@ -80,7 +80,7 @@ Al tocar una notificacion se abre la pantalla Inicio; si el aviso es de un equip
 
 Para dar de alta, agregar, registrar o vincular un equipo se usa la pestaña "Agregar":
 
-1. Poner el Master en modo emparejamiento (clip de 5 a 8 segundos hasta el pitido).
+1. Poner el Master en modo emparejamiento: clip en el orificio trasero, mantener pulsado unos 3 segundos y soltar al oir los cinco pitidos; no llegar a 10 segundos (eso borra el equipo).
 2. La app busca por Bluetooth y encuentra "Sentinel Master".
 3. En "Configurar dispositivo" se ingresa la red WiFi de 2.4 GHz (SSID y Password), los avisos por Telegram (opcional) y el nombre del dispositivo.
 4. Al tocar "Confirmar", el dispositivo se conecta a WiFi, queda registrado en la cuenta y se reinicia.

@@ -26,6 +26,8 @@ Para configurar, programar, activar o desactivar los horarios automaticos desde 
 
 La hora de armado y la de desarmado no pueden ser la misma.
 
+Los cambios hechos desde Telegram (comandos /horarios o lenguaje natural, incluido /horarios off) solo llegan a la central si esta en linea en ese momento: no se guardan para despues. Si la central esta desconectada, sigue armandose y desarmandose con su horario anterior hasta que se reinicie con internet o repitas el cambio con ella en linea.
+
 ## Configurar horarios desde la App
 
 La pestaña "Horarios" de la app (titulo "Programar Alarma") incluye presets rapidos y configuracion manual. Tocar un preset solo rellena el formulario; el horario se guarda al tocar "Programar Alarma" y confirmar con "Programar".
@@ -51,7 +53,7 @@ Los horarios se sincronizan automaticamente entre todas las plataformas del sist
 
 App movil <-> Firebase <-> Servidor Python (VPS) <-> ESP32 (Master)
 
-Cualquier cambio realizado desde la app o desde Telegram se propaga a todos los componentes.
+Un cambio solo tiene efecto en la central cuando esta en linea y lo recibe. Si esta desconectada, el Master sigue usando el horario que tenia guardado. Los cambios hechos desde la app se guardan hasta 24 horas para mandarlos cuando la central vuelva; los de Telegram no (ver arriba). Al arrancar con internet, la central recibe el horario vigente.
 
 ## Ejecucion autonoma en el ESP32
 

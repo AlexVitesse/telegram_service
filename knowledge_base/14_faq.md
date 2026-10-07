@@ -23,7 +23,7 @@ La app es una de las tres formas de controlar Sentinel Guard; las otras son el b
 Si te preguntas como vinculo un dispositivo, como registro un dispositivo, como agrego, añado o emparejo mi equipo, o como doy de alta un dispositivo nuevo (el Master o central del equipo): se hace desde la app Sentinel Guard por Bluetooth. Antes de empezar ten a mano tu red WiFi de 2.4 GHz con su contraseña y, si quieres recibir avisos, tu ID de Telegram.
 
 1. En la app, pulsa "Agregar" en la barra inferior (o el icono + de la pantalla Inicio).
-2. Pon el equipo en modo emparejamiento: busca el orificio trasero del Master, inserta un clip y mantenlo pulsado de 5 a 8 segundos, hasta oir un pitido. No pases de 10 segundos: eso hace un reset de fabrica.
+2. Pon el equipo en modo emparejamiento: busca el orificio trasero del Master, inserta un clip, mantén pulsado unos 3 segundos y suelta al oír los cinco pitidos; no llegues a 10 segundos (eso borra el equipo con un reset de fabrica).
 3. Acercate al dispositivo. El Bluetooth alcanza unos 10 metros.
 4. Cuando aparezca "Sentinel Master", tocalo. En la pantalla "Configurar dispositivo" (Paso 2 de 3) ingresa el nombre de tu red WiFi (SSID, de la lista o con "Ingresar SSID"), su contraseña, tu ID de Telegram en "Avisos por Telegram (opcional)" y el "Nombre del dispositivo". Pulsa "Confirmar".
 5. El Master se conecta a WiFi, queda registrado en tu cuenta y se reinicia. La app termina con "CONFIGURACION COMPLETA".
@@ -77,13 +77,13 @@ Si. Desde la app, en la pantalla Inicio toca el equipo ("Ver detalles y ajustes"
 
 ## Que es el tiempo de salida?
 
-Es el periodo que tienes para salir del area protegida despues de armar el sistema. Por defecto es de 60 segundos y se cambia en la ficha del equipo ("Editar" > "Tiempo de salida"), entre 0 y 180 segundos. Durante este tiempo el Master pita cada 5 segundos y los sensores no disparan la alarma, permitiendote salir sin activarla. No hay tiempo de entrada: al volver, desarma antes de entrar.
+Es el periodo que tienes para salir del area protegida despues de armar el sistema. Por defecto es de 60 segundos y se cambia en la ficha del equipo ("Editar" > "Tiempo de salida"), entre 10 y 180 segundos. Si eliges menos de 10, no se aplica: el Master conserva el valor que tenia. Durante este tiempo el Master pita cada 5 segundos y los sensores no disparan la alarma, permitiendote salir sin activarla. No hay tiempo de entrada: al volver, desarma antes de entrar.
 
 ## Como desvinculo, quito o borro un dispositivo?
 
 Si te preguntas como desvinculo un dispositivo, como borro un dispositivo, como quito un equipo o como elimino un equipo de mi cuenta, hay dos cosas distintas:
 
-- **Borrar el equipo de la app**: abre la ficha del equipo y toca "Borrar dispositivo", luego "Eliminar". Se borra el equipo y toda su configuracion: nombre, destinatarios de Telegram, horarios y tiempos. El equipo sigue funcionando, pero para volver a controlarlo desde la app hay que emparejarlo otra vez por Bluetooth (pestaña "Agregar", clip de 5 a 8 segundos). Solo el dueño de la central puede borrarla con toda su configuracion.
+- **Borrar el equipo de la app**: abre la ficha del equipo y toca "Borrar dispositivo", luego "Eliminar". Se borra el equipo de tu cuenta y su configuracion en la nube: listas de cuentas, destinatarios de Telegram y horarios. Ademas se manda a la central la orden de apagar su horario. Lo que NO se borra es la memoria local del Master: su nombre, el tiempo de salida, el modo de bengala y el horario que tenga guardado. Si la central esta desconectada al borrarla, esa orden puede perderse (se descarta a las 24 horas) y el Master seguiria armandose y desarmandose con su horario guardado. Por eso: borrala con la central en linea, o haz el reset de fabrica (clip 10 segundos o mas) para dejarla limpia del todo. El equipo sigue funcionando, pero para volver a controlarlo desde la app hay que emparejarlo otra vez por Bluetooth (pestaña "Agregar", clip unos 3 segundos hasta los cinco pitidos). Solo el dueño de la central puede borrarla con toda su configuracion.
 - **Quitar solo tu Telegram**: el comando /desvincular quita tu chat de los destinatarios de un equipo. Dejas de recibir sus avisos por Telegram y de controlarlo desde ahi, pero el equipo sigue en la app. Para volver, pide al administrador un nuevo codigo con /adduser, o que el dueño vuelva a poner tu Chat ID en la ficha del equipo.
 
 ## Puedo programar horarios diferentes por dispositivo?
@@ -98,4 +98,4 @@ Tu Chat ID se pone en la app en Perfil > "Chat ID de Telegram", en "Avisos por T
 
 ## Que pasa si mantengo el clip mas de 10 segundos (reset de fabrica)?
 
-Con el clip pulsado de 5 a 8 segundos el Master entra en modo emparejamiento (suena el pitido). Si sigues pulsando hasta 10 segundos o mas, hace un reset de fabrica: borra la red WiFi, el nombre, el modo de bengala, el tiempo de salida, los horarios y el estado de armado guardados en el Master, y se reinicia. Despues hay que emparejarlo otra vez desde la app.
+Con el clip pulsado unos 3 segundos el Master entra en modo emparejamiento y suenan cinco pitidos: suelta en ese momento. Si sigues pulsando hasta 10 segundos o mas, hace un reset de fabrica: borra la red WiFi, el nombre, el modo de bengala, el tiempo de salida, los horarios y el estado de armado guardados en el Master, y se reinicia. Despues hay que emparejarlo otra vez desde la app.

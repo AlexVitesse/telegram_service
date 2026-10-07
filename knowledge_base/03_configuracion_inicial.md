@@ -39,7 +39,7 @@ En la app toca "Agregar" en la barra inferior, o el boton "Agregar" (o el icono 
 
 ### Paso 2: Poner el Master en modo emparejamiento
 
-Insertar un clip en el orificio trasero del Modulo Master y mantenerlo pulsado de 5 a 8 segundos, hasta oir un pitido (varios pitidos cortos). Desde ese momento el LED de estado del Master parpadea: el equipo esta en modo emparejamiento.
+Insertar un clip en el orificio trasero del Modulo Master y mantenerlo pulsado unos 3 segundos y soltar al oir los cinco pitidos cortos; no llegar a 10 segundos (eso borra el equipo). Desde ese momento el LED de estado del Master parpadea: el equipo esta en modo emparejamiento.
 
 Precaucion: si se mantiene pulsado 10 segundos o mas, se ejecuta un reset de fabrica que borra toda la configuracion guardada en el Master: red WiFi, nombre, modo de bengala, tiempo de salida, horarios y estado de armado.
 
@@ -78,7 +78,7 @@ Si la contrasena WiFi esta mal, el Master no vuelve solo al modo emparejamiento:
 
 ## Tiempo limite de emparejamiento
 
-El modo emparejamiento dura 5 minutos desde el pitido. Si no se completa en ese tiempo, el Master apaga el Bluetooth, sale del modo emparejamiento y se reinicia solo. Sera necesario repetir el proceso desde el Paso 2 (clip de 5 a 8 segundos).
+El modo emparejamiento dura 5 minutos desde los pitidos. Si no se completa en ese tiempo, el Master apaga el Bluetooth, sale del modo emparejamiento y se reinicia solo. Sera necesario repetir el proceso desde el Paso 2 (clip unos 3 segundos, hasta los cinco pitidos).
 
 ## Vinculacion con Telegram
 
@@ -137,4 +137,4 @@ Si no pusiste tu ID de Telegram al emparejar, agregalo despues como se explica e
 
 ### Sincronizacion automatica
 
-Los horarios, la configuracion de bengala, el tiempo de salida y demas ajustes se sincronizan automaticamente entre la app, Telegram y el Master. No es necesario repetir la configuracion en cada canal. La contrasena del teclado es la excepcion: se guarda solo en el teclado.
+Los horarios, la configuracion de bengala, el tiempo de salida y demas ajustes se guardan en la nube y llegan al Master cuando esta en linea. No es necesario repetir la configuracion en cada canal. La contrasena del teclado es la excepcion: se guarda solo en el teclado.

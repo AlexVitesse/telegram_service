@@ -38,15 +38,15 @@ La sirena emite una alerta sonora de 110dB y tiene proteccion IP65 contra polvo 
 
 ## Instalacion de la Bengala de Humo
 
-La bengala genera humo no toxico con una cobertura de 20 metros cuadrados. Es un elemento disuasivo que dificulta la vision del intruso.
+La bengala libera una cortina de humo que dificulta la vision del intruso. Para los datos del cartucho (composicion, cobertura, duracion), consulta su ficha tecnica.
 
 - Colocar el modulo a un maximo de 1 metro de un enchufe electrico.
 - Instalar a altura baja o media, ya que el humo sube naturalmente y asi se logra mejor cobertura.
 - Fijar firmemente el modulo a la superficie, ya que el cartucho genera un leve retroceso al detonarse.
 - LED verde encendido: indica que el cartucho de bengala esta correctamente instalado.
 - LED rojo encendido: indica que no se detecta cartucho de bengala (falta o mal colocado).
-- El humo tiene una duracion de 10 a 20 segundos.
-- Importante: despues de una detonacion, esperar al menos 10 minutos antes de tocar el cartucho usado, ya que estara caliente.
+- Mantener el modulo alejado de cortinas, papel y otros materiales inflamables.
+- Importante: despues de una detonacion, no tocar el cartucho usado hasta que se haya enfriado.
 
 ## Instalacion del Teclado
 
