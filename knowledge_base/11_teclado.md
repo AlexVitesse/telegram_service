@@ -14,7 +14,7 @@ Para armar o desarmar el sistema:
 
 1. Ingresar la contrasena usando las teclas numericas.
 2. Presionar la tecla **#** para enviar la contrasena.
-3. Si la contrasena es correcta: el LED verde parpadea 3 veces y el teclado envia la senal al Master via LoRa. Si el sistema estaba desarmado, se arma. Si estaba armado, se desarma.
+3. Si la contrasena es correcta: el LED verde parpadea 3 veces y el teclado envia la senal al Master via LoRa. Si el sistema estaba desarmado, se arma: el Master da 1 pitido y empieza el tiempo de salida. Si estaba armado, se desarma: el Master da 3 pitidos y luego 2 mas. El teclado funciona aunque no haya internet, porque habla directo con el Master.
 4. Si la contrasena es incorrecta: el LED rojo parpadea 2 veces. No se envia ninguna senal al Master.
 
 Para borrar lo que se ha escrito (si se cometio un error al teclear), presionar la tecla **\***. El LED rojo parpadea 1 vez confirmando que la entrada fue borrada.
