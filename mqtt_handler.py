@@ -34,7 +34,8 @@ PENDING_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pending
 #: Configuracion que gana la ultima y que se puede repetir sin efectos: no
 #: caduca. Una central que vuelve a los 3 dias tiene que recibir el horario
 #: que se le cambio, no el que tenia. El resto sigue caducando a las 24 h.
-COMANDOS_CONFIG = (Command.SET_SCHEDULE.value, Command.SET_BENGALA_MODE.value)
+COMANDOS_CONFIG = (Command.SET_SCHEDULE.value, Command.SET_BENGALA_MODE.value,
+                   Command.SET_EXIT_TIME.value)
 
 
 class MqttHandler:
@@ -216,6 +217,7 @@ class MqttHandler:
             # mientras estaba apagada, se quedaba con el viejo.
             if tipo == "system_boot" and self.firebase_manager.is_available():
                 self.firebase_manager.enviar_horario(event.device_id)
+                self.firebase_manager.enviar_tiempo_salida(event.device_id)
             if tipo == "system_boot":
                 # Esta suscrita (se suscribe antes de anunciar el arranque) aunque
                 # aun no haya mandado telemetria: es el primer momento util.
@@ -620,8 +622,15 @@ class MqttHandler:
                                  queue_if_offline=queue_if_offline)
 
     def send_set_exit_time(self, seconds: int, device_id: str = None) -> bool:
-        """Configura el tiempo de salida (countdown antes de armar)"""
-        return self.send_command(Command.SET_EXIT_TIME.value, {"seconds": seconds}, device_id=device_id)
+        """
+        Configura el tiempo de salida (countdown antes de armar).
+
+        Encolado si la central esta offline: antes se publicaba y ya, el broker
+        lo tiraba (sesion limpia) y la central se quedaba con el anterior; el
+        7-oct se perdio asi un "10 s" guardado desde la app.
+        """
+        return self.send_command(Command.SET_EXIT_TIME.value, {"seconds": seconds},
+                                 device_id=device_id, queue_if_offline=True)
 
     def send_set_bengala_mode(self, mode: int, device_id: str = None) -> bool:
         """

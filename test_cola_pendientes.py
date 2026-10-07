@@ -206,6 +206,15 @@ def test_el_archivo_no_depende_del_directorio_de_trabajo():
     assert os.path.isabs(mqtt_handler.PENDING_FILE)
 
 
+def test_tiempo_de_salida_se_encola_y_no_caduca():
+    """El 7-oct se perdio un "10 s" guardado con la central offline."""
+    h = _handler(_archivo())
+    h.send_set_exit_time(10, device_id=MAC)
+    assert _publicados(h) == [], "offline: no tenia que publicar"
+    h._pending_commands[MAC][0] = ("set_exit_time", {"seconds": 10}, time.time() - 3 * 86400)
+    _telemetria(h)
+    assert "set_exit_time" in _publicados(h), _publicados(h)
+
 if __name__ == "__main__":
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0

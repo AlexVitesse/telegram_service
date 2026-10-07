@@ -385,6 +385,22 @@ def test_reclamar_y_borrar_no_se_pisan():
     assert not FirebaseManager._lock_propiedad.locked()
 
 
+def test_al_arrancar_se_reenvia_el_tiempo_de_salida():
+    """Aunque el listener no lo reenvie (mismo valor), la central lo recibe."""
+    datos = _arbol_jose()
+    datos["ESP32"][MAC]["Tiempo_Bomba"] = 10
+    fm = _fm(datos)
+    fm.enviar_tiempo_salida(MAC + "_B2")  # id de MQTT de 17
+    fm.mqtt_handler.send_set_exit_time.assert_called_once_with(seconds=10, device_id=MAC + "_B2")
+
+
+def test_tiempo_de_salida_fuera_de_rango_no_se_manda():
+    datos = _arbol_jose()
+    datos["ESP32"][MAC]["Tiempo_Bomba"] = 5  # la app de antes dejaba 0-180
+    fm = _fm(datos)
+    fm.enviar_tiempo_salida(MAC)
+    fm.mqtt_handler.send_set_exit_time.assert_not_called()
+
 def test_horario_de_quien_no_es_el_dueno_no_cuenta():
     """El caso de los recordatorios cruzados: la entrada de otro no arma la central."""
     import scheduler as sch
