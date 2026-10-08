@@ -537,6 +537,26 @@ class FirebaseManager:
                 f"(10-300 s): no se aplica, la central conserva el anterior"
             )
 
+    def enviar_tiempo_salida(self, device_id: str) -> None:
+        """
+        Manda a la central el `Tiempo_Bomba` de su nodo al arrancar.
+
+        El listener solo lo envia cuando cambia, y comparando contra su propia
+        cache: si la central estaba offline cuando se guardo, o el VPS se
+        reinicio, volver a guardar el mismo valor no lo reenviaba nunca. La
+        central lo guarda en NVS, asi que repetirlo no tiene efecto si ya lo
+        tenia. Fuera de 10-300 s el firmware lo rechaza: no se manda.
+        """
+        if not self.mqtt_handler:
+            return
+        mac = normalizar_mac(device_id)
+        nodos = self._get_all_devices() or {}
+        clave = next((k for k in nodos if self._misma_mac(k, mac)), None)
+        valor = (nodos.get(clave) or {}).get("Tiempo_Bomba") if clave else None
+        if isinstance(valor, (int, float)) and 10 <= valor <= 300:
+            logger.info(f"Tiempo de salida a {device_id}: {int(valor)} s")
+            self.mqtt_handler.send_set_exit_time(seconds=int(valor), device_id=device_id)
+
     def enviar_horario(self, device_id: str) -> None:
         """
         Manda a la central el horario que tiene el scheduler para ella.
