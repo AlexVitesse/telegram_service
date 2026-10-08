@@ -21,7 +21,8 @@ Esta es la pantalla principal de la app y funciona como dashboard central:
 
 - **Boton de armado**: "Proteger ahora" arma y "Desarmar" desarma. Actua sobre todas tus centrales a la vez. El titulo muestra "Proteccion activa" o "Sistema desarmado".
 - **Atajos**: "Salir" (arma), "En casa" (desarma) y "Programar" (abre Horarios).
-- **Boton Emergencia (SOS)**: Activa la alarma (sirena) manualmente en todos tus equipos, con confirmacion previa.
+- **Boton Emergencia (SOS)**: Activa la alarma (sirena) manualmente en todos tus equipos, con confirmacion previa. Que hace la bengala depende de su modo (ver "Disparo de Emergencia").
+- **Boton Atras del telefono**: en la pantalla Inicio sale de la app; en las demas pantallas vuelve a la anterior.
 - **Conexion**: "Central en linea" o "Central sin conexion". Una central cuenta como en linea si mando datos en los ultimos 90 segundos.
 - **Tarjeta de cada equipo**: nombre, estado ("Armado", "Desarmado" o "Sin conexion") y el boton "Ver detalles y ajustes", que abre la ficha del equipo.
 - **Seguridad Programada**: Ver los horarios de armado/desarmado activos.
@@ -38,8 +39,8 @@ Se abre tocando la tarjeta del equipo o "Ver detalles y ajustes":
 - **Modo de prueba**: "Simular disparo" muestra como se veria una alarma sin enviar nada a la central.
 - **Sensores LoRa**: lista de modulos, cada uno "Activo" u "Offline".
 - **Ajustes**: direccion MAC, destinatarios de Telegram y tiempo de salida.
-- **Editar**: cambiar el "Nombre del equipo", agregar o quitar destinatarios de Telegram ("Agregar usuario o grupo", hasta dos usuarios y un grupo) y ajustar el "Tiempo de salida" (60 por defecto). El rango util es de 10 a 180 segundos: la app deja elegir menos de 10, pero ese valor no se aplica y el Master conserva el que tenia. Se guarda con "Guardar cambios".
-- **Borrar dispositivo**: borra el equipo de tu cuenta y su configuracion en la nube, pero no la memoria del propio Master; para dejarlo limpio hay que hacer el reset de fabrica (ver "Como desvinculo, quito o borro un dispositivo" en Preguntas Frecuentes).
+- **Editar**: cambiar el "Nombre del equipo", agregar o quitar destinatarios de Telegram ("Agregar usuario o grupo", hasta dos usuarios y un grupo) y ajustar el "Tiempo de salida" (60 por defecto). Se elige de 10 a 180 segundos. Se guarda con "Guardar cambios"; si la central esta sin conexion, el servidor se lo manda en cuanto vuelva a conectarse.
+- **Borrar dispositivo**: borra el equipo de tu cuenta y su configuracion en la nube. Con el firmware de octubre de 2026, el Master borrado tambien olvida su horario, tiempos y bengala (conserva la WiFi y el nombre). Con un firmware anterior solo se le apaga el horario y lo demas queda en su memoria; para dejarlo limpio hay que hacer el reset de fabrica (ver "Como desvinculo, quito o borro un dispositivo" en Preguntas Frecuentes).
 
 ## Pantalla Horarios
 
@@ -50,14 +51,15 @@ La pestaña "Horarios" (titulo "Programar Alarma") permite programar el armado y
   - Hora de Dormir: 22:00 a 7:00, todos los dias.
   - Fin de Semana: 10:00 a 23:00, sabado y domingo.
   - Viaje/Vacaciones: 00:00 a 23:59, todos los dias (proteccion 24 horas).
-- **Configuracion manual**: elegir "Equipo" (si tienes varios, uno o "Todos mis equipos"), "Hora de Activacion", "Hora de Desactivacion" y los dias, y tocar "Programar Alarma".
+- **Configuracion manual**: elegir "Equipo" (si tienes varios, uno o "Todos mis equipos"), "Hora de Activacion", "Hora de Desactivacion" y los dias, y tocar "Guardar horario". Las horas se muestran como HH:MM en hora del centro de Mexico (la de CDMX; Merida tiene la misma). Si la central esta sin conexion, el horario se aplica cuando vuelva a conectarse.
 - **Alarmas Programadas**: lista de horarios con un icono de papelera para eliminarlos. No hay boton de editar: para cambiar un horario se programa de nuevo.
 
 ## Pantalla Perfil (Configuracion)
 
 Opciones generales de la app y la cuenta:
 
-- **Editar Informacion**: "Cambiar Nombre", "Chat ID de Telegram", "Cambiar Correo" y "Cambiar Contrasena" (pide la contrasena actual).
+- **Editar Informacion**: "Cambiar Nombre", "Chat ID de Telegram", "Cambiar Correo" y "Cambiar Contrasena" (pide la contrasena actual). La app ya no pide el Chat ID al iniciar sesion: se pone aqui o en la ficha del equipo, solo si quieres avisos por Telegram.
+- **Ver los consejos**: vuelve a mostrar los consejos del primer dia (como se usan Salir, En casa y los horarios).
 - **Notificaciones**: "Notificaciones Push", "Armado y desarmado", "Conexion de la central", "Avisos por Telegram" y "Senti" (mostrar u ocultar el asistente).
 - **Cerrar Sesion**: Salir de la cuenta actual.
 - **Eliminar Cuenta**: Eliminacion permanente de la cuenta, de sus equipos y de todos los datos asociados.

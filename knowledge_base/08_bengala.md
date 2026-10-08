@@ -24,6 +24,8 @@ Selecciona "Pregunta" en la app o usa el comando /preguntar en Telegram. Al dete
 
 Si tienes varias centrales, cada aviso es de una sola: sus botones actuan solo sobre la central del aviso, aunque otras esten sonando a la vez. Si tocas "Disparar bengala" en un aviso de una central que ya no esta sonando, el bot responde "Esa alarma ya no esta activa" y no dispara nada. En avisos enviados antes del 7 de octubre de 2026, si suenan varias centrales, el bot te pregunta en cual actuar.
 
+El disparo de emergencia (boton Emergencia de la app o /disparo) tambien pregunta en este modo en los equipos con el firmware de octubre de 2026 o posterior; los anteriores detonan la bengala sin preguntar (ver "Disparo de Emergencia").
+
 Este modo permite evaluar la situacion antes de actuar, por ejemplo revisando camaras de seguridad. La sirena si suena inmediatamente independientemente de la decision sobre la bengala. La respuesta se da tocando uno de los botones del propio mensaje de Telegram; NO existen los comandos /si ni /no. Mientras la alarma siga activa, el bot repite el aviso "ALARMA SIGUE ACTIVA" con los mismos botones cada minuto en el chat privado, y los botones siguen sirviendo mientras la central este sonando. Si nadie contesta en 3 minutos, el Master apaga la sirena por su cuenta, el sistema sigue armado y la bengala no se dispara. A partir de ahi, si tocas "Disparar bengala" en un aviso antiguo, el bot responde "No hay dispositivos en alarma activa". En los grupos de Telegram el aviso llega sin botones.
 
 ## Modo Deshabilitado

@@ -17,12 +17,14 @@ Usa el comando /disparo en el chat con el bot. Por seguridad, el bot solicita co
 Al confirmar el disparo de emergencia:
 
 - La sirena se activa inmediatamente a maxima potencia (110dB).
-- Si la bengala esta habilitada (modo Auto o Pregunta), el Master la detona de inmediato, sin preguntar. Solo con la bengala "Apagada" (deshabilitada) no se dispara.
+- Bengala en modo "Auto": el Master la detona de inmediato.
+- Bengala en modo "Pregunta": los equipos con el firmware de octubre de 2026 o posterior NO la detonan. Suena la sirena y Telegram te pregunta, igual que ante una intrusion ("Disparar bengala", "Dejar armado", "Desactivar sistema"). Los equipos con un firmware anterior la detonan de inmediato, sin preguntar. Si no sabes cual tiene tu equipo, cuenta con que puede detonarla.
+- Bengala "Apagada" (deshabilitada): no se dispara nunca.
 - Se envian notificaciones a todos los usuarios autorizados y a todos los grupos de Telegram vinculados al sistema.
 
 ## Precaucion con la bengala en el disparo de emergencia
 
-Si la bengala esta habilitada y se ejecuta un disparo de emergencia, el cartucho de humo se detona directa e instantaneamente, tambien en modo Pregunta. Una vez iniciada la secuencia, no se puede cancelar ni revertir. Si no quieres humo, pon la bengala en "Apagada" antes de usar esta funcion.
+En modo Auto, un disparo de emergencia detona el cartucho de humo directa e instantaneamente. En modo Pregunta tambien puede detonarlo si el equipo no tiene el firmware de octubre de 2026; por eso el aviso de la app dice que "puede dispararse de inmediato". Una vez iniciada la secuencia, no se puede cancelar ni revertir. Si no quieres humo, pon la bengala en "Apagada" antes de usar esta funcion.
 
 ## Lenguaje natural para disparo
 
