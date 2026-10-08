@@ -66,6 +66,8 @@ class EventType(str, Enum):
     KEYPAD_DISARM = "keypad_disarm"
     STATUS_RESPONSE = "status_response"
     SENSORS_LIST = "sensors_list"
+    #: La central aplico (ok) o rechazo una orden de configuracion. Fase 3.
+    CMD_ACK = "cmd_ack"
 
 # ============================================
 # COMANDOS
@@ -84,6 +86,8 @@ class Command(str, Enum):
     SET_SCHEDULE = "set_schedule"
     SET_EXIT_TIME = "set_exit_time"
     BEEP = "beep"
+    #: Central borrada: olvida horario, tiempos y bengala (no la WiFi). Fase 3.
+    FORGET = "forget"
 
 # ============================================
 # ESTRUCTURAS DE MENSAJES (ESP32 -> Python)
@@ -146,6 +150,11 @@ class MqttTelemetry:
     lora_ok: Optional[bool] = None
     location: str = ""
     name: str = ""
+    #: Horario que la central TIENE: minutos del dia y dias en bits (0=Dom).
+    #: `None` = firmware anterior a la fase 3, que no lo manda.
+    sched_on: Optional[int] = None
+    sched_off: Optional[int] = None
+    sched_days: Optional[int] = None
 
     @classmethod
     def from_json(cls, payload: str) -> 'MqttTelemetry':
@@ -167,7 +176,10 @@ class MqttTelemetry:
             tiempo_bomba=d.get("tiempo_bomba", 60),  # Tiempo de salida desde ESP32
             tiempo_pre=d.get("tiempo_pre", 60),      # Tiempo de pre-alarma desde ESP32
             location=d.get("location", ""),
-            name=d.get("name", "")
+            name=d.get("name", ""),
+            sched_on=d.get("sched_on"),
+            sched_off=d.get("sched_off"),
+            sched_days=d.get("sched_days"),
         )
 
 @dataclass

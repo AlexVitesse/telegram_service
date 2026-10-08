@@ -586,6 +586,7 @@ class FirebaseManager:
                 enabled=False, on_hour=0, on_minute=0, off_hour=0, off_minute=0,
                 device_id=device_id, queue_if_offline=True,
             )
+            self._olvidar(device_id)
             return
         clave = next((k for k in scheduler.configs if self._misma_mac(k, mac)), None)
         if clave is None:
@@ -605,6 +606,53 @@ class FirebaseManager:
             device_id=device_id,
             queue_if_offline=True,
         )
+
+    def _olvidar(self, device_id: str) -> None:
+        """
+        La central borrada vuelve a los ajustes de fabrica (horario, tiempos,
+        bengala; no la WiFi). Firmware de la fase 3; el anterior lo ignora.
+
+        Solo si esta conectada, NUNCA encolado: un "olvidar" pendiente le
+        llegaria a la central despues de volver a darla de alta y le borraria
+        la configuracion nueva. Si estaba offline se lo manda el siguiente
+        arranque (enviar_horario, rama sin nodo).
+        """
+        if self.mqtt_handler.is_device_online(device_id):
+            self.mqtt_handler.send_command(Command.FORGET.value, device_id=device_id)
+
+    def revisar_horario(self, t) -> None:
+        """
+        Con la telemetria (firmware de la fase 3 en adelante, que manda el
+        horario que tiene): si no es el de la nube, se le reenvia. Antes, si
+        la central no lo habia aplicado, nadie se enteraba.
+
+        Como mucho uno cada 10 min por central: uno que la central rechace no
+        se repite en bucle. Sin horario en la nube no se decide nada (el
+        arranque ya cubre la central borrada).
+        """
+        if t.sched_on is None:
+            return
+        mac = normalizar_mac(t.device_id)
+        clave = next((k for k in scheduler.configs if self._misma_mac(k, mac)), None)
+        if clave is None:
+            return
+        cfg = scheduler.configs[clave]
+        if cfg.enabled:
+            igual = (bool(t.auto_schedule_enabled)
+                     and t.sched_on == cfg.on_hour * 60 + cfg.on_minute
+                     and t.sched_off == cfg.off_hour * 60 + cfg.off_minute
+                     and t.sched_days == sum(1 << d for d in cfg.days_indices()))
+        else:
+            igual = not t.auto_schedule_enabled
+        if igual:
+            return
+        reenvios = self.__dict__.setdefault("_reenvio_horario", {})
+        ahora = time.time()
+        if ahora - reenvios.get(mac, 0) < 600:
+            return
+        reenvios[mac] = ahora
+        logger.warning(f"El horario de {t.device_id} no es el de la nube: se le reenvia")
+        self.enviar_horario(t.device_id)
 
     def _nodo(self, mac: str) -> Optional[dict]:
         nodo = (self._get_all_devices() or {}).get(mac)
@@ -1031,6 +1079,8 @@ class FirebaseManager:
         self._borrar_horarios_de(mac)
         self.db.reference(f"ESP32/{mac}").delete()
         self._apagar_horario_central(mac)
+        if self.mqtt_handler:
+            self._olvidar(mac)
         self.invalidate_cache()
         logger.info(f"{mac} borrado por {uid}")
         return "ok"
