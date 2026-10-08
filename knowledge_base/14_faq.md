@@ -25,7 +25,7 @@ Si te preguntas como vinculo un dispositivo, como registro un dispositivo, como 
 1. En la app, pulsa "Agregar" en la barra inferior (o el icono + de la pantalla Inicio).
 2. Pon el equipo en modo emparejamiento: busca el orificio trasero del Master, inserta un clip, mantén pulsado unos 3 segundos y suelta al oír los cinco pitidos; no llegues a 10 segundos (eso borra el equipo con un reset de fabrica).
 3. Acercate al dispositivo. El Bluetooth alcanza unos 10 metros.
-4. Cuando aparezca "Sentinel Master", tocalo. En la pantalla "Configurar dispositivo" (Paso 2 de 3) ingresa el nombre de tu red WiFi (SSID, de la lista o con "Ingresar SSID"), su contraseña, tu ID de Telegram en "Avisos por Telegram (opcional)" y el "Nombre del dispositivo". Pulsa "Confirmar".
+4. Cuando aparezca "Sentinel Master", tocalo. En la pantalla "Configurar dispositivo" (Paso 2 de 3) ingresa el nombre de tu red WiFi (de la lista o con "Escribirla a mano..."), su contraseña, tu ID de Telegram en "Avisos por Telegram (opcional)" y el "Nombre del dispositivo". Pulsa "Confirmar".
 5. El Master se conecta a WiFi, queda registrado en tu cuenta y se reinicia. La app termina con "CONFIGURACION COMPLETA".
 
 ### Tiempo para emparejar y modulos del kit
