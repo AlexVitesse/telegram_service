@@ -53,7 +53,7 @@ Precaucion: si se mantiene pulsado 10 segundos o mas, se ejecuta un reset de fab
 
 Se abre "Configurar dispositivo" (PASO 2 DE 3):
 
-1. **Red WiFi (Requerido)**: elige tu red de la lista. Si no aparece, elige "Ingresar manualmente..." y escribela en "Ingresar SSID". Si no aparece en la lista puede ser de 5 GHz. Tambien puedes usar "Escanear el QR de la red".
+1. **Red WiFi (Requerido)**: elige tu red de la lista. Si no aparece, elige "Escribirla a mano..." y escribela en "Nombre de tu red WiFi". Si no aparece en la lista puede ser de 5 GHz. Tambien puedes usar "Escanear el QR de la red".
 2. **Contraseña de la WiFi (Requerido)**: la contrasena de la red WiFi.
 3. **Avisos por Telegram (opcional)**: tu CHATID y, si quieres avisos en un grupo, el CHATID GRUPAL.
 4. **Nombre del dispositivo (Requerido)**: un nombre para identificar al Master, por ejemplo "Recepcion", "Oficina principal" o "Casa playa".
