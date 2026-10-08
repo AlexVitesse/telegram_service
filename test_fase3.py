@@ -126,6 +126,32 @@ def test_central_borrada_que_arranca_olvida():
     _horarios_aislados(caso)
 
 
+def test_central_borrada_olvida_al_arrancar_sin_telemetria_previa():
+    """El system_boot llega antes que la primera telemetria: offline segun el handler."""
+    def caso(sch):
+        fm = _fm(_arbol_jose())
+        fm.mqtt_handler.is_device_online.return_value = False
+        fm.enviar_horario("AB_CD_EF_01_23_45", arrancando=True)
+        fm.mqtt_handler.send_command.assert_called_once_with(
+            Command.FORGET.value, device_id="AB_CD_EF_01_23_45")
+    _horarios_aislados(caso)
+
+
+def test_system_boot_pide_el_horario_como_arranque():
+    h = MqttHandler.__new__(MqttHandler)
+    h.device_id = MAC
+    h.device_location = ""
+    h.firebase_manager = MagicMock()
+    h.firebase_manager.get_device_location.return_value = ""
+    h.device_manager = MagicMock()
+    h.last_arm_event_time = {}
+    h.prueba_fisica = {}
+    h._on_event_callback = None
+    h.process_pending_commands = MagicMock()
+    h._handle_event('{"deviceId": "%s", "eventType": "system_boot", "data": {}}' % MAC)
+    h.firebase_manager.enviar_horario.assert_called_once_with(MAC, arrancando=True)
+
+
 def test_central_con_nodo_no_olvida():
     def f(fm):
         fm.mqtt_handler.is_device_online.return_value = True

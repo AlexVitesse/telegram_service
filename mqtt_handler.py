@@ -224,7 +224,7 @@ class MqttHandler:
             # La central arranca con el horario que tenia en NVS; si cambio
             # mientras estaba apagada, se quedaba con el viejo.
             if tipo == "system_boot" and self.firebase_manager.is_available():
-                self.firebase_manager.enviar_horario(event.device_id)
+                self.firebase_manager.enviar_horario(event.device_id, arrancando=True)
                 self.firebase_manager.enviar_tiempo_salida(event.device_id)
             if tipo == "system_boot":
                 # Esta suscrita (se suscribe antes de anunciar el arranque) aunque

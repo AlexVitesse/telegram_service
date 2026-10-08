@@ -557,7 +557,7 @@ class FirebaseManager:
             logger.info(f"Tiempo de salida a {device_id}: {int(valor)} s")
             self.mqtt_handler.send_set_exit_time(seconds=int(valor), device_id=device_id)
 
-    def enviar_horario(self, device_id: str) -> None:
+    def enviar_horario(self, device_id: str, arrancando: bool = False) -> None:
         """
         Manda a la central el horario que tiene el scheduler para ella.
 
@@ -586,7 +586,7 @@ class FirebaseManager:
                 enabled=False, on_hour=0, on_minute=0, off_hour=0, off_minute=0,
                 device_id=device_id, queue_if_offline=True,
             )
-            self._olvidar(device_id)
+            self._olvidar(device_id, conectada=arrancando)
             return
         clave = next((k for k in scheduler.configs if self._misma_mac(k, mac)), None)
         if clave is None:
@@ -607,7 +607,7 @@ class FirebaseManager:
             queue_if_offline=True,
         )
 
-    def _olvidar(self, device_id: str) -> None:
+    def _olvidar(self, device_id: str, conectada: bool = False) -> None:
         """
         La central borrada vuelve a los ajustes de fabrica (horario, tiempos,
         bengala; no la WiFi). Firmware de la fase 3; el anterior lo ignora.
@@ -616,8 +616,13 @@ class FirebaseManager:
         llegaria a la central despues de volver a darla de alta y le borraria
         la configuracion nueva. Si estaba offline se lo manda el siguiente
         arranque (enviar_horario, rama sin nodo).
+
+        `conectada`: quien llama ya sabe que lo esta. El `system_boot` llega
+        antes que la primera telemetria, y sin esto is_device_online() decia
+        "offline" justo al arrancar: la central borrada no olvidaba nunca
+        (auditoria del 7-oct-2026).
         """
-        if self.mqtt_handler.is_device_online(device_id):
+        if conectada or self.mqtt_handler.is_device_online(device_id):
             self.mqtt_handler.send_command(Command.FORGET.value, device_id=device_id)
 
     def revisar_horario(self, t) -> None:
