@@ -399,7 +399,8 @@ class MqttHandler:
         return device_id
 
     def send_command(self, cmd: str, args: Dict[str, Any] = None,
-                     device_id: str = None, queue_if_offline: bool = False) -> bool:
+                     device_id: str = None, queue_if_offline: bool = False,
+                     _desde_cola: bool = False) -> bool:
         """
         Envia un comando al ESP32 (tanto al ID completo como al truncado).
         Resuelve IDs truncados al ID real del dispositivo MQTT.
@@ -422,11 +423,6 @@ class MqttHandler:
             logger.info(f"Dispositivo {target_device} offline. Comando {cmd} encolado para envío posterior.")
             return True  # Retornamos True porque se encoló exitosamente
 
-        # Se envia directo: un pendiente del mismo tipo es mas viejo y, si se
-        # mandase despues al vaciar la cola, pisaria a este.
-        if cmd in COMANDOS_CONFIG:
-            self._descartar_pendiente(target_device, cmd)
-
         command = MqttCommand(
             command=cmd,
             args=args or {}
@@ -447,7 +443,18 @@ class MqttHandler:
             self.client.publish(topic_truncated, payload, qos=1)
             logger.info(f"Comando enviado (truncado): {cmd} -> {truncated_id}")
 
-        return result.rc == mqtt.MQTT_ERR_SUCCESS
+        ok = result.rc == mqtt.MQTT_ERR_SUCCESS
+        # Configuracion (gana la ultima). Se decide DESPUES de publicar: antes
+        # se descartaba el pendiente y, si la publicacion fallaba, se perdian
+        # el viejo y el nuevo. Desde la cola no se toca: ahi la reencola
+        # process_pending_commands.
+        if cmd in COMANDOS_CONFIG and not _desde_cola:
+            if ok:
+                self._descartar_pendiente(target_device, cmd)  # el viejo pisaria a este
+            else:
+                logger.warning(f"{cmd} a {target_device} no se publico: queda en cola")
+                self._queue_pending_command(target_device, cmd, args or {})
+        return ok
 
     def _queue_pending_command(self, device_id: str, cmd: str, args: Dict[str, Any]):
         """Encola un comando para enviar cuando el dispositivo vuelva online."""
@@ -545,7 +552,8 @@ class MqttHandler:
             fallidos = []
             for cmd, args, ts in enviar:
                 logger.info(f"Enviando comando pendiente a {device_id}: {cmd}")
-                if not self.send_command(cmd, args, device_id, queue_if_offline=False):
+                if not self.send_command(cmd, args, device_id, queue_if_offline=False,
+                                         _desde_cola=True):
                     fallidos.append((cmd, args, ts))
             if fallidos:
                 logger.warning(f"{len(fallidos)} comando(s) para {device_id} no se publicaron: siguen en cola")

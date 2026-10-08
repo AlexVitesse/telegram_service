@@ -215,6 +215,26 @@ def test_tiempo_de_salida_se_encola_y_no_caduca():
     _telemetria(h)
     assert "set_exit_time" in _publicados(h), _publicados(h)
 
+
+def test_publicacion_fallida_conserva_el_valor_nuevo():
+    """Auditoria 7-oct: con 10 s en cola, central "online" y publish rc=4, al
+    mandar 30 s se borraba la cola y se perdian los dos."""
+    h = _handler(_archivo())
+    h._pending_commands[MAC] = [("set_exit_time", {"seconds": 10}, time.time())]
+    h.last_telemetry_time[MAC] = time.time()
+    h.client.publish.return_value = SimpleNamespace(rc=4)
+    assert h.send_set_exit_time(30, device_id=MAC) is False
+    cola = h._pending_commands.get(MAC, [])
+    assert [a["seconds"] for c, a, _ in cola if c == "set_exit_time"] == [30], cola
+
+
+def test_vaciar_la_cola_con_fallo_no_la_duplica():
+    h = _handler(_archivo())
+    h._pending_commands[MAC] = [("set_exit_time", {"seconds": 10}, time.time())]
+    h.client.publish.return_value = SimpleNamespace(rc=4)
+    _telemetria(h)
+    assert h.get_pending_commands_count(MAC) == 1, h._pending_commands
+
 if __name__ == "__main__":
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0
