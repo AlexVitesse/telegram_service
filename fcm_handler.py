@@ -65,7 +65,6 @@ class PushNotification:
                 "payload": {
                     "aps": {
                         "sound": "default",
-                        "badge": 1,
                     }
                 }
             }
@@ -164,8 +163,8 @@ class FCMHandler:
                 apns=self._messaging.APNSConfig(
                     payload=self._messaging.APNSPayload(
                         aps=self._messaging.Aps(
+                            # Sin badge: la app no lo borra y el "1" se quedaba fijo en el icono.
                             sound="default",
-                            badge=1,
                         )
                     )
                 )
