@@ -7,6 +7,7 @@
 - El Master envia su estado cada 30 segundos. La app y el bot lo marcan "Sin conexion" si pasan 90 segundos sin noticias.
 - Si se perdio la conexion WiFi, el Master intenta reconectar solo cada minuto.
 - Si cambiaste el nombre o la contrasena de tu red WiFi, el Master no se reconecta: hay que emparejarlo otra vez desde la app con los datos nuevos.
+- Si el Master tiene WiFi e internet pero sigue "Sin conexion", puede que tu proveedor de internet bloquee el puerto 8883. Los equipos con el firmware de octubre de 2026 lo resuelven solos: tras dos intentos fallidos se conectan por el puerto 8884 (WebSocket seguro) y lo recuerdan. Con un firmware anterior, contacta a soporte.
 - Como ultimo recurso: reiniciar el Master desconectando la alimentacion y reconectando despues de unos segundos.
 
 ## Bot de Telegram no responde
@@ -28,9 +29,11 @@
 
 ## WiFi no conecta durante configuracion
 
+Si pusiste mal la contraseña de la WiFi al vincular, emparejar o dar de alta la central, o la WiFi no conecta:
+
 - Verificar que la contrasena WiFi ingresada es correcta.
 - El Master solo soporta redes WiFi de 2.4 GHz. No es compatible con redes de 5 GHz. Si tu red no aparece en la lista de la app, puede ser de 5 GHz.
-- Si la app dice "La central no pudo conectarse a la red", revisa contrasena y banda; si estan bien, apaga y enciende la central y vuelve a emparejar.
+- Si la app dice "No se pudo conectar a la WiFi. Revisa la contraseña (la red debe ser de 2.4 GHz).", revisa contrasena y banda y vuelve a tocar "Confirmar"; si estan bien, apaga y enciende la central y vuelve a emparejar. Una contrasena equivocada no se guarda: la central conserva la WiFi que tenia.
 - Si dice "La conexion tardo demasiado", puede que la central ya haya salido del modo emparejamiento: vuelve a poner el clip.
 - Verificar que el router esta encendido y dentro del alcance del Master.
 - Si persiste el problema, intentar con otra red WiFi disponible.

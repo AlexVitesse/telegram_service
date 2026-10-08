@@ -53,8 +53,8 @@ Precaucion: si se mantiene pulsado 10 segundos o mas, se ejecuta un reset de fab
 
 Se abre "Configurar dispositivo" (PASO 2 DE 3):
 
-1. **SSID (Requerido)**: elige tu red de la lista. Si no aparece, elige "Ingresar manualmente..." y escribela en "Ingresar SSID". Si no aparece en la lista puede ser de 5 GHz. Tambien puedes usar "Escanear el QR de la red".
-2. **Password (Requerido)**: la contrasena de la red WiFi.
+1. **Red WiFi (Requerido)**: elige tu red de la lista. Si no aparece, elige "Ingresar manualmente..." y escribela en "Ingresar SSID". Si no aparece en la lista puede ser de 5 GHz. Tambien puedes usar "Escanear el QR de la red".
+2. **Contraseña de la WiFi (Requerido)**: la contrasena de la red WiFi.
 3. **Avisos por Telegram (opcional)**: tu CHATID y, si quieres avisos en un grupo, el CHATID GRUPAL.
 4. **Nombre del dispositivo (Requerido)**: un nombre para identificar al Master, por ejemplo "Recepcion", "Oficina principal" o "Casa playa".
 
@@ -62,7 +62,7 @@ Toca "Confirmar". Por Bluetooth solo viajan al Master la red WiFi, la contrasena
 
 ### Paso 5: Conexion y registro
 
-El Master intenta conectarse a la red WiFi. La app espera hasta 50 segundos. Si conecta, muestra "Conectado a Wi-Fi exitosamente.", registra el equipo en tu cuenta y espera a que se reinicie ("Dispositivo reiniciando en: N segundos"). Al final aparece "CONFIGURACION COMPLETA - Tu Sentinel ya esta en linea" y el boton "Ir al inicio".
+El Master intenta conectarse a la red WiFi; mientras tanto la app muestra "Comprobando la conexión a tu WiFi…" y espera hasta 50 segundos. Si conecta, muestra "Conectado a Wi-Fi exitosamente.", registra el equipo en tu cuenta y espera a que se reinicie ("Dispositivo reiniciando en: N segundos"). Al final aparece "CONFIGURACION COMPLETA - Tu Sentinel ya esta en linea" y el boton "Ir al inicio".
 
 Si el equipo ya estaba en otra cuenta, al emparejarlo pasa a la tuya; la app puede mostrar "Esperando a que la central se conecte…" mientras tanto.
 
@@ -70,11 +70,11 @@ Si el equipo ya estaba en otra cuenta, al emparejarlo pasa a la tuya; la app pue
 
 Mensajes que puede mostrar la app y que hacer:
 
-- "La central no pudo conectarse a la red": revisa la contrasena y que la red sea de 2.4 GHz. Si estan bien, apaga y enciende la central y vuelve a empezar.
+- "No se pudo conectar a la WiFi. Revisa la contraseña (la red debe ser de 2.4 GHz).": con el firmware de octubre de 2026 sale a los pocos segundos si la contrasena es incorrecta. La central sigue en emparejamiento y conserva la WiFi que tenia antes, asi que puedes corregir la contrasena y tocar "Confirmar" otra vez. Si ya estaba bien, apaga y enciende la central y vuelve a empezar.
 - "La conexion tardo demasiado": puede ser una red de 5 GHz, un SSID o contrasena incorrectos, o que la central ya salio del modo emparejamiento.
 - "Se perdio la conexion con la central" o "No hay conexion con la central": vuelve a ponerla en modo emparejamiento con el clip e intentalo otra vez.
 
-Si la contrasena WiFi esta mal, el Master no vuelve solo al modo emparejamiento: sigue en emparejamiento hasta que se acaban los 5 minutos y se reinicia. Repite el proceso desde el Paso 2.
+Si la contrasena WiFi esta mal, el Master sigue en modo emparejamiento hasta que se acaban los 5 minutos y se reinicia; dentro de ese tiempo puedes reintentar desde la misma pantalla. Una contrasena equivocada no se guarda: el Master vuelve a conectarse con la WiFi que ya tenia.
 
 ## Tiempo limite de emparejamiento
 

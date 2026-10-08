@@ -117,7 +117,8 @@ def test_tiempo_de_salida_10_a_180():
 
 
 def test_borrar_no_limpia_el_master():
-    # borrar_equipo borra la nube y apaga el horario; la NVS del Master queda.
+    # borrar_equipo borra la nube y apaga el horario. Con el firmware de la fase 3
+    # (oct-2026) tambien manda forget; con el anterior la NVS del Master queda.
     kb = _kb_texto()
     for f in ("14_faq.md", "04_app_sentinel_guard.md"):
         assert "reset de fabrica" in kb[f], f
