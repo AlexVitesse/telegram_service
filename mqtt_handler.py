@@ -210,13 +210,21 @@ class MqttHandler:
             # POST /equipos/reclamar para no dar una central a quien solo
             # conoce su MAC.
             tipo = getattr(event.event_type, "value", event.event_type)
+            if tipo == EventType.CMD_ACK.value:
+                # Solo al log: no es para nadie mas (ni siquiera el admin).
+                d = event.data or {}
+                if d.get("ok"):
+                    logger.info(f"{event.device_id} aplico {d.get('cmd')}")
+                else:
+                    logger.warning(f"{event.device_id} RECHAZO {d.get('cmd')}")
+                return
             if tipo in ("config_mode_started", "system_boot"):
                 self.prueba_fisica[normalizar_mac(event.device_id)] = time.time()
 
             # La central arranca con el horario que tenia en NVS; si cambio
             # mientras estaba apagada, se quedaba con el viejo.
             if tipo == "system_boot" and self.firebase_manager.is_available():
-                self.firebase_manager.enviar_horario(event.device_id)
+                self.firebase_manager.enviar_horario(event.device_id, arrancando=True)
                 self.firebase_manager.enviar_tiempo_salida(event.device_id)
             if tipo == "system_boot":
                 # Esta suscrita (se suscribe antes de anunciar el arranque) aunque
@@ -264,6 +272,8 @@ class MqttHandler:
             # enviar. Tras un reinicio del VPS ni siquiera hay reconexion.
             # Si la cola esta vacia, sale enseguida.
             self.process_pending_commands(telemetry.device_id)
+            if self.firebase_manager.is_available():
+                self.firebase_manager.revisar_horario(telemetry)
             if reconnected:
                 # Notificar reconexión via callback
                 if hasattr(self, '_on_reconnect_callback') and self._on_reconnect_callback:
@@ -655,8 +665,11 @@ class MqttHandler:
         """
         # Primero activar bengala
         self.send_command(Command.ACTIVATE_BENGALA.value, device_id=device_id)
-        # Luego disparar alarma
-        return self.send_command(Command.TRIGGER_ALARM.value, device_id=device_id)
+        # Luego disparar alarma. `confirm`: es la respuesta del usuario. En modo
+        # pregunta el firmware de la fase 3 solo dispara la bengala si la central
+        # esta esperando o si viene esto (el SOS de la app ya no la dispara).
+        return self.send_command(Command.TRIGGER_ALARM.value, {"confirm": True},
+                                 device_id=device_id)
 
     # ========================================
     # Metodos de conexion
