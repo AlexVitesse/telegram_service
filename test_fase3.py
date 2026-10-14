@@ -11,6 +11,7 @@ Fase 3 (servidor): lo que necesita el firmware nuevo de la central.
     python test_fase3.py
 """
 import sys
+from collections import OrderedDict
 import time
 from unittest.mock import MagicMock
 
@@ -53,6 +54,7 @@ def test_cmd_ack_no_llega_a_nadie():
     h.device_manager = MagicMock()
     h.last_arm_event_time = {}
     h.prueba_fisica = {}
+    h._ids_vistos, h._arranques_por_confirmar = OrderedDict(), {}
     h._on_event_callback = MagicMock()
     ev = '{"deviceId": "%s", "eventType": "cmd_ack", "data": {"cmd": "set_schedule", "ok": false}}' % MAC
     h._handle_event(ev)
@@ -146,6 +148,7 @@ def test_system_boot_pide_el_horario_como_arranque():
     h.device_manager = MagicMock()
     h.last_arm_event_time = {}
     h.prueba_fisica = {}
+    h._ids_vistos, h._arranques_por_confirmar = OrderedDict(), {}
     h._on_event_callback = None
     h.process_pending_commands = MagicMock()
     h._handle_event('{"deviceId": "%s", "eventType": "system_boot", "data": {}}' % MAC)

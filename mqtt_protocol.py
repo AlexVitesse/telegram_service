@@ -100,6 +100,13 @@ class MqttEvent:
     event_type: str
     data: Dict[str, Any]
     timestamp: int = 0
+    #: Firmware con entrega certificada (QoS 1): "<arranque>-<n>". QoS 1 entrega
+    #: "al menos una vez", asi que el mismo id puede llegar dos veces. Vacio en
+    #: firmware viejo.
+    event_id: str = ""
+    #: Reenviado desde la cola de la central: paso sin conexion y `timestamp`
+    #: es la hora en que ocurrio, no la de llegada.
+    atrasado: bool = False
 
     @classmethod
     def from_json(cls, payload: str) -> 'MqttEvent':
@@ -112,8 +119,21 @@ class MqttEvent:
             device_id=d.get("deviceId", ""),
             event_type=d.get("eventType", ""),
             data=d.get("data", {}),
-            timestamp=d.get("timestamp", 0)
+            timestamp=d.get("timestamp", 0),
+            event_id=str(d.get("id") or ""),
+            atrasado=bool(d.get("atrasado", False)),
         )
+
+    def nota_atrasado(self) -> str:
+        """Texto para avisos que llegan tarde; vacio si llego a tiempo."""
+        if not self.atrasado:
+            return ""
+        # Sin hora valida (reinicio sin internet, antes del NTP) no se inventa una.
+        if self.timestamp > 1_600_000_000:
+            from datetime import datetime
+            hora = datetime.fromtimestamp(self.timestamp).strftime("%H:%M")
+            return f"Ocurrió a las {hora}; la central estaba sin internet."
+        return "Ocurrió mientras la central estaba sin internet."
 
 @dataclass
 class MqttTelemetry:
@@ -344,6 +364,12 @@ class TelegramFormatter:
     @staticmethod
     def format_event(event: MqttEvent, location: str = "") -> str:
         """Convierte un evento MQTT en mensaje de Telegram. Todo lo dinamico va escapado."""
+        texto = TelegramFormatter._format_event(event, location)
+        nota = event.nota_atrasado()
+        return f"{texto}\n🕓 _{escape_md(nota)}_" if nota else texto
+
+    @staticmethod
+    def _format_event(event: MqttEvent, location: str = "") -> str:
         event_type = event.event_type
         data = event.data
         lugar = escape_md(location or event.device_id)

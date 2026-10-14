@@ -10,6 +10,7 @@ import os
 import ssl
 import threading
 import time
+from collections import OrderedDict
 from typing import Callable, Dict, Any, Optional, List, TYPE_CHECKING
 import paho.mqtt.client as mqtt
 
@@ -40,6 +41,9 @@ COMANDOS_CONFIG = (Command.SET_SCHEDULE.value, Command.SET_BENGALA_MODE.value,
 
 class MqttHandler:
     """Manejador de conexion MQTT con el ESP32"""
+
+    #: Un system_boot con mas segundos encendida que esto es una reconexion.
+    ARRANQUE_RECIENTE = 300
 
     #: La cola la tocan el hilo de red de paho (telemetria, arranques) y el
     #: bucle de asyncio y los to_thread de la API (send_command). Reentrante:
@@ -91,6 +95,13 @@ class MqttHandler:
         # MAC normalizada -> cuando se vio por ultima vez un boton largo o un
         # arranque (ver _handle_event y api_server /equipos/reclamar).
         self.prueba_fisica: Dict[str, float] = {}
+        # Ids de evento ya procesados (firmware con QoS 1, ver MqttEvent.event_id).
+        # ponytail: en memoria y con tope; tras reiniciar el VPS un reenvio
+        # justo en ese momento se avisaria dos veces. Persistir si llega a pasar.
+        self._ids_vistos: "OrderedDict[str, None]" = OrderedDict()
+        # device_id -> (hora, evento) de un system_boot de firmware viejo, que
+        # lo manda tambien al reconectar. Lo confirma la siguiente telemetria.
+        self._arranques_por_confirmar: Dict[str, tuple] = {}
 
         # Configurar cliente MQTT
         self._setup_client()
@@ -117,6 +128,7 @@ class MqttHandler:
         if rc == 0:
             logger.info("Conectado al broker MQTT")
             self.connected = True
+            self.device_manager.dar_gracia_offline()
             self._subscribe_to_topics()
         else:
             logger.error(f"Error conectando a MQTT, codigo: {rc}")
@@ -188,15 +200,25 @@ class MqttHandler:
                 if location:
                     self.device_location = location
 
-            # Update device state in DeviceManager
-            if event.event_type == EventType.ALARM_TRIGGERED:
+            if self._ya_visto(event):
+                logger.info(f"{event.device_id}: evento {event.event_id} repetido, se ignora")
+                return
+
+            # Update device state in DeviceManager. Uno atrasado no: describe
+            # como estaba la central hace minutos, y la telemetria (cada 30 s)
+            # ya dice como esta ahora.
+            if event.atrasado:
+                logger.info(f"{event.device_id}: {event.event_type} atrasado (ts={event.timestamp}), no cambia el estado")
+            elif event.event_type == EventType.ALARM_TRIGGERED:
                 logger.info(f"🚨 MQTT: ALARM_TRIGGERED recibido de {event.device_id}")
                 logger.info(f"🚨 MQTT: Datos del evento: {event.data}")
                 self.device_manager.set_alarming_state(event.device_id, True)
             elif event.event_type == EventType.ALARM_STOPPED or event.event_type == EventType.SYSTEM_DISARMED:
                 self.device_manager.set_alarming_state(event.device_id, False)
 
-            if event.event_type == EventType.SYSTEM_ARMED:
+            if event.atrasado:
+                pass
+            elif event.event_type == EventType.SYSTEM_ARMED:
                 self.device_manager.set_armed_state(event.device_id, True)
                 self.last_arm_event_time[event.device_id] = time.time()
             elif event.event_type == EventType.SYSTEM_DISARMED:
@@ -218,7 +240,7 @@ class MqttHandler:
                 else:
                     logger.warning(f"{event.device_id} RECHAZO {d.get('cmd')}")
                 return
-            if tipo in ("config_mode_started", "system_boot"):
+            if tipo == "config_mode_started":
                 self.prueba_fisica[normalizar_mac(event.device_id)] = time.time()
 
             # La central arranca con el horario que tenia en NVS; si cambio
@@ -230,6 +252,19 @@ class MqttHandler:
                 # Esta suscrita (se suscribe antes de anunciar el arranque) aunque
                 # aun no haya mandado telemetria: es el primer momento util.
                 self.process_pending_commands(event.device_id)
+                # El firmware hasta 2026-10 lo manda en cada reconexion MQTT, no
+                # solo al encender (hallazgo L3, docs/LINEA_BASE_MODO_LOCAL).
+                # Contarlo como "esta en la mano" abria 15 min para reclamar la
+                # central con cada corte de internet, y el admin leia "Sistema
+                # reiniciado" sin que lo estuviera.
+                uptime = event.data.get("uptime_sec")
+                if uptime is None:
+                    self._arranques_por_confirmar[event.device_id] = (time.time(), event)
+                    return
+                if uptime > self.ARRANQUE_RECIENTE:
+                    logger.info(f"{event.device_id}: system_boot con {uptime} s encendida, es una reconexion")
+                    return
+                self.prueba_fisica[normalizar_mac(event.device_id)] = time.time()
 
             if self._on_event_callback:
                 self._on_event_callback(event)
@@ -250,6 +285,7 @@ class MqttHandler:
             # Guardar telemetria
             self.last_telemetry[telemetry.device_id] = telemetry
             self.last_telemetry_time[telemetry.device_id] = time.time()
+            self._confirmar_arranque(telemetry)
 
             # La central dice que esta viva, pero puede tener la tarea de los
             # sensores colgada. Sin esto no habia forma de enterarse: la
@@ -822,6 +858,31 @@ class MqttHandler:
 
         except Exception as e:
             logger.error(f"Error guardando telemetría en Firebase: {e}")
+
+    def _ya_visto(self, event: MqttEvent) -> bool:
+        """True si este id de evento ya se proceso (QoS 1 puede repetirlo)."""
+        if not event.event_id:
+            return False
+        clave = f"{normalizar_mac(event.device_id)}/{event.event_id}"
+        if clave in self._ids_vistos:
+            return True
+        self._ids_vistos[clave] = None
+        if len(self._ids_vistos) > 2000:
+            self._ids_vistos.popitem(last=False)
+        return False
+
+    def _confirmar_arranque(self, telemetry: MqttTelemetry):
+        """Resuelve un system_boot de firmware viejo con el uptime de la telemetria."""
+        pendiente = self._arranques_por_confirmar.pop(telemetry.device_id, None)
+        if not pendiente:
+            return
+        visto, event = pendiente
+        if telemetry.uptime_sec > self.ARRANQUE_RECIENTE:
+            logger.info(f"{telemetry.device_id}: system_boot con {telemetry.uptime_sec} s encendida, era una reconexion")
+            return
+        self.prueba_fisica[normalizar_mac(telemetry.device_id)] = visto
+        if self._on_event_callback:
+            self._on_event_callback(event)
 
     def format_event_message(self, event: MqttEvent) -> str:
         """Formatea un evento para enviar por Telegram"""

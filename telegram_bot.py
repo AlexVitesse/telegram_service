@@ -3403,8 +3403,10 @@ class TelegramBot:
             logger.warning(f"Dispositivo {device_id} no tiene Telegram_ID ni Group_ID configurados - no se notificará")
             return
 
-        # Manejar evento de alarma disparada con flujo de bengala
-        if event.event_type == EventType.ALARM_TRIGGERED:
+        # Manejar evento de alarma disparada con flujo de bengala. Una alarma
+        # atrasada ya paso: se avisa sin botones ni recordatorios (preguntar
+        # si se dispara la bengala por algo de hace 15 min no tiene sentido).
+        if event.event_type == EventType.ALARM_TRIGGERED and not event.atrasado:
             logger.info(f"🚨 ALARM_TRIGGERED recibido de {device_id}")
             bengala_mode = self.device_manager.get_bengala_mode(device_id)
             bengala_enabled = self.device_manager.is_bengala_enabled(device_id)

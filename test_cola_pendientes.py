@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import sys
+from collections import OrderedDict
 import tempfile
 import time
 from types import SimpleNamespace
@@ -49,6 +50,7 @@ def _handler(archivo):
     h._on_event_callback = h._on_telemetry_callback = None
     h._on_reconnect_callback = h._on_sensors_list_callback = None
     h.prueba_fisica = {}
+    h._ids_vistos, h._arranques_por_confirmar = OrderedDict(), {}
     h._pending_commands = {}
     h.pending_file = archivo
     h._load_pending()

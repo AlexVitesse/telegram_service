@@ -183,6 +183,7 @@ class DeviceManager:
     def update_telemetry_time(self, device_id: str):
         """Actualiza el tiempo de última telemetría y marca como online."""
         device_data = self._get_device_data(device_id)
+        anterior = device_data.get("last_telemetry_time", 0)
         device_data["last_telemetry_time"] = time.time()
 
         # Si estaba offline y ahora recibimos telemetría, marcar como reconectado
@@ -191,6 +192,8 @@ class DeviceManager:
             device_data["is_online"] = True
             device_data["offline_notified"] = False
             if was_offline:
+                # Para el aviso de reconexion: desde la ultima telemetria.
+                device_data["offline_desde"] = anterior
                 logger.info(f"Dispositivo {device_id} reconectado")
                 return True  # Indica que se reconectó
         return False  # No hubo cambio de estado
@@ -205,6 +208,17 @@ class DeviceManager:
                 if device_data.get("is_online", False):
                     return True
         return False
+
+    def dar_gracia_offline(self):
+        """
+        Reinicia la cuenta de silencio de todas las centrales. Para cuando el
+        VPS vuelve a tener broker: mientras no lo tenia no le llegaba nada de
+        nadie, y sin esto a los 90 s las declaraba a todas "sin conexion".
+        """
+        ahora = time.time()
+        for data in self.devices_state.values():
+            if data.get("last_telemetry_time", 0):
+                data["last_telemetry_time"] = ahora
 
     def check_offline_devices(self, timeout_seconds: int = 90) -> List[Dict[str, Any]]:
         """

@@ -223,6 +223,17 @@ class AlarmBridgeService:
             f"rssi={telemetry.wifi_rssi}dBm, heap={telemetry.heap_free}"
         )
 
+    def _tiempo_fuera(self, device_id: str) -> str:
+        """'Estuvo sin conexión 18 min (04:42 – 05:00)…' o '' si no se sabe."""
+        desde = self.device_manager.devices_state.get(device_id, {}).get("offline_desde", 0)
+        if not desde:
+            return ""
+        from datetime import datetime
+        ahora = _time.time()
+        minutos = max(1, round((ahora - desde) / 60))
+        de, a = (datetime.fromtimestamp(t).strftime("%H:%M") for t in (desde, ahora))
+        return f"\nEstuvo sin conexión {minutos} min ({de} – {a}). En ese rato no llegaban sus avisos."
+
     def _handle_device_reconnect(self, device_id: str):
         """Maneja reconexión de un dispositivo"""
         logger.info(f"Dispositivo {device_id} reconectado - notificando usuarios")
@@ -235,6 +246,7 @@ class AlarmBridgeService:
             f"📍 Ubicación: {location}\n"
             f"📱 ID: `{device_id}`\n\n"
             "El dispositivo ha restablecido la conexión."
+            f"{self._tiempo_fuera(device_id)}"
         )
         self._schedule_telegram_broadcast_for_device(
             device_id, message, familia="conexion"
@@ -277,7 +289,12 @@ class AlarmBridgeService:
 
         while self.running:
             try:
-                # Verificar dispositivos offline (90 segundos sin telemetría)
+                # Verificar dispositivos offline (90 segundos sin telemetría).
+                # Sin broker el VPS no oye a nadie: la culpa es nuestra, no del
+                # internet de cada casa. Al volver, mqtt_handler da la gracia.
+                if not self.mqtt.connected:
+                    await asyncio.sleep(30)
+                    continue
                 offline_devices = self.device_manager.check_offline_devices(timeout_seconds=90)
 
                 for device_data in offline_devices:
@@ -677,6 +694,9 @@ class AlarmBridgeService:
 
             # Enviar notificación si se creó una
             if notification:
+                nota = event.nota_atrasado()
+                if nota:
+                    notification.body = f"{notification.body}. {nota}"
                 sent = self.fcm.send_to_device_users(device_id, notification)
                 if sent > 0:
                     logger.info(f"Push enviado a {sent} usuarios para evento {event.event_type}")
