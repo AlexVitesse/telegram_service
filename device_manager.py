@@ -220,6 +220,24 @@ class DeviceManager:
             if data.get("last_telemetry_time", 0):
                 data["last_telemetry_time"] = ahora
 
+    #: Dos o mas centrales que se callan en esta ventana = fallo del broker,
+    #: no del internet de cada casa (14-oct: 3 centrales en 4 min, ~11 avisos).
+    VENTANA_CAIDA_MASIVA = 600
+
+    def calladas_a_la_vez(self, timeout_seconds: int = 90) -> List[str]:
+        """
+        Centrales sin conexion que cuentan para una caida masiva: las que se
+        callaron en los ultimos VENTANA_CAIDA_MASIVA s y las que ya estan
+        retenidas por una (siguen contando hasta que vuelven, aunque la caida
+        dure mas que la ventana).
+        """
+        limite = time.time() - timeout_seconds - self.VENTANA_CAIDA_MASIVA
+        return [
+            device_id for device_id, d in self.devices_state.items()
+            if d.get("offline_notified")
+            and (d.get("aviso_retenido") or d.get("last_telemetry_time", 0) > limite)
+        ]
+
     def check_offline_devices(self, timeout_seconds: int = 90) -> List[Dict[str, Any]]:
         """
         Verifica qué dispositivos han dejado de enviar telemetría.

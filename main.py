@@ -236,10 +236,20 @@ class AlarmBridgeService:
 
     def _handle_device_reconnect(self, device_id: str):
         """Maneja reconexión de un dispositivo"""
-        logger.info(f"Dispositivo {device_id} reconectado - notificando usuarios")
-
         # Obtener ubicación desde Firebase (más confiable)
         location = firebase_manager.get_device_location(device_id) or "Desconocida"
+
+        # Si no se le dijo "sin conexion" (caida masiva), tampoco "reconectado".
+        # El cambio de estado mientras estuvo fuera si se avisa: eso es de su casa.
+        if self.device_manager.devices_state.get(device_id, {}).pop("aviso_retenido", False):
+            logger.info(f"Dispositivo {device_id} reconectado tras caida masiva - sin aviso al usuario")
+            try:
+                self._avisar_cambio_sin_conexion(device_id, location)
+            except Exception as e:
+                logger.error(f"[{device_id}] No se pudo avisar del cambio sin conexion: {e}")
+            return
+
+        logger.info(f"Dispositivo {device_id} reconectado - notificando usuarios")
 
         message = (
             "🟢 *DISPOSITIVO RECONECTADO*\n\n"
@@ -286,6 +296,7 @@ class AlarmBridgeService:
         # Esperar 60 segundos antes de empezar a monitorear
         # para dar tiempo a que los dispositivos envíen telemetría inicial
         await asyncio.sleep(60)
+        en_caida_masiva = False
 
         while self.running:
             try:
@@ -297,8 +308,29 @@ class AlarmBridgeService:
                     continue
                 offline_devices = self.device_manager.check_offline_devices(timeout_seconds=90)
 
+                # Varias centrales calladas a la vez = el broker va mal aunque el
+                # VPS siga conectado (14-oct 04:42: ~11 avisos falsos a 3 casas).
+                # A los usuarios no se les avisa; el vigia lee estas dos lineas
+                # del log y avisa al admin por el bot VISOR.
+                # ponytail: la primera central que se calla si avisa a su
+                # usuario (aun no hay otra con quien compararla).
+                calladas = self.device_manager.calladas_a_la_vez(timeout_seconds=90)
+                masiva = len(calladas) >= 2
+                if masiva and not en_caida_masiva:
+                    logger.warning(
+                        f"Caida masiva: {len(calladas)} centrales sin conexion a la vez "
+                        f"({', '.join(calladas)}); probable fallo del broker, no se avisa a los usuarios"
+                    )
+                elif not masiva and en_caida_masiva:
+                    logger.info("Caida masiva terminada")
+                en_caida_masiva = masiva
+
                 for device_data in offline_devices:
                     device_id = device_data.get("id", "desconocido")
+                    if masiva:
+                        device_data["aviso_retenido"] = True
+                        logger.warning(f"Dispositivo {device_id} sin conexion (caida masiva, aviso retenido)")
+                        continue
                     # Obtener ubicación desde Firebase (más confiable)
                     location = firebase_manager.get_device_location(device_id) or "Desconocida"
 

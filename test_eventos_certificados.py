@@ -7,6 +7,8 @@ Lo que vio la linea base de 24 h del modo local (docs/LINEA_BASE_MODO_LOCAL_2026
   - Con QoS 1 el mismo evento puede llegar dos veces: un aviso por id.
   - Un evento atrasado (paso sin internet) no cambia el estado y dice su hora.
   - Sin broker el VPS no oye a nadie: no declara a todas "sin conexion".
+  - Varias centrales calladas a la vez = el broker va mal: no se culpa al
+    internet de cada casa (caida del 14-oct, docs/PLAN_EVENTOS_CERTIFICADOS §10.5).
 
     python test_eventos_certificados.py
 """
@@ -107,6 +109,53 @@ def test_al_reconectar_se_sabe_desde_cuando_estaba_fuera():
     assert dm.check_offline_devices(timeout_seconds=90)
     assert dm.update_telemetry_time(MAC) is True
     assert dm.devices_state[MAC]["offline_desde"] == antes
+
+
+def _central_callada(dm, mac, hace_seg):
+    """Una central que mando su ultima telemetria hace `hace_seg` segundos."""
+    dm.devices_state[mac] = {"id": mac, "is_online": True, "offline_notified": False,
+                             "last_telemetry_time": time.time() - hace_seg}
+
+
+def test_una_central_callada_no_es_caida_masiva():
+    dm = _h().device_manager
+    dm.devices_state.clear()
+    _central_callada(dm, "08_D1_F9_29_E4", 100)
+    _central_callada(dm, "C8_2E_18_26_60", 10)   # esta sigue hablando
+    dm.check_offline_devices(timeout_seconds=90)
+    assert dm.calladas_a_la_vez() == ["08_D1_F9_29_E4"]
+
+
+def test_dos_calladas_en_la_ventana_son_caida_masiva():
+    # 14-oct: 08_D1 a las 04:44 y C8_2E_18_26_60 a las 04:46.
+    dm = _h().device_manager
+    dm.devices_state.clear()
+    _central_callada(dm, "08_D1_F9_29_E4", 250)
+    _central_callada(dm, "C8_2E_18_26_60", 100)
+    dm.check_offline_devices(timeout_seconds=90)
+    assert len(dm.calladas_a_la_vez()) == 2
+
+
+def test_una_central_muerta_hace_horas_no_cuenta():
+    # Si no, una central desenchufada una semana haria "masiva" a cualquier otra.
+    dm = _h().device_manager
+    dm.devices_state.clear()
+    _central_callada(dm, "C8_2E_18_25_CA", 86400)
+    _central_callada(dm, "A0_A3_B3_2F_A2", 100)
+    dm.check_offline_devices(timeout_seconds=90)
+    assert dm.calladas_a_la_vez() == ["A0_A3_B3_2F_A2"]
+
+
+def test_la_retenida_sigue_contando_si_la_caida_dura_mas_que_la_ventana():
+    # La del 14-oct duro 18 min, mas que la ventana de 10.
+    dm = _h().device_manager
+    dm.devices_state.clear()
+    _central_callada(dm, "08_D1_F9_29_E4", 1100)
+    _central_callada(dm, "A0_A3_B3_2F_A2", 100)
+    dm.check_offline_devices(timeout_seconds=90)
+    assert dm.calladas_a_la_vez() == ["A0_A3_B3_2F_A2"]
+    dm.devices_state["08_D1_F9_29_E4"]["aviso_retenido"] = True
+    assert len(dm.calladas_a_la_vez()) == 2
 
 
 def _correr():
