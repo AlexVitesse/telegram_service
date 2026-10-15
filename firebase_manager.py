@@ -8,7 +8,7 @@ Maneja la conexion con Firebase Realtime Database (RTDB) para:
 import logging
 import threading
 import time
-from typing import Optional, List, Dict, Any, TYPE_CHECKING
+from typing import Callable, Optional, List, Dict, Any, TYPE_CHECKING
 from mqtt_protocol import Command, normalizar_mac # Importar el Enum de Comandos
 from scheduler import scheduler, DAY_NAMES, elegir_por_dispositivo  # Para sincronizar horarios
 
@@ -59,6 +59,18 @@ class UserInfo:
         self.is_admin = is_admin
         self.authorized_devices = authorized_devices
 
+
+def es_disparo_app(data) -> bool:
+    """
+    El SOS de la app escribe `DisparoApp = {"<fecha>": true}` (un objeto, con set()),
+    no `true` a secas. Hasta el 15-oct solo se aceptaba `true` y el SOS de la app
+    no llegaba nunca a la central, ni con ella en linea. Desactivar escribe
+    `{"<fecha>": false}`: eso no dispara.
+    """
+    if data is True:
+        return True
+    return isinstance(data, dict) and any(v is True for v in data.values())
+
 class FirebaseManager:
     #: Serializa `reclamar_equipo` y `borrar_equipo`: los dos leen `ownerUid` y
     #: luego escriben listas y nodo, y la API los corre en hilos. Sin esto un
@@ -86,6 +98,8 @@ class FirebaseManager:
         self._cache_timestamp: float = 0  # Timestamp de cuando se cacheó
 
         self.mqtt_handler: Optional['MqttHandler'] = None
+        # Lo pone main.py: avisa del SOS al grupo de Telegram de la central.
+        self.on_sos: Optional[Callable[[str], None]] = None
 
         # Listener monitoring
         self._last_listener_event_time: float = 0
@@ -343,10 +357,14 @@ class FirebaseManager:
                     logger.info(f"Comando de App: DESARMAR para {device_id}")
                     self.mqtt_handler.send_command(cmd=Command.DISARM.value, device_id=device_id)
 
-            elif command_key == 'DisparoApp' and event.data is True:
-                # Solo disparar cuando DisparoApp cambia a True, no cuando se resetea a False
+            elif command_key == 'DisparoApp' and es_disparo_app(event.data):
                 logger.info(f"Comando de App: DISPARO para {device_id}")
                 self.mqtt_handler.send_command(cmd=Command.TRIGGER_ALARM.value, device_id=device_id)
+                if self.on_sos:
+                    try:
+                        self.on_sos(device_id)
+                    except Exception as e:  # el aviso nunca debe tumbar el listener
+                        logger.error(f"[{device_id}] No se pudo avisar del SOS al grupo: {e}")
 
             elif command_key == 'BengalaHab':
                 if event.data is True:

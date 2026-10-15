@@ -428,6 +428,35 @@ class AlarmBridgeService:
             # Verificar cada 60 segundos
             await asyncio.sleep(60)
 
+    def _avisar_sos(self, device_id: str):
+        """
+        SOS pedido desde la app: aviso al grupo de Telegram de la central.
+
+        Decision del 15-oct: solo al grupo (`Group_ID`); sin grupo no se avisa a
+        nadie. Sale del VPS, asi que llega aunque la central no tenga internet
+        (por ejemplo, desde el telefono con datos moviles). Corre en el hilo del
+        listener de Firebase: el envio va al loop del bot.
+        """
+        datos = (firebase_manager._get_all_devices() or {}).get(device_id) or {}
+        grupo = str(datos.get("Group_ID") or "").strip()
+        if not grupo:
+            logger.info(f"🆘 [{device_id}] SOS de la app sin grupo de Telegram: no se avisa a nadie")
+            return
+        from datetime import datetime
+        nombre = datos.get("Nombre") or device_id
+        hora = datetime.now().strftime("%H:%M")
+        msg = f"🆘 SOS pedido desde la app en {nombre} a las {hora}."
+        if not self.mqtt.is_device_online(device_id):
+            msg += "\n⚠️ La central está sin conexión: la sirena NO va a sonar."
+        msg += "\nSi es una emergencia, llamen al 911."
+        if self._loop and self.telegram.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self.telegram.send_message(grupo, msg, skip_anti_spam=True), self._loop
+            )
+            logger.info(f"🆘 [{device_id}] SOS de la app avisado al grupo")
+        else:
+            logger.error(f"🆘 [{device_id}] SOS de la app: el bot no esta listo, el grupo NO fue avisado")
+
     def _get_authorized_chats(self, device_id: str):
         """
         Los chats a los que hay que NOTIFICAR algo de este dispositivo.
@@ -830,6 +859,7 @@ class AlarmBridgeService:
 
         # Iniciar listener de comandos de la App en Firebase
         if self.firebase_available: # Only start if Firebase is connected
+            firebase_manager.on_sos = self._avisar_sos
             firebase_manager.start_app_command_listener(self.mqtt)
 
         self.running = True
