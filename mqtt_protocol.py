@@ -175,6 +175,8 @@ class MqttTelemetry:
     sched_on: Optional[int] = None
     sched_off: Optional[int] = None
     sched_days: Optional[int] = None
+    #: Version del firmware (`FW_VERSION`, desde el 15-oct-2026). "" = anterior.
+    fw: str = ""
 
     @classmethod
     def from_json(cls, payload: str) -> 'MqttTelemetry':
@@ -198,6 +200,7 @@ class MqttTelemetry:
             location=d.get("location", ""),
             name=d.get("name", ""),
             sched_on=d.get("sched_on"),
+            fw=str(d.get("fw") or ""),
             sched_off=d.get("sched_off"),
             sched_days=d.get("sched_days"),
         )

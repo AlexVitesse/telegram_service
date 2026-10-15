@@ -393,6 +393,16 @@ def test_ausente_no_es_lo_mismo_que_radio_muerta():
     assert sana.lora_ok is True, sana.lora_ok
 
 
+def test_version_del_firmware():
+    """`fw` desde el 15-oct; sin el, firmware anterior ("" y no se escribe)."""
+    from mqtt_protocol import MqttTelemetry
+    import json
+
+    assert MqttTelemetry.from_json(json.dumps({"deviceId": "D1"})).fw == ""
+    nueva = MqttTelemetry.from_json(json.dumps({"deviceId": "D1", "fw": "2026.10.15"}))
+    assert nueva.fw == "2026.10.15", nueva.fw
+
+
 def _correr():
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0
