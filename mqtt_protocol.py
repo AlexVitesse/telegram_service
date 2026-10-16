@@ -115,11 +115,16 @@ class MqttEvent:
         logger.debug(f"Raw payload for MqttEvent: {payload}")
         d = json.loads(payload)
         logger.debug(f"Parsed dictionary for MqttEvent: {d}")
+        timestamp = d.get("timestamp", 0)
+        # Central sin hora (reiniciada sin internet y aun sin NTP): manda cuanto
+        # lleva el evento en su cola y la hora se saca de la de llegada.
+        if (not timestamp or timestamp < 1_600_000_000) and isinstance(d.get("edad_s"), int):
+            timestamp = int(time.time()) - d["edad_s"]
         return cls(
             device_id=d.get("deviceId", ""),
             event_type=d.get("eventType", ""),
             data=d.get("data", {}),
-            timestamp=d.get("timestamp", 0),
+            timestamp=timestamp,
             event_id=str(d.get("id") or ""),
             atrasado=bool(d.get("atrasado", False)),
         )

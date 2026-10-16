@@ -158,6 +158,21 @@ def test_la_retenida_sigue_contando_si_la_caida_dura_mas_que_la_ventana():
     assert len(dm.calladas_a_la_vez()) == 2
 
 
+def test_central_sin_hora_manda_la_edad_y_el_vps_la_calcula():
+    """Reiniciada sin internet y aun sin NTP: timestamp 0 + edad_s (15-oct)."""
+    e = MqttEvent.from_json(json.dumps({
+        "deviceId": "D1", "eventType": "system_armed", "timestamp": 0,
+        "edad_s": 600, "atrasado": True, "data": {}}))
+    assert abs(e.timestamp - (int(time.time()) - 600)) <= 2, e.timestamp
+    assert "Ocurrió a las" in e.nota_atrasado()
+    # Firmware viejo: ni edad_s ni hora; no se inventa una.
+    viejo = MqttEvent.from_json(json.dumps({
+        "deviceId": "D1", "eventType": "system_armed", "timestamp": 35,
+        "atrasado": True, "data": {}}))
+    assert viejo.timestamp == 35
+    assert viejo.nota_atrasado() == "Ocurrió mientras la central estaba sin internet."
+
+
 def _correr():
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0
