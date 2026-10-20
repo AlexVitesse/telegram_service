@@ -179,6 +179,14 @@ class MqttHandler:
             # Verificar si es una lista de sensores (tiene estructura diferente)
             try:
                 d = json.loads(payload)
+                # Antes que nada: lleva secretos (from_json loguea el payload
+                # en debug) y no es para avisar a nadie.
+                if d.get("eventType") == EventType.LOCAL_CREDS.value:
+                    try:
+                        self._guardar_creds_locales(str(d.get("deviceId") or ""), d.get("data") or {})
+                    except Exception as e:
+                        logger.error(f"No se pudieron guardar local_creds: {type(e).__name__}")
+                    return
                 if d.get("eventType") == EventType.SENSORS_LIST:
                     self._handle_sensors_list(payload)
                     return
@@ -854,6 +862,8 @@ class MqttHandler:
             # Igual: sin `fw` el firmware es anterior; no se escribe nada.
             if telemetry.fw:
                 telemetry_data["fw"] = telemetry.fw
+            if telemetry.ip:
+                telemetry_data["ip"] = telemetry.ip
 
             path = f"ESP32/{device_id}/Telemetry"
             self.firebase_manager.update_data(path, telemetry_data)
@@ -861,6 +871,23 @@ class MqttHandler:
 
         except Exception as e:
             logger.error(f"Error guardando telemetría en Firebase: {e}")
+
+    def _guardar_creds_locales(self, device_id: str, d: dict) -> None:
+        """
+        Credenciales del modo local (red propia y API firmada) a
+        ESP32/<id>/Local, que solo lee el dueno (reglas de la RTDB). Solo si
+        la central esta dada de alta: si no, el update crearia el nodo.
+        """
+        datos = {k: d.get(k) for k in ("ssid", "pass", "key", "port")}
+        if not all(datos.values()) or len(str(datos["key"])) != 64:
+            logger.warning(f"{device_id}: local_creds incompletas, se ignoran")
+            return
+        if device_id not in (self.firebase_manager._get_all_devices() or {}):
+            logger.info(f"{device_id}: local_creds de una central sin alta, se ignoran")
+            return
+        datos["actualizado"] = int(time.time())
+        self.firebase_manager.update_data(f"ESP32/{device_id}/Local", datos)
+        logger.info(f"{device_id}: credenciales del modo local guardadas")
 
     def _ya_visto(self, event: MqttEvent) -> bool:
         """True si este id de evento ya se proceso (QoS 1 puede repetirlo)."""

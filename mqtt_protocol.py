@@ -68,6 +68,9 @@ class EventType(str, Enum):
     SENSORS_LIST = "sensors_list"
     #: La central aplico (ok) o rechazo una orden de configuracion. Fase 3.
     CMD_ACK = "cmd_ack"
+    #: Modo local: {ssid, pass, key, port} de la red propia y la API local.
+    #: Secreto: no se loguea ni se avisa a nadie; va a ESP32/<id>/Local.
+    LOCAL_CREDS = "local_creds"
 
 # ============================================
 # COMANDOS
@@ -88,6 +91,8 @@ class Command(str, Enum):
     BEEP = "beep"
     #: Central borrada: olvida horario, tiempos y bengala (no la WiFi). Fase 3.
     FORGET = "forget"
+    #: Contrasena y llave del modo local nuevas (traspaso).
+    LOCAL_ROTATE = "local_rotate"
 
 # ============================================
 # ESTRUCTURAS DE MENSAJES (ESP32 -> Python)
@@ -182,6 +187,8 @@ class MqttTelemetry:
     sched_days: Optional[int] = None
     #: Version del firmware (`FW_VERSION`, desde el 15-oct-2026). "" = anterior.
     fw: str = ""
+    #: IP de la central en la red de la casa (modo local por LAN). "" = anterior.
+    ip: str = ""
 
     @classmethod
     def from_json(cls, payload: str) -> 'MqttTelemetry':
@@ -206,6 +213,7 @@ class MqttTelemetry:
             name=d.get("name", ""),
             sched_on=d.get("sched_on"),
             fw=str(d.get("fw") or ""),
+            ip=str(d.get("ip") or ""),
             sched_off=d.get("sched_off"),
             sched_days=d.get("sched_days"),
         )

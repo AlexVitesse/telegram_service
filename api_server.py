@@ -507,6 +507,16 @@ class ApiSenti:
 
         if r["traspaso"]:
             await self._avisar_dueno_anterior(mac, r)
+            # El telefono del dueno anterior guarda la llave del modo local:
+            # la central genera otra. Encolada si esta apagada: llega tarde
+            # pero llega (a diferencia de "olvidar", no borra nada).
+            # El alta ya esta hecha: un fallo aqui no la deshace.
+            try:
+                from mqtt_protocol import Command
+                self._bot.mqtt_handler.send_command(
+                    Command.LOCAL_ROTATE.value, device_id=mac, queue_if_offline=True)
+            except Exception as e:
+                logger.error("No se pudo pedir llave local nueva a %s: %s", mac, e)
         return web.json_response({"ok": True, "traspaso": r["traspaso"]})
 
     async def borrar(self, request: web.Request) -> web.Response:
