@@ -1228,12 +1228,20 @@ class FirebaseManager:
         self._cache_uid[str(chat_id)] = (uid, ahora)
         return uid
 
-    def quiere_aviso_telegram(self, chat_id: str, clave: Optional[str]) -> bool:
+    def quiere_aviso_telegram(
+        self, chat_id: str, clave: Optional[str], device_id: Optional[str] = None
+    ) -> bool:
         """
         Si este chat de Telegram quiere recibir este aviso.
 
-        `clave` es la familia opcional ("armado", "conexion") o None para los
-        avisos que no se pueden apagar por categoria -las alarmas-. Incluso con
+        `clave` es la familia opcional ("armado", "conexion"), "alarma" para
+        intrusion y SOS, o None para el resto de eventos.
+
+        GRUPOS (chat_id negativo): no tienen cuenta, asi que siguen las
+        preferencias del DUENO de la central (`device_id`): con
+        `Usuarios/{dueno}/alertas/grupo` en false, al grupo solo le llegan las
+        alarmas (20-oct, el grupo se llenaba de "armado/desarmado"). Sin
+        `device_id` no se puede saber de quien es el grupo y se avisa. Incluso con
         None se consulta `alertas/telegram`, que es el interruptor del CANAL:
         quien lo apaga esta diciendo "por Telegram no", no "de esto no".
 
@@ -1248,6 +1256,11 @@ class FirebaseManager:
         """
         if not self.is_available():
             return True
+
+        if str(chat_id).startswith("-"):
+            if not device_id or clave == "alarma":
+                return True
+            return self._grupo_quiere_todo(device_id)
 
         uid = self._uid_por_chat_id(chat_id)
         if not uid:
@@ -1271,6 +1284,17 @@ class FirebaseManager:
             return True
 
         return alertas.get(clave) is not False
+
+    def _grupo_quiere_todo(self, device_id: str) -> bool:
+        """`Usuarios/{dueno}/alertas/grupo`; ante la duda, True."""
+        dueno = (self._nodo(device_id) or {}).get("ownerUid")
+        if not dueno:
+            return True
+        try:
+            return self.db.reference(f"Usuarios/{dueno}/alertas/grupo").get() is not False
+        except Exception as e:
+            logger.error(f"Error leyendo alertas/grupo de {dueno}: {e}")
+            return True
 
     def get_authorized_devices(self, chat_id: str) -> List[str]:
         """

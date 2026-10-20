@@ -3356,7 +3356,9 @@ class TelegramBot:
     # Metodos para manejar eventos del ESP32
     # ========================================
 
-    def _chats_que_quieren(self, chat_ids: List[str], familia: Optional[str]) -> List[str]:
+    def _chats_que_quieren(
+        self, chat_ids: List[str], familia: Optional[str], device_id: Optional[str] = None
+    ) -> List[str]:
         """
         De los chats autorizados, los que no han apagado este aviso.
 
@@ -3371,7 +3373,7 @@ class TelegramBot:
         """
         return [
             c for c in chat_ids
-            if self.firebase_manager.quiere_aviso_telegram(c, familia)
+            if self.firebase_manager.quiere_aviso_telegram(c, familia, device_id)
         ]
 
     async def handle_mqtt_event(self, event: MqttEvent):
@@ -3460,7 +3462,7 @@ class TelegramBot:
         )
 
         # Enviar a todos los usuarios
-        for chat_id in self._chats_que_quieren(chat_ids, familia):
+        for chat_id in self._chats_que_quieren(chat_ids, familia, device_id):
             try:
                 await self.send_message(chat_id, message, "Markdown", has_keyboard=True)
             except Exception as e:
@@ -3484,7 +3486,7 @@ class TelegramBot:
         # que usan despues los recordatorios cada 30 s: filtrar solo el primer
         # mensaje dejaria a quien apago el canal recibiendo los recordatorios.
         # Solo el interruptor de canal; una alarma no se apaga por categoria.
-        chat_ids = self._chats_que_quieren(chat_ids, None)
+        chat_ids = self._chats_que_quieren(chat_ids, "alarma", device_id)
         if not chat_ids:
             logger.warning(
                 f"Alarma en {device_id}: ningun chat de Telegram quiere avisos"
@@ -3560,7 +3562,7 @@ class TelegramBot:
         # Igual que en el flujo con bengala: se filtra una vez, porque de esta
         # lista salen tambien los recordatorios cada 30 s. Solo el interruptor
         # de canal; una alarma no se apaga por categoria.
-        chat_ids = self._chats_que_quieren(chat_ids, None)
+        chat_ids = self._chats_que_quieren(chat_ids, "alarma", device_id)
         if not chat_ids:
             logger.warning(
                 f"Alarma en {device_id}: ningun chat de Telegram quiere avisos"

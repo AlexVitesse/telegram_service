@@ -499,7 +499,7 @@ class AlarmBridgeService:
         for chat_id in chat_ids:
             # El interruptor de canal ya lo aplico _get_authorized_chats; aqui
             # solo queda la familia.
-            if familia and not firebase_manager.quiere_aviso_telegram(chat_id, familia):
+            if familia and not firebase_manager.quiere_aviso_telegram(chat_id, familia, device_id):
                 continue
             asyncio.run_coroutine_threadsafe(
                 self.telegram.send_message(

@@ -144,6 +144,8 @@ def _fb(nodos=None, usuarios=None):
     fb.quiere_aviso_telegram = types.MethodType(
         FirebaseManager.quiere_aviso_telegram, fb
     )
+    fb._grupo_quiere_todo = types.MethodType(FirebaseManager._grupo_quiere_todo, fb)
+    fb._nodo = lambda mac: fb.nodos.get(f"ESP32/{mac}")
     return fb
 
 
@@ -180,6 +182,25 @@ def test_apagar_lo_mio_no_calla_al_grupo():
     fb = _fb({"Usuarios/U1/alertas": {"telegram": False}}, {"U1": "555"})
     assert not fb.quiere_aviso_telegram("555", None)
     assert fb.quiere_aviso_telegram("-1001", None), "el grupo quedo silenciado"
+
+
+def test_grupo_solo_alarmas_si_el_dueno_lo_pide():
+    """20-oct: el grupo se llenaba de armado/desarmado; solo queria intrusiones."""
+    fb = _fb({"ESP32/AA": {"ownerUid": "U1"}, "Usuarios/U1/alertas/grupo": False}, {"U1": "555"})
+    assert fb.quiere_aviso_telegram("-1001", "alarma", "AA")
+    assert not fb.quiere_aviso_telegram("-1001", "armado", "AA")
+    assert not fb.quiere_aviso_telegram("-1001", "conexion", "AA")
+    assert not fb.quiere_aviso_telegram("-1001", None, "AA"), "otros eventos tambien callan"
+    # Lo del grupo no toca al dueno en su chat.
+    assert fb.quiere_aviso_telegram("555", "armado", "AA")
+
+
+def test_grupo_sin_preferencia_o_sin_saber_la_central_recibe_todo():
+    fb = _fb({"ESP32/AA": {"ownerUid": "U1"}}, {"U1": "555"})
+    assert fb.quiere_aviso_telegram("-1001", "armado", "AA")
+    fb2 = _fb({"ESP32/AA": {"ownerUid": "U1"}, "Usuarios/U1/alertas/grupo": False}, {"U1": "555"})
+    assert fb2.quiere_aviso_telegram("-1001", "armado"), "sin device_id no se calla"
+    assert fb2.quiere_aviso_telegram("-1001", "armado", "ZZ"), "central sin nodo: se avisa"
 
 
 def test_la_resolucion_se_cachea():
