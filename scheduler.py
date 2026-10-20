@@ -164,7 +164,7 @@ class ScheduleConfig:
     def decide_la_central(self) -> bool:
         """Mas de un horario o vacaciones: el VPS no ejecuta ni recuerda."""
         lista = self.lista or []
-        return len(lista) > 1 or any(h.get('desde') for h in lista)
+        return len(lista) > 1 or any(h.get('desde') or h.get('off') == 0xFFFF for h in lista)
 
     def get_on_time(self) -> time:
         return time(self.on_hour, self.on_minute)

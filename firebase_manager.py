@@ -468,10 +468,12 @@ class FirebaseManager:
                 continue
             on_h, on_m = cls._parse_schedule_time(h.get('activationTime', ''))
             off_h, off_m = cls._parse_schedule_time(h.get('deactivationTime', ''))
+            solo_arma = bool(h.get('soloArma')) and not h.get('desde')
             item = {
                 'en': h.get('enabled') is not False,
                 'on': on_h * 60 + on_m,
-                'off': off_h * 60 + off_m,
+                # 0xFFFF: solo arma, se desarma a mano (firmware SIN_DESARME).
+                'off': 0xFFFF if solo_arma else off_h * 60 + off_m,
             }
             desde, hasta = str(h.get('desde') or ''), str(h.get('hasta') or '')
             if desde and hasta:

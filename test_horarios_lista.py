@@ -28,6 +28,13 @@ def test_lista_al_formato_del_firmware():
     ], fw
 
 
+def test_solo_armar_va_sin_desarmado_y_decide_la_central():
+    fw = FirebaseManager._lista_para_firmware({'lista': [
+        {'activationTime': '07:45', 'deactivationTime': '', 'days': LV, 'soloArma': True}]})
+    assert fw == [{'en': True, 'on': 465, 'off': 0xFFFF, 'dias': 0b0111110}], fw
+    assert ScheduleConfig(enabled=True, lista=fw).decide_la_central()
+
+
 def test_sin_lista_es_el_horario_de_siempre():
     assert FirebaseManager._lista_para_firmware({'activationTime': '22:00'}) is None
     assert FirebaseManager._lista_para_firmware({'lista': []}) is None
