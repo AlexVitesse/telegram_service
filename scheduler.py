@@ -126,6 +126,10 @@ class ScheduleConfig:
     last_off_executed: str = ""     # Fecha de última ejecución off
     last_on_reminder_sent: str = ""   # Fecha de último recordatorio de activación
     last_off_reminder_sent: str = ""  # Fecha de último recordatorio de desactivación
+    #: Varios horarios en formato del firmware ({en,on,off,dias,desde,hasta}).
+    #: Con mas de uno, o con vacaciones, decide SOLO la central: el VPS no arma
+    #: ni desarma (desarmaria cuando otro horario dice que siga armada).
+    lista: list = None
 
     def __post_init__(self):
         # Si days es None, activar todos los días por defecto
@@ -153,8 +157,14 @@ class ScheduleConfig:
             last_on_executed=data.get('last_on_executed', ''),
             last_off_executed=data.get('last_off_executed', ''),
             last_on_reminder_sent=data.get('last_on_reminder_sent', ''),
-            last_off_reminder_sent=data.get('last_off_reminder_sent', '')
+            last_off_reminder_sent=data.get('last_off_reminder_sent', ''),
+            lista=data.get('lista') or None,
         )
+
+    def decide_la_central(self) -> bool:
+        """Mas de un horario o vacaciones: el VPS no ejecuta ni recuerda."""
+        lista = self.lista or []
+        return len(lista) > 1 or any(h.get('desde') for h in lista)
 
     def get_on_time(self) -> time:
         return time(self.on_hour, self.on_minute)
@@ -415,7 +425,7 @@ class Scheduler:
 
     def _is_due(self, cfg: ScheduleConfig, kind: str, reminder: bool) -> bool:
         """¿Toca disparar ahora? kind='on'|'off', reminder=True para el aviso previo."""
-        if not cfg.enabled:
+        if not cfg.enabled or cfg.decide_la_central():
             return False
         if reminder and cfg.notify_before_minutes <= 0:
             return False

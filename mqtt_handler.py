@@ -662,7 +662,8 @@ class MqttHandler:
 
     def send_set_schedule(self, enabled: bool, on_hour: int, on_minute: int,
                           off_hour: int, off_minute: int, days: list = None,
-                          device_id: str = None, queue_if_offline: bool = False) -> bool:
+                          device_id: str = None, queue_if_offline: bool = False,
+                          lista: list = None) -> bool:
         """
         Configura horarios automaticos.
         days: Lista de índices de días [0-6] donde 0=Domingo, 1=Lunes, etc.
@@ -680,6 +681,10 @@ class MqttHandler:
             "off_minute": off_minute,
             "days": days
         }
+        # Varios horarios (firmware del 20-oct): la central usa `lista` y el
+        # firmware anterior la ignora y se queda con los campos de arriba.
+        if lista:
+            args["lista"] = lista
         return self.send_command(Command.SET_SCHEDULE.value, args, device_id=device_id,
                                  queue_if_offline=queue_if_offline)
 
@@ -864,6 +869,9 @@ class MqttHandler:
                 telemetry_data["fw"] = telemetry.fw
             if telemetry.ip:
                 telemetry_data["ip"] = telemetry.ip
+            # La app ofrece "otro horario" solo si la central los acepta.
+            if telemetry.sched_max:
+                telemetry_data["sched_max"] = telemetry.sched_max
 
             path = f"ESP32/{device_id}/Telemetry"
             self.firebase_manager.update_data(path, telemetry_data)

@@ -189,6 +189,8 @@ class MqttTelemetry:
     fw: str = ""
     #: IP de la central en la red de la casa (modo local por LAN). "" = anterior.
     ip: str = ""
+    #: Cuantos horarios acepta la central (`lista` en set_schedule). None = 1.
+    sched_max: Optional[int] = None
 
     @classmethod
     def from_json(cls, payload: str) -> 'MqttTelemetry':
@@ -216,6 +218,7 @@ class MqttTelemetry:
             ip=str(d.get("ip") or ""),
             sched_off=d.get("sched_off"),
             sched_days=d.get("sched_days"),
+            sched_max=d.get("sched_max"),
         )
 
 @dataclass

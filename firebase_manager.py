@@ -452,6 +452,37 @@ class FirebaseManager:
         except (ValueError, IndexError):
             return 0, 0
 
+    @classmethod
+    def _lista_para_firmware(cls, schedule_data: dict) -> Optional[list]:
+        """
+        `lista` de la app ({nombre, activationTime, deactivationTime, days,
+        enabled, desde, hasta}) al formato del firmware. El nombre se queda en
+        la app. None si no hay lista (horario de siempre).
+        """
+        lista = schedule_data.get('lista')
+        if not isinstance(lista, list) or not lista:
+            return None
+        fw = []
+        for h in lista[:4]:
+            if not isinstance(h, dict):
+                continue
+            on_h, on_m = cls._parse_schedule_time(h.get('activationTime', ''))
+            off_h, off_m = cls._parse_schedule_time(h.get('deactivationTime', ''))
+            item = {
+                'en': h.get('enabled') is not False,
+                'on': on_h * 60 + on_m,
+                'off': off_h * 60 + off_m,
+            }
+            desde, hasta = str(h.get('desde') or ''), str(h.get('hasta') or '')
+            if desde and hasta:
+                item['desde'] = int(desde.replace('-', '')[:8])
+                item['hasta'] = int(hasta.replace('-', '')[:8])
+            else:
+                dias = h.get('days') or DAY_NAMES
+                item['dias'] = sum(1 << i for i, d in enumerate(DAY_NAMES) if d in dias)
+            fw.append(item)
+        return fw or None
+
     def _apply_schedule_to_scheduler(self, device_id: str, schedule_data: dict) -> bool:
         """
         Escribe el horario de Firebase en el scheduler local DE ESE dispositivo.
@@ -462,9 +493,10 @@ class FirebaseManager:
         on_hour, on_minute = self._parse_schedule_time(schedule_data.get('activationTime', ''))
         off_hour, off_minute = self._parse_schedule_time(schedule_data.get('deactivationTime', ''))
         days = list(schedule_data.get('days') or DAY_NAMES)
+        lista = self._lista_para_firmware(schedule_data)
 
-        actual = (cfg.enabled, cfg.on_hour, cfg.on_minute, cfg.off_hour, cfg.off_minute, cfg.days)
-        nuevo = (enabled, on_hour, on_minute, off_hour, off_minute, days)
+        actual = (cfg.enabled, cfg.on_hour, cfg.on_minute, cfg.off_hour, cfg.off_minute, cfg.days, cfg.lista)
+        nuevo = (enabled, on_hour, on_minute, off_hour, off_minute, days, lista)
         if actual == nuevo:
             # Sin cambios: no tocar los flags o el horario se re-ejecutaria hoy
             return False
@@ -473,6 +505,7 @@ class FirebaseManager:
         cfg.on_hour, cfg.on_minute = on_hour, on_minute
         cfg.off_hour, cfg.off_minute = off_hour, off_minute
         cfg.days = days
+        cfg.lista = lista
         # Horario nuevo: limpiar flags para que pueda dispararse hoy
         cfg.last_on_reminder_sent = ""
         cfg.last_off_reminder_sent = ""
@@ -623,6 +656,7 @@ class FirebaseManager:
             days=cfg.days_indices(),
             device_id=device_id,
             queue_if_offline=True,
+            lista=cfg.lista,
         )
 
     def _olvidar(self, device_id: str, conectada: bool = False) -> None:
@@ -660,6 +694,10 @@ class FirebaseManager:
         if clave is None:
             return
         cfg = scheduler.configs[clave]
+        # ponytail: la telemetria solo dice el primer horario; con varios no se
+        # comprueba (se reenvian al arrancar la central y al cambiar).
+        if cfg.decide_la_central():
+            return
         if cfg.enabled:
             igual = (bool(t.auto_schedule_enabled)
                      and t.sched_on == cfg.on_hour * 60 + cfg.on_minute
