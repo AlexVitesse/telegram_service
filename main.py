@@ -758,6 +758,8 @@ class AlarmBridgeService:
                 nota = event.nota_atrasado()
                 if nota:
                     notification.body = f"{notification.body}. {nota}"
+                    # La app lo lee de aquí; el texto queda de respaldo.
+                    notification.data["atrasado"] = "1"
                 sent = self.fcm.send_to_device_users(device_id, notification)
                 if sent > 0:
                     logger.info(f"Push enviado a {sent} usuarios para evento {event.event_type}")
