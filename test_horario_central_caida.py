@@ -65,6 +65,16 @@ def test_callada_un_momento_si_recibe_el_comando():
     s.mqtt.send_arm.assert_called_once_with("C8")
 
 
+def test_horario_que_llega_despues_del_arranque_tambien_se_siembra():
+    # 23-oct: el horario de 6C_C8_40_4F_C7 llego de Firebase 2 s despues
+    # de la siembra del arranque y la central seguia recibiendo comandos.
+    s = _servicio({"timestamp": int(time.time()) - 13 * 86400, "armed": False})
+    s.device_manager.devices_state.clear()
+    asyncio.run(s._scheduled_arm("C8"))
+    s.mqtt.send_arm.assert_not_called()
+    assert s.device_manager.devices_state["C8"]["offline_notified"]
+
+
 def test_recordatorio_avisa_caida_una_vez_al_dia():
     s = _servicio({"timestamp": int(time.time()) - 3 * 86400, "armed": False})
     s._loop = object()

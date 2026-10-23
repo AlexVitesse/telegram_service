@@ -121,7 +121,7 @@ class AlarmBridgeService:
         True si la central lleva rato caida: el comando no se manda. Tampoco
         se encola: armar horas despues, al reconectar, sorprenderia al dueño.
         """
-        desde = self.device_manager.caida_desde(device_id) if self.device_manager else 0
+        desde = self._caida_desde(device_id)
         if not desde:
             return False
         from datetime import datetime
@@ -131,15 +131,28 @@ class AlarmBridgeService:
         )
         return True
 
-    def _sembrar_centrales_caidas(self):
+    def _caida_desde(self, device_id: str) -> float:
+        """caida_desde, sembrando antes la central si el servidor no la conoce."""
+        if not self.device_manager:
+            return 0
+        if self.device_manager.get_device_info(device_id) is None:
+            try:
+                self._sembrar_centrales_caidas([device_id])
+            except Exception as e:
+                logger.error(f"No se pudo sembrar {device_id}: {e}")
+        return self.device_manager.caida_desde(device_id)
+
+    def _sembrar_centrales_caidas(self, ids=None):
         """
         Las centrales con horario que ya estaban calladas al arrancar quedan
         como caidas (ver DeviceManager.sembrar_caida). Solo las de horario: un
         ID viejo y truncado de otra central taparia por prefijo a la real.
+        Tambien se llama en el momento del horario: el de una central puede
+        llegar de Firebase despues del arranque (23-oct, 6C_C8_40_4F_C7).
         """
         todos = firebase_manager._get_all_devices() or {}
         limite = _time.time() - 90
-        for device_id in list(scheduler.configs):
+        for device_id in ids or list(scheduler.configs):
             t = (todos.get(device_id) or {}).get("Telemetry")
             if not isinstance(t, dict):
                 continue
@@ -150,7 +163,7 @@ class AlarmBridgeService:
             ts = ts / 1000 if ts > 1e11 else ts
             if 0 < ts < limite:
                 self.device_manager.sembrar_caida(device_id, ts, t.get("armed", False))
-                logger.info(f"{device_id} ya estaba sin conexión al arrancar (última telemetría {_time.strftime('%d-%m %H:%M', _time.localtime(ts))})")
+                logger.info(f"{device_id} ya estaba sin conexión (última telemetría {_time.strftime('%d-%m %H:%M', _time.localtime(ts))})")
 
     async def _scheduled_arm(self, device_id: str):
         """Callback para activacion automatica programada"""
@@ -195,7 +208,7 @@ class AlarmBridgeService:
         # recordatorios a la misma hora dejan de ser texto identico (el
         # anti-spam de 15 s de Telegram se comia el segundo).
         lugar = escape_md(firebase_manager.get_device_location(device_id) or device_id)
-        caida = self.device_manager.caida_desde(device_id) if self.device_manager else 0
+        caida = self._caida_desde(device_id)
         if caida:
             # "Se activara en 5 min" seria mentira. Uno al dia: con dos
             # horarios serian cuatro avisos iguales.
