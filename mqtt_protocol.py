@@ -54,8 +54,14 @@ class EventType(str, Enum):
     SYSTEM_DISARMED = "system_disarmed"
     ALARM_TRIGGERED = "alarm_triggered"
     ALARM_STOPPED = "alarm_stopped"
+    # bengala_activated lo manda la central al DISPARARLA y, el firmware de
+    # antes del 22-oct, tambien al habilitarla: no se puede saber cual fue.
     BENGALA_ACTIVATED = "bengala_activated"
+    # Solo al deshabilitarla (firmware de antes del 22-oct).
     BENGALA_DEACTIVATED = "bengala_deactivated"
+    # Firmware desde el 22-oct: habilitar/deshabilitar con nombre propio.
+    BENGALA_HABILITADA = "bengala_habilitada"
+    BENGALA_DESHABILITADA = "bengala_deshabilitada"
     MOVEMENT_DETECTED = "movement_detected"
     DOOR_OPEN = "door_open"
     SENSOR_ONLINE = "sensor_online"
@@ -339,6 +345,7 @@ EVENTOS_USUARIO = {
     EventType.SYSTEM_ARMED, EventType.SYSTEM_DISARMED,
     EventType.ALARM_TRIGGERED, EventType.ALARM_STOPPED,
     EventType.BENGALA_ACTIVATED, EventType.BENGALA_DEACTIVATED,
+    EventType.BENGALA_HABILITADA, EventType.BENGALA_DESHABILITADA,
     EventType.MOVEMENT_DETECTED, EventType.DOOR_OPEN,
     EventType.SENSOR_ONLINE, EventType.SENSOR_OFFLINE,
     EventType.KEYPAD_ARM, EventType.KEYPAD_DISARM,
@@ -437,8 +444,11 @@ class TelegramFormatter:
         elif event_type == EventType.BENGALA_ACTIVATED:
             return f"🔥 *Bengala ACTIVADA*\n📍 {lugar}"
 
-        elif event_type == EventType.BENGALA_DEACTIVATED:
-            return f"🔥 *Bengala desactivada*\n📍 {lugar}"
+        elif event_type == EventType.BENGALA_HABILITADA:
+            return f"🔥 *Bengala habilitada*\n📍 {lugar}\nSe disparará si salta la alarma."
+
+        elif event_type in (EventType.BENGALA_DEACTIVATED, EventType.BENGALA_DESHABILITADA):
+            return f"🔥 *Bengala deshabilitada*\n📍 {lugar}"
 
         elif event_type == EventType.MOVEMENT_DETECTED:
             sensor_name = escape_md(data.get("sensorName", "Desconocido"))
