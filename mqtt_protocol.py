@@ -34,6 +34,9 @@ class Topics:
     # ESP32 -> Python (topics generales)
     EVENTOS = "dispositivos/eventos"
     TELEMETRIA = "dispositivos/estado_telemetria"
+    #: Testamento (LWT): lo publica el broker ~30 s despues de perder a la
+    #: central. Payload {"deviceId": ...}. Solo firmware desde el 23-oct.
+    DESCONEXION = "dispositivos/desconexion"
 
     # Python -> ESP32 (topics por dispositivo)
     @staticmethod
@@ -197,6 +200,9 @@ class MqttTelemetry:
     ip: str = ""
     #: Cuantos horarios acepta la central (`lista` en set_schedule). None = 1.
     sched_max: Optional[int] = None
+    #: Cada cuantos segundos manda telemetria. None = firmware anterior (30 s y
+    #: sin testamento): el VPS lo espera los 90 s de siempre.
+    tele_s: Optional[int] = None
 
     @classmethod
     def from_json(cls, payload: str) -> 'MqttTelemetry':
@@ -225,6 +231,7 @@ class MqttTelemetry:
             sched_off=d.get("sched_off"),
             sched_days=d.get("sched_days"),
             sched_max=d.get("sched_max"),
+            tele_s=d.get("tele_s"),
         )
 
 @dataclass

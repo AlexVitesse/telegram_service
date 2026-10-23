@@ -180,11 +180,16 @@ class DeviceManager:
             del self.devices_state[device_id]
             logger.info(f"Dispositivo {device_id} eliminado del gestor de estado.")
 
-    def update_telemetry_time(self, device_id: str):
+    def update_telemetry_time(self, device_id: str, tele_s: Optional[int] = None):
         """Actualiza el tiempo de última telemetría y marca como online."""
         device_data = self._get_device_data(device_id)
         anterior = device_data.get("last_telemetry_time", 0)
         device_data["last_telemetry_time"] = time.time()
+        device_data["tele_s"] = tele_s
+        # Telemetria despues del testamento = volvio (o el testamento era de
+        # una conexion que el broker reemplazo; el firmware manda telemetria
+        # al conectar justo para esto).
+        device_data["desconectada"] = False
 
         # Si estaba offline y ahora recibimos telemetría, marcar como reconectado
         was_offline = device_data.get("offline_notified", False)
@@ -268,6 +273,34 @@ class DeviceManager:
             and (d.get("aviso_retenido") or d.get("last_telemetry_time", 0) > limite)
         ]
 
+    def marcar_desconectada(self, device_id: str):
+        """
+        Testamento del broker: la central dejo de responder. Cuenta como sin
+        conexion en la siguiente vuelta de `check_offline_devices`, sin esperar
+        a que falte telemetria. Una central que nunca mando telemetria no se
+        crea aqui (seria un fantasma que nadie ve volver).
+        """
+        if device_id in self.devices_state:
+            self.devices_state[device_id]["desconectada"] = True
+            logger.info(f"Dispositivo {device_id}: testamento del broker (dejo de responder)")
+
+    @staticmethod
+    def espera_telemetria(data: Dict[str, Any], timeout_seconds: int) -> float:
+        """
+        Silencio tolerado antes de darla por caida. Con testamento (`tele_s`) la
+        caida la avisa el broker; esto queda de respaldo por si el testamento no
+        llega: dos telemetrias perdidas y medio minuto.
+        """
+        tele_s = data.get("tele_s") or 0
+        return max(timeout_seconds, 2 * tele_s + 30)
+
+    def vivas_con_testamento(self) -> List[str]:
+        """Centrales en linea con firmware de testamento (ver main: refresco de Telemetry/timestamp)."""
+        return [
+            device_id for device_id, d in self.devices_state.items()
+            if d.get("tele_s") and d.get("is_online") and not d.get("desconectada")
+        ]
+
     def check_offline_devices(self, timeout_seconds: int = 90) -> List[Dict[str, Any]]:
         """
         Verifica qué dispositivos han dejado de enviar telemetría.
@@ -286,7 +319,7 @@ class DeviceManager:
             time_since_telemetry = now - last_telemetry
 
             # Si excede el timeout y no hemos notificado aún
-            if time_since_telemetry > timeout_seconds:
+            if data.get("desconectada") or time_since_telemetry > self.espera_telemetria(data, timeout_seconds):
                 if data.get("is_online", True) and not data.get("offline_notified", False):
                     data["is_online"] = False
                     data["offline_notified"] = True

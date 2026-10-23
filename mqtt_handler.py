@@ -146,6 +146,7 @@ class MqttHandler:
             # ESP32 -> Python
             (Topics.EVENTOS, 1),
             (Topics.TELEMETRIA, 1),
+            (Topics.DESCONEXION, 1),
         ]
 
         for topic, qos in topics:
@@ -167,6 +168,8 @@ class MqttHandler:
                 self._handle_event(payload)
             elif topic == Topics.TELEMETRIA or topic.startswith(Topics.TELEMETRIA):
                 self._handle_telemetry(payload)
+            elif topic == Topics.DESCONEXION:
+                self.device_manager.marcar_desconectada(str(json.loads(payload).get("deviceId") or ""))
             else:
                 logger.debug(f"Topic no manejado: {topic}")
 
@@ -309,7 +312,7 @@ class MqttHandler:
                 )
 
             # Actualizar tiempo de telemetría y verificar reconexión
-            reconnected = self.device_manager.update_telemetry_time(telemetry.device_id)
+            reconnected = self.device_manager.update_telemetry_time(telemetry.device_id, telemetry.tele_s)
             # Con CUALQUIER telemetria, no solo al "reconectar": la cola empieza
             # a llenarse a los 60 s sin telemetria y la reconexion no se marca
             # hasta los 90 s, asi que un corte de 60-90 s dejaba la cola sin

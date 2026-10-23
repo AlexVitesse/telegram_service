@@ -387,6 +387,7 @@ class AlarmBridgeService:
                     await asyncio.sleep(30)
                     continue
                 offline_devices = self.device_manager.check_offline_devices(timeout_seconds=90)
+                self._refrescar_en_linea()
 
                 # Varias centrales calladas a la vez = el broker va mal aunque el
                 # VPS siga conectado (14-oct 04:42: ~11 avisos falsos a 3 casas).
@@ -435,6 +436,19 @@ class AlarmBridgeService:
 
             # Verificar cada 30 segundos
             await asyncio.sleep(30)
+
+    def _refrescar_en_linea(self):
+        """
+        La app da una central por caida a los 90 s del ultimo
+        `ESP32/{id}/Telemetry/timestamp`. Con telemetria cada 2 min eso la haria
+        parpadear, y hay apps instaladas que no se pueden cambiar: el VPS, que
+        sabe por el testamento que sigue conectada, refresca la hora cada 30 s.
+        """
+        existentes = firebase_manager._get_all_devices() or {}
+        ahora = int(_time.time())
+        for device_id in self.device_manager.vivas_con_testamento():
+            if device_id in existentes:  # no recrear el nodo de un equipo borrado
+                firebase_manager.update_data(f"ESP32/{device_id}/Telemetry", {"timestamp": ahora})
 
     async def _send_alarm_reminders(self):
         """
