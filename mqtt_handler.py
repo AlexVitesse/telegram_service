@@ -326,6 +326,11 @@ class MqttHandler:
                 if hasattr(self, '_on_reconnect_callback') and self._on_reconnect_callback:
                     self._on_reconnect_callback(telemetry.device_id)
 
+            # La red de seguridad de Alarming: si se pierde un evento (o el VPS
+            # se reinicia a media alarma) la siguiente telemetria lo corrige.
+            if telemetry.sirena is not None:
+                self.device_manager.set_alarming_state(telemetry.device_id, telemetry.sirena)
+
             # Actualizar tiempo de salida desde telemetría del ESP32
             if telemetry.tiempo_bomba > 0:
                 self.device_exit_time[telemetry.device_id] = telemetry.tiempo_bomba

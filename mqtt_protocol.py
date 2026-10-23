@@ -203,6 +203,9 @@ class MqttTelemetry:
     #: Cada cuantos segundos manda telemetria. None = firmware anterior (30 s y
     #: sin testamento): el VPS lo espera los 90 s de siempre.
     tele_s: Optional[int] = None
+    #: Si la sirena suena ahora (pin del buzzer). None = firmware anterior, que
+    #: manda alarm_active siempre en false: de ese no se fia nadie.
+    sirena: Optional[bool] = None
 
     @classmethod
     def from_json(cls, payload: str) -> 'MqttTelemetry':
@@ -232,6 +235,7 @@ class MqttTelemetry:
             sched_days=d.get("sched_days"),
             sched_max=d.get("sched_max"),
             tele_s=d.get("tele_s"),
+            sirena=d.get("sirena"),
         )
 
 @dataclass

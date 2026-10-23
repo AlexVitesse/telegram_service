@@ -95,6 +95,13 @@ class DeviceManager:
         """
         Establece el estado de alarma de un dispositivo.
         Inicia o detiene el temporizador de recordatorios.
+
+        Como `set_armed_state`: la memoria decide si se REGISTRA el cambio, la
+        escritura la decide `update_device_state_in_firebase` contra la base.
+        Antes solo se escribia si cambiaba la memoria, y el reinicio por
+        "offline" de `get_alarming_devices` toca solo la memoria: 22-oct 17:12
+        `ESP32/08_D1_F9_29_E4/Alarming` se quedo en true y la app mostraba
+        "Alerta en curso" cada vez que se abria, con la central desarmada.
         """
         device_data = self._get_device_data(device_id)
         if device_data.get("is_alarming") != alarming:
@@ -107,9 +114,9 @@ class DeviceManager:
                 device_data["last_alarm_event_time"] = 0.0
                 device_data["last_reminder_time"] = 0.0
                 logger.info(f"Dispositivo {device_id} ha salido del estado de alarma.")
-            
-            if self.firebase_manager:
-                self.firebase_manager.update_device_state_in_firebase(device_id, {"is_alarming": alarming})
+
+        if self.firebase_manager:
+            self.firebase_manager.update_device_state_in_firebase(device_id, {"is_alarming": alarming})
 
     def get_alarming_devices(self, reminder_interval_seconds: int = 60) -> List[Dict[str, Any]]:
         """
