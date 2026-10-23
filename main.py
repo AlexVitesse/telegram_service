@@ -116,12 +116,51 @@ class AlarmBridgeService:
             return False
         return (_time.time() - info.get("last_telemetry_time", 0)) < max_age
 
+    def _horario_sobre_caida(self, device_id: str, cmd: str) -> bool:
+        """
+        True si la central lleva rato caida: el comando no se manda. Tampoco
+        se encola: armar horas despues, al reconectar, sorprenderia al dueño.
+        """
+        desde = self.device_manager.caida_desde(device_id) if self.device_manager else 0
+        if not desde:
+            return False
+        from datetime import datetime
+        logger.warning(
+            f"Horario omitido ({cmd}): {device_id} sin conexión desde "
+            f"{datetime.fromtimestamp(desde):%d-%m %H:%M}"
+        )
+        return True
+
+    def _sembrar_centrales_caidas(self):
+        """
+        Las centrales con horario que ya estaban calladas al arrancar quedan
+        como caidas (ver DeviceManager.sembrar_caida). Solo las de horario: un
+        ID viejo y truncado de otra central taparia por prefijo a la real.
+        """
+        todos = firebase_manager._get_all_devices() or {}
+        limite = _time.time() - 90
+        for device_id in list(scheduler.configs):
+            t = (todos.get(device_id) or {}).get("Telemetry")
+            if not isinstance(t, dict):
+                continue
+            try:
+                ts = float(t.get("timestamp") or 0)
+            except (TypeError, ValueError):
+                continue
+            ts = ts / 1000 if ts > 1e11 else ts
+            if 0 < ts < limite:
+                self.device_manager.sembrar_caida(device_id, ts, t.get("armed", False))
+                logger.info(f"{device_id} ya estaba sin conexión al arrancar (última telemetría {_time.strftime('%d-%m %H:%M', _time.localtime(ts))})")
+
     async def _scheduled_arm(self, device_id: str):
         """Callback para activacion automatica programada"""
         # El ESP32 tiene su propio horario en NVS y puede haberse armado solo en
         # este mismo minuto: repetir el comando duplicaria el evento y el aviso.
         if self._state_is_fresh(device_id) and self.device_manager.is_armed(device_id):
             logger.info(f"Activacion automatica omitida: {device_id} ya está armado")
+            return
+
+        if self._horario_sobre_caida(device_id, "arm"):
             return
 
         logger.info(f"Activacion automatica programada para {device_id}")
@@ -136,6 +175,9 @@ class AlarmBridgeService:
         """Callback para desactivacion automatica programada"""
         if self._state_is_fresh(device_id) and not self.device_manager.is_armed(device_id):
             logger.info(f"Desactivacion automatica omitida: {device_id} ya está desarmado")
+            return
+
+        if self._horario_sobre_caida(device_id, "disarm"):
             return
 
         logger.info(f"Desactivacion automatica programada para {device_id}")
@@ -153,7 +195,24 @@ class AlarmBridgeService:
         # recordatorios a la misma hora dejan de ser texto identico (el
         # anti-spam de 15 s de Telegram se comia el segundo).
         lugar = escape_md(firebase_manager.get_device_location(device_id) or device_id)
-        if action == "on":
+        caida = self.device_manager.caida_desde(device_id) if self.device_manager else 0
+        if caida:
+            # "Se activara en 5 min" seria mentira. Uno al dia: con dos
+            # horarios serian cuatro avisos iguales.
+            from datetime import datetime
+            hoy = datetime.now().strftime("%Y-%m-%d")
+            estado = self.device_manager.get_device_info(device_id) or {}
+            if estado.get("aviso_horario_caida") == hoy:
+                return
+            estado["aviso_horario_caida"] = hoy
+            hora = cfg.format_on_time() if action == "on" else cfg.format_off_time()
+            msg = (
+                f"⚠️ *CENTRAL SIN CONEXIÓN*\n📍 {lugar}\n\n"
+                f"No se sabe de ella desde el {datetime.fromtimestamp(caida):%d/%m %H:%M}.\n"
+                f"El servidor no puede {'activarla' if action == 'on' else 'desactivarla'} a las {hora}.\n"
+                "Revisa que esté encendida y con internet."
+            )
+        elif action == "on":
             msg = (
                 f"⏰ *RECORDATORIO*\n📍 {lugar}\n\n"
                 f"🔒 Se *activará* en {minutes} minutos\n"
@@ -172,7 +231,7 @@ class AlarmBridgeService:
             if int(chat_id) < 0:
                 continue
             # Quien apago los avisos de armado tampoco quiere su recordatorio.
-            if not firebase_manager.quiere_aviso_telegram(chat_id, "armado"):
+            if not firebase_manager.quiere_aviso_telegram(chat_id, "conexion" if caida else "armado"):
                 continue
             if self._loop and self.telegram.is_running():
                 asyncio.run_coroutine_threadsafe(
@@ -231,8 +290,16 @@ class AlarmBridgeService:
         from datetime import datetime
         ahora = _time.time()
         minutos = max(1, round((ahora - desde) / 60))
-        de, a = (datetime.fromtimestamp(t).strftime("%H:%M") for t in (desde, ahora))
-        return f"\nEstuvo sin conexión {minutos} min ({de} – {a}). En ese rato no llegaban sus avisos."
+        if minutos < 60:
+            dur, fmt = f"{minutos} min", "%H:%M"
+        elif minutos < 1440:
+            dur, fmt = f"{round(minutos / 60)} h", "%H:%M"
+        else:
+            # Desde que se siembran las caidas al arrancar hay vueltas de dias.
+            dias = round(minutos / 1440)
+            dur, fmt = f"{dias} día{'s' if dias > 1 else ''}", "%d/%m %H:%M"
+        de, a = (datetime.fromtimestamp(t).strftime(fmt) for t in (desde, ahora))
+        return f"\nEstuvo sin conexión {dur} ({de} – {a}). En ese rato no llegaban sus avisos."
 
     def _handle_device_reconnect(self, device_id: str):
         """Maneja reconexión de un dispositivo"""
@@ -845,6 +912,12 @@ class AlarmBridgeService:
             logger.info("Firebase inicializado correctamente")
         else:
             logger.warning("Firebase no disponible, usando almacenamiento local")
+
+        if self.firebase_available:
+            try:
+                self._sembrar_centrales_caidas()
+            except Exception as e:
+                logger.error(f"No se pudieron sembrar las centrales caidas: {e}")
 
         # Conectar a MQTT
         if not self.mqtt.connect():

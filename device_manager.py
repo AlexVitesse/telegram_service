@@ -198,6 +198,36 @@ class DeviceManager:
                 return True  # Indica que se reconectó
         return False  # No hubo cambio de estado
 
+    def sembrar_caida(self, device_id: str, ultima_telemetria: float, armado: bool):
+        """
+        Central que ya estaba callada cuando arranco el servidor. Sin esto no
+        manda telemetria, `check_offline_devices` la ignora (nunca la oyo) y el
+        horario le sigue mandando comandos a nadie (23-oct: C8_2E_18_26_60
+        llevaba 7 dias caida). Queda como ya avisada: el aviso se dio antes del
+        reinicio, o lleva meses muerta. Al volver si se avisa la reconexion.
+        """
+        if device_id in self.devices_state:
+            return
+        d = self._get_device_data(device_id)
+        d.update(last_telemetry_time=ultima_telemetria, is_online=False,
+                 offline_notified=True, is_armed=bool(armado))
+
+    def caida_desde(self, device_id: str, minimo: float = 600) -> float:
+        """
+        Ultima telemetria de una central que lleva mas de `minimo` s caida, o
+        0 si esta en linea o solo se callo un momento: ante la duda el horario
+        manda el comando igual.
+        """
+        if self.is_online(device_id):
+            return 0
+        ultimas = [
+            d.get("last_telemetry_time", 0)
+            for sid, d in self.devices_state.items()
+            if (sid.startswith(device_id) or device_id.startswith(sid)) and d.get("offline_notified")
+        ]
+        ultima = max(ultimas, default=0)
+        return ultima if ultima and time.time() - ultima > minimo else 0
+
     def is_online(self, device_id: str) -> bool:
         """
         Verifica si un dispositivo está online.
