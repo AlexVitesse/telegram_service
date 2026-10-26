@@ -34,7 +34,7 @@ class Topics:
     # ESP32 -> Python (topics generales)
     EVENTOS = "dispositivos/eventos"
     TELEMETRIA = "dispositivos/estado_telemetria"
-    #: Testamento (LWT): lo publica el broker ~30 s despues de perder a la
+    #: Testamento (LWT): lo publica el broker ~1,5 x keepalive (60 s) despues de perder a la
     #: central. Payload {"deviceId": ...}. Solo firmware desde el 23-oct.
     DESCONEXION = "dispositivos/desconexion"
 

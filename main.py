@@ -377,6 +377,10 @@ class AlarmBridgeService:
         # para dar tiempo a que los dispositivos envíen telemetría inicial
         await asyncio.sleep(60)
         en_caida_masiva = False
+        # El testamento llega en el hilo de paho: despierta esta vuelta ya.
+        despertar = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        self.mqtt.on_desconexion = lambda: loop.call_soon_threadsafe(despertar.set)
 
         while self.running:
             try:
@@ -434,8 +438,12 @@ class AlarmBridgeService:
             except Exception as e:
                 logger.error(f"Error monitoreando conexiones: {e}")
 
-            # Verificar cada 30 segundos
-            await asyncio.sleep(30)
+            # Verificar cada 30 segundos, o al momento si llega un testamento
+            try:
+                await asyncio.wait_for(despertar.wait(), timeout=30)
+            except asyncio.TimeoutError:
+                pass
+            despertar.clear()
 
     def _refrescar_en_linea(self):
         """

@@ -68,6 +68,18 @@ def test_refresco_solo_de_equipos_que_existen():
     assert rutas == ["ESP32/A1/Telemetry"], rutas
 
 
+
+def test_testamento_despierta_al_monitor():
+    from mqtt_handler import MqttHandler
+    h = MqttHandler.__new__(MqttHandler)
+    h.device_manager = _dm(120, 5)
+    h.on_desconexion = MagicMock()
+    h._on_message(None, None, SimpleNamespace(
+        topic="dispositivos/desconexion", payload=b'{"deviceId": "A1"}'))
+    assert h.device_manager.devices_state["A1"]["desconectada"]
+    h.on_desconexion.assert_called_once()
+
+
 if __name__ == "__main__":
     for nombre, f in list(globals().items()):
         if nombre.startswith("test_"):

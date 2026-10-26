@@ -59,6 +59,9 @@ class MqttHandler:
             clean_session=False  # Sesión persistente: el broker guarda mensajes mientras estamos offline
         )
         self.connected = False
+        #: Lo pone main.py: despierta al monitor de conexiones al llegar un
+        #: testamento, para avisar ya y no en su siguiente vuelta (hasta 30 s).
+        self.on_desconexion: Optional[Callable[[], None]] = None
         self.device_id: Optional[str] = config.device_id or None
         self.device_location: str = ""
         #: A partir de cuantos segundos de silencio de la tarea LoRa se
@@ -170,6 +173,8 @@ class MqttHandler:
                 self._handle_telemetry(payload)
             elif topic == Topics.DESCONEXION:
                 self.device_manager.marcar_desconectada(str(json.loads(payload).get("deviceId") or ""))
+                if self.on_desconexion:
+                    self.on_desconexion()
             else:
                 logger.debug(f"Topic no manejado: {topic}")
 
