@@ -62,6 +62,8 @@ class MqttHandler:
         #: Lo pone main.py: despierta al monitor de conexiones al llegar un
         #: testamento, para avisar ya y no en su siguiente vuelta (hasta 30 s).
         self.on_desconexion: Optional[Callable[[], None]] = None
+        #: Ultimo modo de bengala mandado a cada central, hasta que lo confirme (cmd_ack).
+        self._modo_bengala_pedido: Dict[str, int] = {}
         self.device_id: Optional[str] = config.device_id or None
         self.device_location: str = ""
         #: A partir de cuantos segundos de silencio de la tarea LoRa se
@@ -240,6 +242,15 @@ class MqttHandler:
             elif event.event_type == EventType.SYSTEM_DISARMED:
                 self.device_manager.set_armed_state(event.device_id, False)
                 self.last_arm_event_time[event.device_id] = time.time()
+            # La bengala se cuenta cuando la central lo confirma, venga de donde
+            # venga la orden (app, Telegram, red local). Antes solo los botones de
+            # Telegram la marcaban: tras deshabilitar y habilitar desde la app el
+            # VPS seguia con bengala_enabled=False y en modo pregunta la alarma
+            # llegaba sin el boton de disparar (27-oct).
+            elif event.event_type == EventType.BENGALA_HABILITADA:
+                self.device_manager.set_bengala_enabled(event.device_id, True)
+            elif event.event_type == EventType.BENGALA_DESHABILITADA:
+                self.device_manager.set_bengala_enabled(event.device_id, False)
 
             logger.info(f"Evento de {event.device_id}: {event.event_type}")
 
@@ -253,6 +264,12 @@ class MqttHandler:
                 d = event.data or {}
                 if d.get("ok"):
                     logger.info(f"{event.device_id} aplico {d.get('cmd')}")
+                    # El ack no trae el modo: es el ultimo que se le mando. Sin
+                    # esto el VPS esperaba a la telemetria (hasta 2 min).
+                    if d.get("cmd") == Command.SET_BENGALA_MODE.value:
+                        modo = self._modo_bengala_pedido.pop(event.device_id, None)
+                        if modo is not None:
+                            self.device_manager.set_bengala_mode(event.device_id, modo, save_to_firebase=False)
                 else:
                     logger.warning(f"{event.device_id} RECHAZO {d.get('cmd')}")
                 return
@@ -489,6 +506,9 @@ class MqttHandler:
             self._queue_pending_command(target_device, cmd, args or {})
             logger.info(f"Dispositivo {target_device} offline. Comando {cmd} encolado para envío posterior.")
             return True  # Retornamos True porque se encoló exitosamente
+
+        if cmd == Command.SET_BENGALA_MODE.value and args and "mode" in args:
+            self._modo_bengala_pedido[target_device] = args["mode"]
 
         command = MqttCommand(
             command=cmd,
