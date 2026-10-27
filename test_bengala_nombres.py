@@ -55,3 +55,11 @@ assert h.device_manager.get_bengala_mode(MAC) == 1   # otro ack no lo toca
 evento("cmd_ack", '{"cmd": "%s", "ok": true}' % Command.SET_BENGALA_MODE.value)
 assert h.device_manager.get_bengala_mode(MAC) == 0
 print("ok estado de la bengala")
+
+
+# H5 (27-oct): un SOS con la central desarmada la deja armada al momento, para
+# que la app ofrezca "Desarmar" y su orden llegue.
+h.device_manager.set_armed_state(MAC, False)
+evento("alarm_triggered", '{"sensorId": "MANUAL", "sensorName": "Disparo remoto"}')
+assert h.device_manager.is_armed(MAC) is True
+print("ok alarma desarmada queda armada")

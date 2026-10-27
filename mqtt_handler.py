@@ -231,6 +231,12 @@ class MqttHandler:
                 logger.info(f"🚨 MQTT: ALARM_TRIGGERED recibido de {event.device_id}")
                 logger.info(f"🚨 MQTT: Datos del evento: {event.data}")
                 self.device_manager.set_alarming_state(event.device_id, True)
+                # Alarmando, la central esta armada (seguridad_activada) aunque se
+                # disparase desarmada (SOS, /disparo); su telemetria lo dice hasta
+                # 2 min despues. Mientras, Estado=False: la app ofrecia "Proteger
+                # ahora" (la central lo ignora) y su "Desarmar" no escribia nada
+                # porque ya constaba desarmada. 27-oct, H5: casi 2 min sonando.
+                self.device_manager.set_armed_state(event.device_id, True)
             elif event.event_type == EventType.ALARM_STOPPED or event.event_type == EventType.SYSTEM_DISARMED:
                 self.device_manager.set_alarming_state(event.device_id, False)
 
