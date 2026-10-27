@@ -100,6 +100,9 @@ class FirebaseManager:
         self.mqtt_handler: Optional['MqttHandler'] = None
         # Lo pone main.py: avisa del SOS al grupo de Telegram de la central.
         self.on_sos: Optional[Callable[[str], None]] = None
+        # Lo pone main.py: la app pidio autorizar un sensor en cuarentena
+        # (`ESP32/{mac}/Pendientes/{sensorId}/autorizar = true`).
+        self.on_autorizar: Optional[Callable[[str, str], None]] = None
 
         # Listener monitoring
         self._last_listener_event_time: float = 0
@@ -165,6 +168,32 @@ class FirebaseManager:
         except Exception as e:
             logger.error(f"Error en update_data({path}): {e}")
             return False
+
+    def anotar_pendiente(self, device_id: str, sensor_id: str, tipo: str) -> bool:
+        """
+        Apunta un sensor en cuarentena en `ESP32/{mac}/Pendientes/{sensorId}`,
+        que es lo que lee la app. True si es nuevo: la central lo repite en cada
+        `ON` y en cada reconexion, y solo se avisa la primera vez.
+        """
+        if not self.is_available() or not sensor_id:
+            return False
+        try:
+            ref = self.db.reference(f"ESP32/{normalizar_mac(device_id)}/Pendientes/{sensor_id}")
+            if ref.get():
+                return False
+            ref.set({"tipo": tipo or "", "desde": int(time.time())})
+            return True
+        except Exception as e:
+            logger.error(f"No se pudo anotar el sensor pendiente {sensor_id} de {device_id}: {e}")
+            return False
+
+    def quitar_pendiente(self, device_id: str, sensor_id: str) -> None:
+        if not self.is_available() or not sensor_id:
+            return
+        try:
+            self.db.reference(f"ESP32/{normalizar_mac(device_id)}/Pendientes/{sensor_id}").delete()
+        except Exception as e:
+            logger.error(f"No se pudo quitar el sensor pendiente {sensor_id} de {device_id}: {e}")
 
     def start_app_command_listener(self, mqtt_handler_instance: 'MqttHandler') -> None:
         """
@@ -365,6 +394,19 @@ class FirebaseManager:
                         self.on_sos(device_id)
                     except Exception as e:  # el aviso nunca debe tumbar el listener
                         logger.error(f"[{device_id}] No se pudo avisar del SOS al grupo: {e}")
+
+            elif command_key == 'Pendientes':
+                # /{mac}/Pendientes/{id}/autorizar = true, o el pendiente entero
+                # con autorizar dentro. Las escrituras del propio VPS (alta y
+                # borrado del pendiente) no lo traen.
+                sensor_id = parts[3] if len(parts) > 3 else ""
+                pide = (len(parts) > 4 and parts[4] == 'autorizar' and event.data is True) or                        (len(parts) == 4 and isinstance(event.data, dict) and event.data.get('autorizar') is True)
+                if sensor_id and pide and self.on_autorizar:
+                    logger.info(f"Comando de App: AUTORIZAR SENSOR {sensor_id} en {device_id}")
+                    try:
+                        self.on_autorizar(device_id, sensor_id)
+                    except Exception as e:  # nunca tumbar el listener
+                        logger.error(f"[{device_id}] No se pudo pedir la autorizacion de {sensor_id}: {e}")
 
             elif command_key == 'BengalaHab':
                 if event.data is True:

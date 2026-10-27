@@ -69,6 +69,9 @@ class EventType(str, Enum):
     DOOR_OPEN = "door_open"
     SENSOR_ONLINE = "sensor_online"
     SENSOR_OFFLINE = "sensor_offline"
+    #: Sensor LoRa nuevo en cuarentena (firmware de Pedro, oct-2026): no dispara
+    #: hasta que el dueno lo autoriza. data {"sensorId", "sensorType"}.
+    PENDING_AUTHORIZATION = "pending_authorization"
     WIFI_CONNECTED = "wifi_connected"
     WIFI_DISCONNECTED = "wifi_disconnected"
     KEYPAD_ARM = "keypad_arm"
@@ -100,6 +103,8 @@ class Command(str, Enum):
     BEEP = "beep"
     #: Central borrada: olvida horario, tiempos y bengala (no la WiFi). Fase 3.
     FORGET = "forget"
+    #: Saca de cuarentena un sensor: args {"sensorId"}. Responde cmd_ack sin el id.
+    AUTHORIZE_DEVICE = "authorize_device"
     #: Contrasena y llave del modo local nuevas (traspaso).
     LOCAL_ROTATE = "local_rotate"
 

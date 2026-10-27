@@ -35,7 +35,7 @@ from telegram.constants import ParseMode
 
 from config import config
 from scheduler import scheduler
-from mqtt_protocol import MqttEvent, EventType, normalizar_mac, escape_md
+from mqtt_protocol import MqttEvent, EventType, Command, normalizar_mac, escape_md
 from device_manager import DeviceManager
 from ai_handler import AIHandler
 import comandos_app
@@ -107,6 +107,16 @@ class LeadCaptureState:
 
     def is_expired(self, timeout_seconds: int = 600) -> bool:
         return (time.time() - self.started_at) >= timeout_seconds
+
+
+
+def teclado_autorizar(device_id: str, sensor_id: str) -> InlineKeyboardMarkup:
+    """Botones del aviso de sensor nuevo. Van solo al chat privado del dueño."""
+    sufijo = f"{normalizar_mac(device_id)}_{sensor_id}"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Autorizar", callback_data=f"auth_{sufijo}"),
+        InlineKeyboardButton("Ignorar", callback_data=f"authno_{sufijo}"),
+    ]])
 
 
 def require_auth(func):
@@ -3003,6 +3013,23 @@ class TelegramBot:
 
         if not self.mqtt_handler:
             await query.edit_message_text("❌ Error: Sistema no conectado")
+            return
+
+        # Sensor en cuarentena: auth_{mac}_{sensorId} / authno_{...}. La MAC
+        # normalizada mide 14 y lleva "_"; el id del sensor (MOV-XXXX) no.
+        if data and (data.startswith("auth_") or data.startswith("authno_")):
+            resto = data.split("_", 1)[1]
+            mac, sensor = resto[:14], resto[15:]
+            if not self.firebase_manager.es_dueno(mac, chat_id):
+                await query.edit_message_text("❌ Solo el dueño de la central puede autorizar sensores.")
+            elif data.startswith("authno_"):
+                await query.edit_message_text(
+                    f"Ignorado: {sensor} sigue sin poder disparar la alarma. "
+                    "Puedes autorizarlo después desde la app.")
+            else:
+                self.mqtt_handler.send_command(Command.AUTHORIZE_DEVICE.value, {"sensorId": sensor},
+                                               device_id=mac, queue_if_offline=True)
+                await query.edit_message_text(f"⏳ Autorizando {sensor}…")
             return
 
         devices = self.firebase_manager.get_authorized_devices(chat_id)

@@ -64,6 +64,10 @@ class MqttHandler:
         self.on_desconexion: Optional[Callable[[], None]] = None
         #: Ultimo modo de bengala mandado a cada central, hasta que lo confirme (cmd_ack).
         self._modo_bengala_pedido: Dict[str, int] = {}
+        #: Ultimo sensor que se pidio autorizar a cada central (el cmd_ack no trae
+        #: el id). Lo pone main.py: on_autorizacion(central, sensor, ok).
+        self._autorizacion_pedida: Dict[str, str] = {}
+        self.on_autorizacion: Optional[Callable[[str, str, bool], None]] = None
         self.device_id: Optional[str] = config.device_id or None
         self.device_location: str = ""
         #: A partir de cuantos segundos de silencio de la tarea LoRa se
@@ -268,6 +272,10 @@ class MqttHandler:
             if tipo == EventType.CMD_ACK.value:
                 # Solo al log: no es para nadie mas (ni siquiera el admin).
                 d = event.data or {}
+                if d.get("cmd") == Command.AUTHORIZE_DEVICE.value:
+                    sensor = self._autorizacion_pedida.pop(event.device_id, None)
+                    if sensor and self.on_autorizacion:
+                        self.on_autorizacion(event.device_id, sensor, bool(d.get("ok")))
                 if d.get("ok"):
                     logger.info(f"{event.device_id} aplico {d.get('cmd')}")
                     # El ack no trae el modo: es el ultimo que se le mando. Sin
@@ -515,6 +523,8 @@ class MqttHandler:
 
         if cmd == Command.SET_BENGALA_MODE.value and args and "mode" in args:
             self._modo_bengala_pedido[target_device] = args["mode"]
+        if cmd == Command.AUTHORIZE_DEVICE.value and args and args.get("sensorId"):
+            self._autorizacion_pedida[target_device] = args["sensorId"]
 
         command = MqttCommand(
             command=cmd,

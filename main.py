@@ -26,13 +26,13 @@ from typing import Dict, Any, Optional
 from config import config
 from device_manager import DeviceManager
 from mqtt_handler import MqttHandler
-from telegram_bot import TelegramBot, teclado_alarma
+from telegram_bot import TelegramBot, teclado_alarma, teclado_autorizar
 from api_server import ApiSenti
 from scheduler import scheduler
 from fcm_handler import FCMHandler
 
 from firebase_manager import firebase_manager
-from mqtt_protocol import MqttEvent, MqttTelemetry, EventType, escape_md
+from mqtt_protocol import MqttEvent, MqttTelemetry, EventType, Command, escape_md
 
 # Configurar logging con rotación automática
 from logging.handlers import RotatingFileHandler
@@ -262,6 +262,10 @@ class AlarmBridgeService:
         También envía push notifications a la App.
         """
         logger.info(f"[{event.device_id}] Evento recibido: {event.event_type}")
+
+        if event.event_type == EventType.PENDING_AUTHORIZATION:
+            self._sensor_pendiente(event)
+            return
 
         # Log adicional para eventos de alarma
         if event.event_type == EventType.ALARM_TRIGGERED:
@@ -530,6 +534,63 @@ class AlarmBridgeService:
 
             # Verificar cada 60 segundos
             await asyncio.sleep(60)
+
+    def _duenos(self, device_id: str) -> list:
+        """Chats privados del dueño: autorizar un sensor es dejarle disparar la alarma, no va al grupo."""
+        return [c for c in firebase_manager.get_authorized_chats(device_id) if firebase_manager.es_dueno(device_id, c)]
+
+    def _a_los_duenos(self, device_id: str, texto: str, teclado=None):
+        if not (self._loop and self.telegram.is_running()):
+            return
+        for chat in self._duenos(device_id):
+            asyncio.run_coroutine_threadsafe(
+                self.telegram.send_message(chat, texto, "Markdown", reply_markup=teclado, skip_anti_spam=True),
+                self._loop,
+            )
+
+    def _sensor_pendiente(self, event: MqttEvent):
+        """
+        Sensor LoRa nuevo en cuarentena (firmware de Pedro): se apunta en
+        `Pendientes` para la app y se avisa al dueño UNA vez, con push y con
+        botones en Telegram. La central lo repite en cada `ON`; el resto, al log.
+        """
+        device_id = event.device_id
+        sensor = str((event.data or {}).get("sensorId") or "")
+        tipo = str((event.data or {}).get("sensorType") or "")
+        if not firebase_manager.anotar_pendiente(device_id, sensor, tipo):
+            logger.info(f"[{device_id}] {sensor} sigue en cuarentena (ya avisado)")
+            return
+        location = firebase_manager.get_device_location(device_id) or device_id
+        logger.info(f"[{device_id}] Sensor nuevo en cuarentena: {sensor} ({tipo}); se avisa al dueño")
+        if self.fcm.is_available():
+            self.fcm.send_to_device_users(
+                device_id, self.fcm.create_sensor_pending_notification(sensor, location, device_id))
+        self._a_los_duenos(
+            device_id,
+            f"🆕 *Sensor nuevo en {escape_md(location)}*\n\n"
+            f"`{sensor}` pide permiso para disparar la alarma. "
+            "Mientras no lo autorices, la central lo ignora.\n\n"
+            "Autorízalo solo si lo acabas de instalar tú.",
+            teclado_autorizar(device_id, sensor),
+        )
+
+    def _pedir_autorizacion(self, device_id: str, sensor: str):
+        """Desde la app (Pendientes/{id}/autorizar) o el botón de Telegram."""
+        self.mqtt.send_command(Command.AUTHORIZE_DEVICE.value, {"sensorId": sensor},
+                               device_id=device_id, queue_if_offline=True)
+
+    def _autorizacion_hecha(self, device_id: str, sensor: str, ok: bool):
+        """cmd_ack de authorize_device: se quita el pendiente y se le dice al dueño cómo fue."""
+        firebase_manager.quitar_pendiente(device_id, sensor)
+        location = escape_md(firebase_manager.get_device_location(device_id) or device_id)
+        if ok:
+            texto = f"✅ Sensor `{sensor}` autorizado en *{location}*. Ya puede disparar la alarma."
+        else:
+            # Se reinició o llegó al tope de 5 pendientes: lo olvidó.
+            texto = (f"⚠️ *{location}* ya no tiene a `{sensor}` en espera. "
+                     "Apaga y enciende el sensor para que vuelva a pedir permiso.")
+        logger.info(f"[{device_id}] Autorizacion de {sensor}: {'ok' if ok else 'rechazada'}")
+        self._a_los_duenos(device_id, texto)
 
     def _avisar_sos(self, device_id: str):
         """
@@ -971,6 +1032,8 @@ class AlarmBridgeService:
         # Iniciar listener de comandos de la App en Firebase
         if self.firebase_available: # Only start if Firebase is connected
             firebase_manager.on_sos = self._avisar_sos
+            firebase_manager.on_autorizar = self._pedir_autorizacion
+            self.mqtt.on_autorizacion = self._autorizacion_hecha
             firebase_manager.start_app_command_listener(self.mqtt)
 
         self.running = True

@@ -29,6 +29,7 @@ class NotificationType(Enum):
     MOVEMENT_DETECTED = "movement_detected"
     DOOR_OPEN = "door_open"
     DEVICE_TRANSFERRED = "device_transferred"
+    SENSOR_PENDING = "sensor_pending"
 
 
 @dataclass
@@ -472,6 +473,26 @@ class FCMHandler:
                 "action": "view_alarm",
             },
             notification_type=NotificationType.BENGALA_ACTIVATED,
+            priority="high"
+        )
+
+    def create_sensor_pending_notification(
+        self,
+        sensor_id: str,
+        device_location: str,
+        device_id: str
+    ) -> PushNotification:
+        """Sensor nuevo esperando que el dueno lo autorice (se autoriza en la ficha de la central)."""
+        return PushNotification(
+            title="🆕 Sensor nuevo",
+            body=f"{sensor_id} pide permiso en {device_location}. Autorízalo solo si lo instalaste tú.",
+            data={
+                "device_id": device_id,
+                "sensor": sensor_id,
+                "location": device_location,
+                "action": "view_sensors",
+            },
+            notification_type=NotificationType.SENSOR_PENDING,
             priority="high"
         )
 
