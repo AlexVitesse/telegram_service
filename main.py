@@ -642,7 +642,7 @@ class AlarmBridgeService:
         chats = firebase_manager.get_authorized_chats(device_id)
         return [
             c for c in chats
-            if firebase_manager.quiere_aviso_telegram(c, None)
+            if firebase_manager.quiere_aviso_telegram(c, None, device_id)
         ]
 
     def _schedule_telegram_broadcast_for_device(

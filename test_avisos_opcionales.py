@@ -174,7 +174,8 @@ def test_un_chat_sin_cuenta_recibe_todo():
     respetar, y callarse ante la duda es lo que no puede hacer una alarma.
     """
     fb = _fb({}, {"U1": "555"})
-    assert fb.quiere_aviso_telegram("-1001", None)
+    assert fb.quiere_aviso_telegram("-1001", "alarma")
+    assert not fb.quiere_aviso_telegram("-1001", None), "grupo sin dueño conocido: solo alarmas (27-oct)"
     assert fb.quiere_aviso_telegram("999", "armado")
 
 
@@ -182,7 +183,7 @@ def test_apagar_lo_mio_no_calla_al_grupo():
     """Las preferencias son por chat, no por dispositivo."""
     fb = _fb({"Usuarios/U1/alertas": {"telegram": False}}, {"U1": "555"})
     assert not fb.quiere_aviso_telegram("555", None)
-    assert fb.quiere_aviso_telegram("-1001", None), "el grupo quedo silenciado"
+    assert fb.quiere_aviso_telegram("-1001", "alarma"), "el grupo quedo silenciado"
 
 
 def test_grupo_solo_alarmas_si_el_dueno_lo_pide():
@@ -196,12 +197,19 @@ def test_grupo_solo_alarmas_si_el_dueno_lo_pide():
     assert fb.quiere_aviso_telegram("555", "armado", "AA")
 
 
-def test_grupo_sin_preferencia_o_sin_saber_la_central_recibe_todo():
+def test_grupo_sin_preferencia_o_sin_saber_la_central_solo_alarmas():
+    """27-oct: por defecto el grupo no sabe cuando se arma (seria saber cuando la casa esta sola)."""
     fb = _fb({"ESP32/AA": {"ownerUid": "U1"}}, {"U1": "555"})
+    assert not fb.quiere_aviso_telegram("-1001", "armado", "AA"), "sin preferencia: solo alarmas"
+    assert not fb.quiere_aviso_telegram("-1001", "armado"), "sin device_id: solo alarmas"
+    assert not fb.quiere_aviso_telegram("-1001", "armado", "ZZ"), "central sin nodo: solo alarmas"
+    assert fb.quiere_aviso_telegram("-1001", "alarma", "ZZ")
+    assert fb.quiere_aviso_telegram("-1001", "alarma")
+
+
+def test_grupo_todo_si_el_dueno_lo_enciende():
+    fb = _fb({"ESP32/AA": {"ownerUid": "U1"}, "Usuarios/U1/alertas/grupo": True}, {"U1": "555"})
     assert fb.quiere_aviso_telegram("-1001", "armado", "AA")
-    fb2 = _fb({"ESP32/AA": {"ownerUid": "U1"}, "Usuarios/U1/alertas/grupo": False}, {"U1": "555"})
-    assert fb2.quiere_aviso_telegram("-1001", "armado"), "sin device_id no se calla"
-    assert fb2.quiere_aviso_telegram("-1001", "armado", "ZZ"), "central sin nodo: se avisa"
 
 
 def test_la_resolucion_se_cachea():

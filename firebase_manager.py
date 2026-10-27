@@ -1327,11 +1327,12 @@ class FirebaseManager:
         `clave` es la familia opcional ("armado", "conexion"), "alarma" para
         intrusion y SOS, o None para el resto de eventos.
 
-        GRUPOS (chat_id negativo): no tienen cuenta, asi que siguen las
-        preferencias del DUENO de la central (`device_id`): con
-        `Usuarios/{dueno}/alertas/grupo` en false, al grupo solo le llegan las
-        alarmas (20-oct, el grupo se llenaba de "armado/desarmado"). Sin
-        `device_id` no se puede saber de quien es el grupo y se avisa. Incluso con
+        GRUPOS (chat_id negativo): solo alarmas (intrusion y SOS), salvo que el
+        DUENO de la central (`device_id`) encienda `Usuarios/{dueno}/alertas/grupo`.
+        27-oct: decidido por el usuario como valor por defecto. Saber cuando se
+        arma y se desarma es saber cuando la casa esta sola, y en el grupo puede
+        haber quien no deberia saberlo. Sin `device_id` no hay dueno a quien
+        preguntar: solo alarmas. Incluso con
         None se consulta `alertas/telegram`, que es el interruptor del CANAL:
         quien lo apaga esta diciendo "por Telegram no", no "de esto no".
 
@@ -1348,9 +1349,9 @@ class FirebaseManager:
             return True
 
         if str(chat_id).startswith("-"):
-            if not device_id or clave == "alarma":
+            if clave == "alarma":
                 return True
-            return self._grupo_quiere_todo(device_id)
+            return bool(device_id) and self._grupo_quiere_todo(device_id)
 
         uid = self._uid_por_chat_id(chat_id)
         if not uid:
@@ -1376,15 +1377,15 @@ class FirebaseManager:
         return alertas.get(clave) is not False
 
     def _grupo_quiere_todo(self, device_id: str) -> bool:
-        """`Usuarios/{dueno}/alertas/grupo`; ante la duda, True."""
+        """`Usuarios/{dueno}/alertas/grupo` encendido a proposito; ante la duda, solo alarmas."""
         dueno = (self._nodo(device_id) or {}).get("ownerUid")
         if not dueno:
-            return True
+            return False
         try:
-            return self.db.reference(f"Usuarios/{dueno}/alertas/grupo").get() is not False
+            return self.db.reference(f"Usuarios/{dueno}/alertas/grupo").get() is True
         except Exception as e:
             logger.error(f"Error leyendo alertas/grupo de {dueno}: {e}")
-            return True
+            return False
 
     def get_authorized_devices(self, chat_id: str) -> List[str]:
         """
