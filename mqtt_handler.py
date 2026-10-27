@@ -64,10 +64,11 @@ class MqttHandler:
         self.on_desconexion: Optional[Callable[[], None]] = None
         #: Ultimo modo de bengala mandado a cada central, hasta que lo confirme (cmd_ack).
         self._modo_bengala_pedido: Dict[str, int] = {}
-        #: Ultimo sensor que se pidio autorizar a cada central (el cmd_ack no trae
-        #: el id). Lo pone main.py: on_autorizacion(central, sensor, ok).
+        #: Ultimo sensor que se pidio autorizar a cada central: el cmd_ack del
+        #: firmware de antes del 27-oct no trae el id. Lo pone main.py:
+        #: on_sensor_ack(orden, central, sensor, ok) para authorize/remove/rename.
         self._autorizacion_pedida: Dict[str, str] = {}
-        self.on_autorizacion: Optional[Callable[[str, str, bool], None]] = None
+        self.on_sensor_ack: Optional[Callable[[str, str, str, bool], None]] = None
         self.device_id: Optional[str] = config.device_id or None
         self.device_location: str = ""
         #: A partir de cuantos segundos de silencio de la tarea LoRa se
@@ -272,10 +273,13 @@ class MqttHandler:
             if tipo == EventType.CMD_ACK.value:
                 # Solo al log: no es para nadie mas (ni siquiera el admin).
                 d = event.data or {}
-                if d.get("cmd") == Command.AUTHORIZE_DEVICE.value:
-                    sensor = self._autorizacion_pedida.pop(event.device_id, None)
-                    if sensor and self.on_autorizacion:
-                        self.on_autorizacion(event.device_id, sensor, bool(d.get("ok")))
+                ordenes_sensor = (Command.AUTHORIZE_DEVICE.value, Command.REMOVE_DEVICE.value,
+                                  Command.RENAME_DEVICE.value)
+                if d.get("cmd") in ordenes_sensor:
+                    pedido = self._autorizacion_pedida.pop(event.device_id, None)                         if d["cmd"] == Command.AUTHORIZE_DEVICE.value else None
+                    sensor = d.get("sensorId") or pedido
+                    if sensor and self.on_sensor_ack:
+                        self.on_sensor_ack(d["cmd"], event.device_id, sensor, bool(d.get("ok")))
                 if d.get("ok"):
                     logger.info(f"{event.device_id} aplico {d.get('cmd')}")
                     # El ack no trae el modo: es el ultimo que se le mando. Sin
@@ -439,6 +443,9 @@ class MqttHandler:
                 f"Lista de sensores de {sensors_list.device_id}: "
                 f"{sensors_list.active_sensors}/{sensors_list.total_sensors} activos"
             )
+
+            if self.firebase_manager.is_available():
+                self.firebase_manager.guardar_sensores(sensors_list.device_id, sensors_list.sensors)
 
             # Notificar via callback si está registrado
             if self._on_sensors_list_callback:

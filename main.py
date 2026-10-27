@@ -579,17 +579,35 @@ class AlarmBridgeService:
         self.mqtt.send_command(Command.AUTHORIZE_DEVICE.value, {"sensorId": sensor},
                                device_id=device_id, queue_if_offline=True)
 
-    def _autorizacion_hecha(self, device_id: str, sensor: str, ok: bool):
-        """cmd_ack de authorize_device: se quita el pendiente y se le dice al dueño cómo fue."""
-        firebase_manager.quitar_pendiente(device_id, sensor)
+    def _orden_de_sensor(self, device_id: str, sensor: str, orden: str, nombre: Optional[str] = None):
+        """Desde la app (Sensors/{id}/borrar|renombrar) o el botón de Telegram."""
+        if orden == "borrar":
+            self.mqtt.send_command(Command.REMOVE_DEVICE.value, {"sensorId": sensor},
+                                   device_id=device_id, queue_if_offline=True)
+        elif orden == "renombrar" and nombre:
+            self.mqtt.send_command(Command.RENAME_DEVICE.value, {"sensorId": sensor, "name": nombre},
+                                   device_id=device_id, queue_if_offline=True)
+
+    def _sensor_ack(self, orden: str, device_id: str, sensor: str, ok: bool):
+        """
+        cmd_ack de authorize/remove/rename. Se avisa SIEMPRE al dueño en privado
+        (nunca al grupo): si alguien con su teléfono borra un sensor, se entera.
+        """
         location = escape_md(firebase_manager.get_device_location(device_id) or device_id)
-        if ok:
-            texto = f"✅ Sensor `{sensor}` autorizado en *{location}*. Ya puede disparar la alarma."
-        else:
-            # Se reinició o llegó al tope de 5 pendientes: lo olvidó.
-            texto = (f"⚠️ *{location}* ya no tiene a `{sensor}` en espera. "
+        if orden == Command.AUTHORIZE_DEVICE.value:
+            firebase_manager.quitar_pendiente(device_id, sensor)
+            texto = (f"✅ Sensor `{sensor}` autorizado en *{location}*. Ya puede disparar la alarma." if ok else
+                     # Se reinició o llegó al tope de 5 pendientes: lo olvidó.
+                     f"⚠️ *{location}* ya no tiene a `{sensor}` en espera. "
                      "Apaga y enciende el sensor para que vuelva a pedir permiso.")
-        logger.info(f"[{device_id}] Autorizacion de {sensor}: {'ok' if ok else 'rechazada'}")
+        elif orden == Command.REMOVE_DEVICE.value:
+            firebase_manager.quitar_pendiente(device_id, sensor)
+            texto = (f"🗑 Sensor `{sensor}` eliminado de *{location}*. Ya no vigila esa zona." if ok else
+                     f"⚠️ *{location}* no tiene el sensor `{sensor}`: no había nada que eliminar.")
+        else:
+            texto = (f"✏️ Sensor `{sensor}` renombrado en *{location}*." if ok else
+                     f"⚠️ *{location}* no tiene el sensor `{sensor}`: no se pudo renombrar.")
+        logger.info(f"[{device_id}] {orden} de {sensor}: {'ok' if ok else 'rechazada'}")
         self._a_los_duenos(device_id, texto)
 
     def _avisar_sos(self, device_id: str):
@@ -1033,7 +1051,8 @@ class AlarmBridgeService:
         if self.firebase_available: # Only start if Firebase is connected
             firebase_manager.on_sos = self._avisar_sos
             firebase_manager.on_autorizar = self._pedir_autorizacion
-            self.mqtt.on_autorizacion = self._autorizacion_hecha
+            firebase_manager.on_sensor_orden = self._orden_de_sensor
+            self.mqtt.on_sensor_ack = self._sensor_ack
             firebase_manager.start_app_command_listener(self.mqtt)
 
         self.running = True

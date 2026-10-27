@@ -94,7 +94,8 @@ def _handler():
     h._ids_vistos, h._arranques_por_confirmar = OrderedDict(), {}
     h._on_event_callback = None
     h._modo_bengala_pedido, h._autorizacion_pedida = {}, {}
-    h.on_autorizacion = MagicMock()
+    h.on_sensor_ack = MagicMock()
+    h.sensors_list, h.sensors_list_time, h._on_sensors_list_callback = {}, {}, None
     return h
 
 
@@ -102,20 +103,71 @@ def test_el_ack_dice_que_sensor_era():
     h = _handler()
     h._autorizacion_pedida[MAC] = "MOV-NUEVO1"       # lo apunta send_command
     h._handle_event('{"deviceId": "%s", "eventType": "cmd_ack", "data": {"cmd": "set_schedule", "ok": true}}' % MAC)
-    h.on_autorizacion.assert_not_called()             # otro ack no lo consume
+    h.on_sensor_ack.assert_not_called()               # otro ack no lo consume
     h._handle_event('{"deviceId": "%s", "eventType": "cmd_ack", "data": {"cmd": "authorize_device", "ok": true}}' % MAC)
-    h.on_autorizacion.assert_called_once_with(MAC, "MOV-NUEVO1", True)
+    h.on_sensor_ack.assert_called_once_with("authorize_device", MAC, "MOV-NUEVO1", True)
+
+
+def test_el_ack_nuevo_trae_el_sensor():
+    h = _handler()
+    h._handle_event('{"deviceId": "%s", "eventType": "cmd_ack", "data": {"cmd": "remove_device", "ok": true, "sensorId": "MOV-X"}}' % MAC)
+    h.on_sensor_ack.assert_called_once_with("remove_device", MAC, "MOV-X", True)
 
 
 def test_hecha_quita_el_pendiente_y_avisa():
     app, enviados = _app()
-    app._autorizacion_hecha(MAC, "MOV-NUEVO1", True)
+    app._sensor_ack("authorize_device", MAC, "MOV-NUEVO1", True)
     m.firebase_manager.quitar_pendiente.assert_called_once_with(MAC, "MOV-NUEVO1")
     assert enviados[0][0] == "111" and "autorizado" in enviados[0][1]
     app, enviados = _app()
-    app._autorizacion_hecha(MAC, "MOV-NUEVO1", False)   # la central lo olvidó
+    app._sensor_ack("authorize_device", MAC, "MOV-NUEVO1", False)   # la central lo olvidó
     m.firebase_manager.quitar_pendiente.assert_called_once()
     assert "Apaga y enciende" in enviados[0][1]
+
+
+def test_eliminar_avisa_siempre_al_dueno_y_nunca_al_grupo():
+    app, enviados = _app()
+    app._sensor_ack("remove_device", MAC, "MOV-X", True)
+    assert [e[0] for e in enviados] == ["111"] and "eliminado" in enviados[0][1]
+
+
+def test_la_app_pide_eliminar_y_renombrar():
+    fm = _fm({MAC: {}})
+    pedidos = []
+    fm.on_sensor_orden = lambda d, s, o, n: pedidos.append((s, o, n))
+    fm._app_command_listener(_Evento(f"/{MAC}/Sensors/MOV-A/borrar", True))
+    fm._app_command_listener(_Evento(f"/{MAC}/Sensors/MOV-B/renombrar", "  Puerta cocina  "))
+    fm._app_command_listener(_Evento(f"/{MAC}/Sensors/MOV-C/renombrar", "   "))     # vacío: nada
+    # La lista que escribe el VPS no pide nada.
+    fm._app_command_listener(_Evento(f"/{MAC}/Sensors", {"MOV-A": {"name": "x", "authorized": True}}))
+    assert pedidos == [("MOV-A", "borrar", None), ("MOV-B", "renombrar", "Puerta cocina")]
+
+
+def test_orden_de_sensor_manda_el_comando():
+    app, _ = _app()
+    app._orden_de_sensor(MAC, "MOV-A", "borrar")
+    app._orden_de_sensor(MAC, "MOV-B", "renombrar", "Sala")
+    assert [c.args[0] for c in app.mqtt.send_command.call_args_list] == ["remove_device", "rename_device"]
+    assert app.mqtt.send_command.call_args_list[1].args[1] == {"sensorId": "MOV-B", "name": "Sala"}
+
+
+def test_la_lista_de_la_central_llega_a_la_rtdb():
+    h = _handler()
+    h.firebase_manager.is_available.return_value = True
+    h._handle_sensors_list('{"deviceId": "%s", "eventType": "sensors_list", "sensors": ['
+                           '{"id": "MOV-A", "name": "Sala", "type": "MOV", "active": true, "authorized": true},'
+                           '{"id": "MOV-B", "type": "MOV", "authorized": false}]}' % MAC)
+    dev, sensores = h.firebase_manager.guardar_sensores.call_args.args
+    assert dev == MAC and [(s.sensor_id, s.authorized) for s in sensores] == [("MOV-A", True), ("MOV-B", False)]
+
+
+def test_teclado_de_sensores():
+    from mqtt_protocol import SensorInfo
+    from telegram_bot import teclado_sensores
+    sensores = [SensorInfo("MOV-A", "Sala", "MOV", True, 0, "", 0, True),
+                SensorInfo("MOV-B", "", "MOV", True, 0, "", 0, False)]
+    datos = [f[0].callback_data for f in teclado_sensores(MAC, sensores).inline_keyboard]
+    assert datos == [f"sdel_{MAC}_MOV-A", f"auth_{MAC}_MOV-B"]
 
 
 def test_callback_cabe_en_telegram():

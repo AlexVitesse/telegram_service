@@ -110,6 +110,22 @@ class LeadCaptureState:
 
 
 
+def teclado_sensores(device_id: str, sensores) -> Optional[InlineKeyboardMarkup]:
+    """Bajo /sensors, solo para el dueño: 🗑 por sensor autorizado, ✅ por los de cuarentena."""
+    mac = normalizar_mac(device_id)
+    filas = []
+    for s in sensores:
+        if not s.sensor_id:
+            continue
+        if s.authorized:
+            filas.append([InlineKeyboardButton(f"🗑 Eliminar {s.name or s.sensor_id}"[:60],
+                                               callback_data=f"sdel_{mac}_{s.sensor_id}")])
+        else:
+            filas.append([InlineKeyboardButton(f"✅ Autorizar {s.sensor_id}",
+                                               callback_data=f"auth_{mac}_{s.sensor_id}")])
+    return InlineKeyboardMarkup(filas) if filas else None
+
+
 def teclado_autorizar(device_id: str, sensor_id: str) -> InlineKeyboardMarkup:
     """Botones del aviso de sensor nuevo. Van solo al chat privado del dueño."""
     sufijo = f"{normalizar_mac(device_id)}_{sensor_id}"
@@ -1708,6 +1724,12 @@ class TelegramBot:
 
             await self.send_message(chat_id, response, "Markdown")
 
+            # Borrar o autorizar: solo el dueño y en su chat privado.
+            if sensors_list and sensors_list.sensors and self.firebase_manager.es_dueno(device_id, chat_id):
+                teclado = teclado_sensores(device_id, sensors_list.sensors)
+                if teclado:
+                    await self.send_message(chat_id, f"Sensores de {name}:", reply_markup=teclado)
+
     def _schedule_status_text(self, device_ids: list) -> str:
         """Estado del horario de uno o varios dispositivos"""
         if len(device_ids) == 1:
@@ -3013,6 +3035,28 @@ class TelegramBot:
 
         if not self.mqtt_handler:
             await query.edit_message_text("❌ Error: Sistema no conectado")
+            return
+
+        # Eliminar un sensor: sdel_ pide confirmación, sdelok_ lo hace, sdelno_ no.
+        if data and data.split("_", 1)[0] in ("sdel", "sdelok", "sdelno"):
+            pref, resto = data.split("_", 1)
+            mac, sensor = resto[:14], resto[15:]
+            if not self.firebase_manager.es_dueno(mac, chat_id):
+                await query.edit_message_text("❌ Solo el dueño de la central puede eliminar sensores.")
+            elif pref == "sdel":
+                await query.edit_message_text(
+                    f"¿Eliminar {sensor}? Dejará de vigilar esa zona. Si sigue encendido, "
+                    "volverá a pedir permiso.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🗑 Sí, eliminar", callback_data=f"sdelok_{mac}_{sensor}"),
+                        InlineKeyboardButton("Cancelar", callback_data=f"sdelno_{mac}_{sensor}"),
+                    ]]))
+            elif pref == "sdelno":
+                await query.edit_message_text(f"No se eliminó {sensor}.")
+            else:
+                self.mqtt_handler.send_command(Command.REMOVE_DEVICE.value, {"sensorId": sensor},
+                                               device_id=mac, queue_if_offline=True)
+                await query.edit_message_text(f"⏳ Eliminando {sensor}…")
             return
 
         # Sensor en cuarentena: auth_{mac}_{sensorId} / authno_{...}. La MAC

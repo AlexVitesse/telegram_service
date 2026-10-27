@@ -103,6 +103,9 @@ class FirebaseManager:
         # Lo pone main.py: la app pidio autorizar un sensor en cuarentena
         # (`ESP32/{mac}/Pendientes/{sensorId}/autorizar = true`).
         self.on_autorizar: Optional[Callable[[str, str], None]] = None
+        # Lo pone main.py: la app pidio eliminar o renombrar un sensor
+        # (`Sensors/{id}/borrar = true` / `Sensors/{id}/renombrar = "texto"`).
+        self.on_sensor_orden: Optional[Callable[[str, str, str, Optional[str]], None]] = None
 
         # Listener monitoring
         self._last_listener_event_time: float = 0
@@ -186,6 +189,30 @@ class FirebaseManager:
         except Exception as e:
             logger.error(f"No se pudo anotar el sensor pendiente {sensor_id} de {device_id}: {e}")
             return False
+
+    def guardar_sensores(self, device_id: str, sensores) -> None:
+        """
+        La lista que manda la central (`sensors_list`) en `ESP32/{mac}/Sensors`,
+        que es lo que la app enseña para renombrar y eliminar. Se reemplaza
+        entera: un sensor borrado desaparece.
+        """
+        if not self.is_available():
+            return
+        datos = {
+            s.sensor_id: {
+                "name": s.name or s.sensor_id,
+                "type": s.sensor_type,
+                "location": s.location or "",
+                "authorized": bool(s.authorized),
+                "online": bool(s.active),
+                "lastSeenSec": int(s.last_seen_sec or 0),
+            }
+            for s in sensores if s.sensor_id
+        }
+        try:
+            self.db.reference(f"ESP32/{normalizar_mac(device_id)}/Sensors").set(datos or None)
+        except Exception as e:
+            logger.error(f"No se pudo guardar la lista de sensores de {device_id}: {e}")
 
     def quitar_pendiente(self, device_id: str, sensor_id: str) -> None:
         if not self.is_available() or not sensor_id:
@@ -407,6 +434,24 @@ class FirebaseManager:
                         self.on_autorizar(device_id, sensor_id)
                     except Exception as e:  # nunca tumbar el listener
                         logger.error(f"[{device_id}] No se pudo pedir la autorizacion de {sensor_id}: {e}")
+
+            elif command_key == 'Sensors':
+                # /{mac}/Sensors/{id}/borrar = true, /{mac}/Sensors/{id}/renombrar = "x"
+                # (o el sensor entero con eso dentro). La lista que escribe el
+                # propio VPS no los trae.
+                sensor_id = parts[3] if len(parts) > 3 else ""
+                datos = {parts[4]: event.data} if len(parts) > 4 else (event.data if isinstance(event.data, dict) else {})
+                orden, nombre = None, None
+                if datos.get("borrar") is True:
+                    orden = "borrar"
+                elif isinstance(datos.get("renombrar"), str) and datos["renombrar"].strip():
+                    orden, nombre = "renombrar", datos["renombrar"].strip()[:32]
+                if sensor_id and orden and self.on_sensor_orden:
+                    logger.info(f"Comando de App: {orden.upper()} SENSOR {sensor_id} en {device_id}")
+                    try:
+                        self.on_sensor_orden(device_id, sensor_id, orden, nombre)
+                    except Exception as e:
+                        logger.error(f"[{device_id}] No se pudo pedir {orden} de {sensor_id}: {e}")
 
             elif command_key == 'BengalaHab':
                 if event.data is True:

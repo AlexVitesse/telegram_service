@@ -105,6 +105,8 @@ class Command(str, Enum):
     FORGET = "forget"
     #: Saca de cuarentena un sensor: args {"sensorId"}. Responde cmd_ack sin el id.
     AUTHORIZE_DEVICE = "authorize_device"
+    REMOVE_DEVICE = "remove_device"   # {"sensorId"}
+    RENAME_DEVICE = "rename_device"   # {"sensorId", "name"}
     #: Contrasena y llave del modo local nuevas (traspaso).
     LOCAL_ROTATE = "local_rotate"
 
@@ -253,6 +255,7 @@ class SensorInfo:
     rssi: int
     location: str
     last_seen_sec: int  # Segundos desde última comunicación
+    authorized: bool = True  # False = en cuarentena (firmware desde el 27-oct; antes no lo mandaba)
 
     @classmethod
     def from_dict(cls, d: dict) -> 'SensorInfo':
@@ -263,7 +266,8 @@ class SensorInfo:
             active=d.get("active", False),
             rssi=d.get("rssi", 0),
             location=d.get("location", ""),
-            last_seen_sec=d.get("lastSeenSec", 0)
+            last_seen_sec=d.get("lastSeenSec", 0),
+            authorized=d.get("authorized", True),
         )
 
     def get_type_icon(self) -> str:
