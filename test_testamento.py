@@ -35,9 +35,11 @@ def test_telemetria_cada_2_min_no_la_da_por_caida():
     assert _dm(120, 271).check_offline_devices(90)       # respaldo sin testamento
 
 
-def test_testamento_la_da_por_caida_al_momento():
+def test_testamento_la_da_por_caida_tras_la_gracia():
     dm = _dm(120, 5)
     dm.marcar_desconectada("A1")
+    assert not dm.check_offline_devices(90)
+    dm.devices_state["A1"]["desconectada"] -= dm.GRACIA_TESTAMENTO_S
     assert dm.check_offline_devices(90)
     assert not dm.vivas_con_testamento()
 
@@ -45,6 +47,7 @@ def test_testamento_la_da_por_caida_al_momento():
 def test_telemetria_despues_del_testamento_la_reconecta():
     dm = _dm(120, 5)
     dm.marcar_desconectada("A1")
+    dm.devices_state["A1"]["desconectada"] -= dm.GRACIA_TESTAMENTO_S
     dm.check_offline_devices(90)
     assert dm.update_telemetry_time("A1", 120) is True
     assert dm.vivas_con_testamento() == ["A1"]
@@ -67,6 +70,15 @@ def test_refresco_solo_de_equipos_que_existen():
     rutas = [c.args[0] for c in main_mod.firebase_manager.update_data.call_args_list]
     assert rutas == ["ESP32/A1/Telemetry"], rutas
 
+
+
+def test_testamento_junto_con_la_reconexion_no_avisa():
+    dm = _dm(120, 5)
+    dm.marcar_desconectada("A1")
+    dm.update_telemetry_time("A1", 120)
+    dm.devices_state["A1"]["last_telemetry_time"] = time.time()
+    assert not dm.check_offline_devices(90)
+    assert dm.vivas_con_testamento() == ["A1"]
 
 
 def test_testamento_despierta_al_monitor():

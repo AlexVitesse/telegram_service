@@ -441,6 +441,7 @@ class AlarmBridgeService:
             # Verificar cada 30 segundos, o al momento si llega un testamento
             try:
                 await asyncio.wait_for(despertar.wait(), timeout=30)
+                await asyncio.sleep(self.device_manager.GRACIA_TESTAMENTO_S)
             except asyncio.TimeoutError:
                 pass
             despertar.clear()

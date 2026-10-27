@@ -283,13 +283,19 @@ class DeviceManager:
     def marcar_desconectada(self, device_id: str):
         """
         Testamento del broker: la central dejo de responder. Cuenta como sin
-        conexion en la siguiente vuelta de `check_offline_devices`, sin esperar
-        a que falte telemetria. Una central que nunca mando telemetria no se
+        conexion en `check_offline_devices` pasados GRACIA_TESTAMENTO_S, sin
+        esperar a que falte telemetria. Una central que nunca mando telemetria no se
         crea aqui (seria un fantasma que nadie ve volver).
         """
         if device_id in self.devices_state:
-            self.devices_state[device_id]["desconectada"] = True
+            self.devices_state[device_id]["desconectada"] = time.time()
             logger.info(f"Dispositivo {device_id}: testamento del broker (dejo de responder)")
+
+    #: Si la central se reconecta antes de que el broker de por muerta la sesion
+    #: vieja, el testamento llega junto con la reconexion (27-oct: corte de 11 s,
+    #: testamento y telemetria en el mismo segundo, push falso). Se espera esto
+    #: a ver si llega telemetria, que borra la marca.
+    GRACIA_TESTAMENTO_S = 10
 
     @staticmethod
     def espera_telemetria(data: Dict[str, Any], timeout_seconds: int) -> float:
@@ -326,7 +332,8 @@ class DeviceManager:
             time_since_telemetry = now - last_telemetry
 
             # Si excede el timeout y no hemos notificado aún
-            if data.get("desconectada") or time_since_telemetry > self.espera_telemetria(data, timeout_seconds):
+            testamento = data.get("desconectada")
+            if (testamento and now - testamento >= self.GRACIA_TESTAMENTO_S) or time_since_telemetry > self.espera_telemetria(data, timeout_seconds):
                 if data.get("is_online", True) and not data.get("offline_notified", False):
                     data["is_online"] = False
                     data["offline_notified"] = True
