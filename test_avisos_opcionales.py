@@ -141,6 +141,7 @@ def _fb(nodos=None, usuarios=None):
     fb._cache_uid = {}
     fb._CACHE_UID_TTL = FirebaseManager._CACHE_UID_TTL
     fb._uid_por_chat_id = types.MethodType(FirebaseManager._uid_por_chat_id, fb)
+    fb._uids_por_chat_id = types.MethodType(FirebaseManager._uids_por_chat_id, fb)
     fb.quiere_aviso_telegram = types.MethodType(
         FirebaseManager.quiere_aviso_telegram, fb
     )

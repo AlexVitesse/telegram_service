@@ -1021,9 +1021,12 @@ class FirebaseManager:
         nodo = self._nodo(device_id) or {}
         dueno = str(nodo.get("ownerUid") or "")
         if dueno:
-            uid = self._uid_por_chat_id(str(chat_id))
-            if uid:
-                return uid == dueno
+            # Todas, no la primera: un mismo Telegram vinculado a dos cuentas
+            # (27-oct: la del dueño y una de prueba) dejaba al dueño sin el aviso
+            # para autorizar sensores, porque salía la otra.
+            uids = self._uids_por_chat_id(str(chat_id))
+            if uids:
+                return dueno in uids
         return str(nodo.get("Telegram_ID") or "") == str(chat_id)
 
     def _quitar_de_listas(self, mac: str, excepto: Optional[str] = None) -> List[str]:
@@ -1262,8 +1265,13 @@ class FirebaseManager:
     _CACHE_UID_TTL = 300
 
     def _uid_por_chat_id(self, chat_id: str) -> Optional[str]:
+        """La cuenta de la app cuyo `telegram_id` es este chat (la primera si hay varias)."""
+        uids = self._uids_por_chat_id(chat_id)
+        return uids[0] if uids else None
+
+    def _uids_por_chat_id(self, chat_id: str) -> List[str]:
         """
-        La cuenta de la app cuyo `telegram_id` es este chat.
+        Las cuentas de la app cuyo `telegram_id` es este chat.
 
         Consulta indexada sobre `Usuarios` en vez de descargarlo entero. La
         regla `.indexOn: ["telegram_id"]` tiene que existir: sin ella Firebase
@@ -1277,7 +1285,7 @@ class FirebaseManager:
         evento- no.
         """
         if not self.is_available():
-            return None
+            return []
 
         ahora = time.time()
         cacheado = self._cache_uid.get(str(chat_id))
@@ -1293,12 +1301,12 @@ class FirebaseManager:
             )
         except Exception as e:
             logger.error(f"No se pudo resolver el uid de {chat_id}: {e}")
-            return None
+            return []
 
-        uid = None
-        if isinstance(encontrados, dict) and encontrados:
-            uid = next(iter(encontrados))
-            if len(encontrados) > 1:
+        uids = list(encontrados) if isinstance(encontrados, dict) else []
+        if uids:
+            uid = uids[0]
+            if len(uids) > 1:
                 # Dos cuentas con el mismo Telegram. No deberia pasar
                 # -vincular_chat_id no pisa un valor existente- pero puede haber
                 # datos viejos, y elegir en silencio esconderia el problema.
@@ -1307,8 +1315,8 @@ class FirebaseManager:
                     f"se usan las preferencias de {uid}"
                 )
 
-        self._cache_uid[str(chat_id)] = (uid, ahora)
-        return uid
+        self._cache_uid[str(chat_id)] = (uids, ahora)
+        return uids
 
     def quiere_aviso_telegram(
         self, chat_id: str, clave: Optional[str], device_id: Optional[str] = None

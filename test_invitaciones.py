@@ -158,9 +158,12 @@ def test_con_ownerUid_un_telegram_id_viejo_no_es_dueno():
     bot = _bot({JOSE: [A]})
     fm = bot.firebase_manager
     fm.db.datos["ESP32"][A]["ownerUid"] = "alice"
-    fm._uid_por_chat_id = lambda chat: {JOSE: "bob"}.get(chat)
+    fm._uids_por_chat_id = lambda chat: {JOSE: ["bob"]}.get(chat, [])
     assert not fm.es_dueno(A, JOSE)
-    fm._uid_por_chat_id = lambda chat: {JOSE: "alice"}.get(chat)
+    fm._uids_por_chat_id = lambda chat: {JOSE: ["alice"]}.get(chat, [])
+    assert fm.es_dueno(A, JOSE)
+    # El mismo Telegram en dos cuentas (27-oct): basta con que una sea la dueña.
+    fm._uids_por_chat_id = lambda chat: {JOSE: ["prueba", "alice"]}.get(chat, [])
     assert fm.es_dueno(A, JOSE)
 
 
