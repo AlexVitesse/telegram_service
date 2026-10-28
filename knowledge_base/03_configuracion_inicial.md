@@ -115,13 +115,14 @@ Crear la cuenta en la app (si no existe) y seguir el procedimiento de la seccion
 
 ### Paso 3: Encender los modulos secundarios (slaves)
 
-Los sensores PIR, magneticos, la sirena, la bengala y el teclado vienen ya emparejados de fabrica con el Master incluido en el kit. No se dan de alta desde la app. Solo hay que:
+Los modulos no vienen vinculados de fabrica con el Master (no todos los kits usan todos los modulos). No se dan de alta a mano, pero cada uno hay que autorizarlo una vez:
 
 1. Colocar cada modulo en su ubicacion fisica definitiva.
 2. Conectar o insertar sus pilas segun el caso.
 3. Verificar que cada modulo parpadee su LED de encendido.
+4. Autorizarlo: al encenderse, el Master lo escucha por LoRa y lo deja en espera ("sensor nuevo"). Al dueño le llega una notificacion y un mensaje de Telegram; se autoriza en la app (ficha del equipo > "Sensores nuevos" > "Autorizar") o con el boton del mensaje de Telegram. Hasta entonces ese modulo no dispara la alarma.
 
-La comunicacion entre el Master y los slaves usa LoRa con un canal preconfigurado: el Master reconoce cada modulo la primera vez que lo escucha, por eso no se requiere emparejamiento manual.
+Esto aplica a los sensores de movimiento (PIR) y de puerta/ventana (magneticos), al teclado y a la bengala. La sirena no necesita autorizacion. Conviene encenderlos de uno en uno: el Master guarda como mucho 5 modulos en espera a la vez.
 
 ### Paso 4: Telegram (opcional)
 

@@ -30,7 +30,7 @@ Si te preguntas como vinculo un dispositivo, como registro un dispositivo, como 
 
 ### Tiempo para emparejar y modulos del kit
 
-Desde el pitido tienes 5 minutos para emparejar el equipo. Si se pasa ese tiempo, el Master sale del modo emparejamiento y se reinicia solo; vuelve a ponerlo en modo emparejamiento con el clip. Los sensores, la sirena, la bengala y el teclado del kit ya vienen emparejados de fabrica con su Master y no hay que darlos de alta uno por uno.
+Desde el pitido tienes 5 minutos para emparejar el equipo. Si se pasa ese tiempo, el Master sale del modo emparejamiento y se reinicia solo; vuelve a ponerlo en modo emparejamiento con el clip. Los sensores, la bengala y el teclado no vienen vinculados de fabrica: al encender cada uno, el Master lo deja en espera y hay que autorizarlo una vez desde la app o Telegram (ver "Que es un sensor nuevo o en cuarentena?"). La sirena no necesita autorizacion.
 
 La guia detallada esta en "Configuracion del Master via Bluetooth (BLE)". Si el Bluetooth no encuentra el equipo, revisa "BLE no detecta el dispositivo" en Solucion de Problemas.
 
