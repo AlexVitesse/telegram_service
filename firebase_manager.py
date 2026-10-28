@@ -210,7 +210,10 @@ class FirebaseManager:
             for s in sensores if s.sensor_id
         }
         try:
-            self.db.reference(f"ESP32/{normalizar_mac(device_id)}/Sensors").set(datos or None)
+            ref = self.db.reference(f"ESP32/{normalizar_mac(device_id)}/Sensors")
+            # set(None) lo rechaza el SDK ("Value must not be None") y el ultimo
+            # sensor borrado se quedaba en la app (27-oct).
+            ref.set(datos) if datos else ref.delete()
         except Exception as e:
             logger.error(f"No se pudo guardar la lista de sensores de {device_id}: {e}")
 

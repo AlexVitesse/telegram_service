@@ -161,6 +161,17 @@ def test_la_lista_de_la_central_llega_a_la_rtdb():
     assert dev == MAC and [(s.sensor_id, s.authorized) for s in sensores] == [("MOV-A", True), ("MOV-B", False)]
 
 
+def test_sin_sensores_se_borra_el_nodo():
+    """El ultimo sensor eliminado no puede quedarse en la app."""
+    from firebase_manager import FirebaseManager
+    fm = FirebaseManager.__new__(FirebaseManager)
+    fm.is_available = lambda: True
+    ref = MagicMock()
+    fm.db = MagicMock(); fm.db.reference.return_value = ref
+    fm.guardar_sensores(MAC, [])
+    ref.delete.assert_called_once(); ref.set.assert_not_called()
+
+
 def test_teclado_de_sensores():
     from mqtt_protocol import SensorInfo
     from telegram_bot import teclado_sensores
