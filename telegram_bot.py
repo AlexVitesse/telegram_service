@@ -700,6 +700,8 @@ class TelegramBot:
         help_text += "`/deshabilitar` - Desactivar bengala\n\n"
         help_text += "🔗 *Dispositivos:*\n"
         help_text += "`/desvincular` - Desvincular un dispositivo\n\n"
+        help_text += "📻 *Sensores:*\n"
+        help_text += "`/sensors` - Ver sensores. El dueño, en privado, tiene botones: 🗑 eliminar y ✅ autorizar uno nuevo\n\n"
         help_text += "⏰ *Horarios:*\n"
         help_text += "`/horarios` - Ver/configurar programación por dispositivo\n"
         help_text += "`/horarios activar HH:MM` - Hora de armado\n"
@@ -713,7 +715,6 @@ class TelegramBot:
         if self._is_user_admin(chat_id):
             help_text += "⚙️ *Admin:*\n"
             help_text += "`/permisos` - Gestionar usuarios\n"
-            help_text += "`/sensors` - Ver sensores\n"
             help_text += "`/adduser` - Agregar usuario\n"
 
         await update.message.reply_text(
