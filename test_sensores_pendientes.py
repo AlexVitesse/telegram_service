@@ -172,6 +172,22 @@ def test_sin_sensores_se_borra_el_nodo():
     ref.delete.assert_called_once(); ref.set.assert_not_called()
 
 
+def test_la_lista_borra_los_pendientes_que_la_central_olvido():
+    """Tras un reinicio o el tope de 5, la app ofrecia autorizar sensores que ya no existian."""
+    from firebase_manager import FirebaseManager
+    from mqtt_protocol import SensorInfo
+    fm = FirebaseManager.__new__(FirebaseManager)
+    fm.is_available = lambda: True
+    sensors, pendientes = MagicMock(), MagicMock()
+    pendientes.get.return_value = {"MOV-VIVO": True, "MOV-OLVIDADO": True}
+    fm.db = MagicMock()
+    fm.db.reference.side_effect = lambda ruta: pendientes if ruta.endswith("/Pendientes") else sensors
+    fm.guardar_sensores(MAC, [SensorInfo("MOV-VIVO", "", "MOV", True, 0, "", 0, False),
+                              SensorInfo("MOV-SALA", "Sala", "MOV", True, 0, "", 0, True)])
+    pendientes.child.assert_called_once_with("MOV-OLVIDADO")
+    pendientes.child.return_value.delete.assert_called_once()
+
+
 def test_teclado_de_sensores():
     from mqtt_protocol import SensorInfo
     from telegram_bot import teclado_sensores

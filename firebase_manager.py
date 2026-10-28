@@ -214,6 +214,14 @@ class FirebaseManager:
             # set(None) lo rechaza el SDK ("Value must not be None") y el ultimo
             # sensor borrado se quedaba en la app (27-oct).
             ref.set(datos) if datos else ref.delete()
+            # La lista es completa, cuarentena incluida: un pendiente que no sale
+            # en ella lo olvido la central (reinicio o tope de 5) y en la app
+            # seria un "Autorizar" que no puede salir bien (28-oct).
+            en_espera = {s.sensor_id for s in sensores if s.sensor_id and not s.authorized}
+            pendientes = self.db.reference(f"ESP32/{normalizar_mac(device_id)}/Pendientes")
+            for sensor_id in (pendientes.get(shallow=True) or {}):
+                if sensor_id not in en_espera:
+                    pendientes.child(sensor_id).delete()
         except Exception as e:
             logger.error(f"No se pudo guardar la lista de sensores de {device_id}: {e}")
 
