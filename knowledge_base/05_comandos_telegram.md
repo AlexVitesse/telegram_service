@@ -15,7 +15,7 @@
 - **/off** - Desarmar el sistema de alarma. Funciona igual que /on: seleccion directa con un dispositivo o menu con multiples. Incluye opcion "Desarmar TODOS". Cooldown de 5 segundos.
 - **/status** - Consulta el estado actual del dispositivo: en linea o sin respuesta, armado o desarmado, modo bengala e intensidad de senal WiFi (en dBm). El bot espera unos segundos la respuesta del dispositivo. Con varios equipos ofrece "Ver TODOS". Cooldown de 5 segundos.
 - **/disparo** - Ejecuta un disparo manual de la sirena/alarma en todos tus equipos. Requiere confirmacion con los botones "Confirmar" y "Cancelar" para evitar activaciones accidentales. Cooldown de 8 segundos (mas alto que otros comandos por seguridad).
-- **/sensors** - Muestra informacion tecnica detallada de cada equipo: sensores LoRa (senal y hace cuanto se vieron), senal WiFi, memoria libre, tiempo de actividad (uptime), estado de armado, modo de bengala, tiempo de salida y horario.
+- **/sensors** - Muestra informacion tecnica detallada de cada equipo: sensores LoRa (senal y hace cuanto se vieron), senal WiFi, memoria libre, tiempo de actividad (uptime), estado de armado, modo de bengala, tiempo de salida y horario. Al dueño del equipo, en chat privado, le salen botones debajo: la papelera para eliminar un sensor (pide confirmacion) y la palomita para autorizar un sensor nuevo. Es la forma de borrar un sensor desde Telegram; renombrarlo solo se puede desde la app.
 
 ## Detener sirena sin desarmar
 

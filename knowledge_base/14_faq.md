@@ -67,6 +67,23 @@ Si. El administrador puede agregar usuarios con el comando /adduser, o el dueño
 
 Los sensores LoRa son de bajo consumo energetico. La duracion de la bateria depende del modelo del sensor y la frecuencia de uso. El sistema no mide el nivel de bateria, pero con el comando /sensors en Telegram puedes ver cada sensor, su senal y hace cuanto se escucho por ultima vez; un sensor que lleva mucho sin oirse puede tener la bateria agotada.
 
+## Que es un sensor nuevo o en cuarentena?
+
+Por seguridad, cuando el Master escucha un sensor LoRa que no conoce, no lo deja disparar la alarma hasta que el dueño lo autorice. Al dueño le llega una notificacion "Sensor nuevo" y un mensaje privado de Telegram con botones. Se autoriza de dos formas:
+- En la app: ficha del equipo > "Sensores nuevos" > "Autorizar".
+- En Telegram: con el boton del aviso, o con /sensors y la palomita junto al sensor.
+Autorizalo solo si acabas de instalar ese sensor tu. Si la app o Telegram dicen que la central ya no lo tiene en espera (pasa si el Master se reinicio o si llegaron mas de 5 sensores nuevos a la vez), apaga y enciende el sensor para que vuelva a pedir permiso.
+
+## Como elimino o renombro un sensor?
+
+- **Eliminar**: en la app, ficha del equipo > "Sensores LoRa" > papelera; o en Telegram con /sensors y la papelera junto al sensor (solo el dueño, en chat privado). Pide confirmacion porque esa zona deja de vigilarse. Si el sensor sigue encendido, la proxima vez que se active volvera a pedir permiso como sensor nuevo; para quitarlo del todo, apagalo o quitale la bateria.
+- **Renombrar**: solo desde la app, con el lapiz junto al sensor (hasta 32 caracteres, se permiten acentos y ñ). El nombre es el que sale en los avisos de alarma.
+Al dueño siempre le llega un mensaje privado cuando se elimina o renombra un sensor, para que se entere si lo hizo otra persona.
+
+## Que significa que un sensor esta "Offline"?
+
+Cada sensor avisa al Master que sigue vivo una vez al dia. Si pasan mas de 25 horas sin saber de el, el Master lo marca fuera de linea y llega la notificacion "Sensor Offline". Suele ser bateria agotada, el sensor fuera de alcance o apagado. Revisa la bateria y la distancia al Master.
+
 ## Es seguro el sistema?
 
 Si. La comunicacion MQTT utiliza cifrado TLS a traves del puerto 8883 (o del 8884, WebSocket tambien cifrado, si el proveedor de internet bloquea el 8883). Los datos se almacenan en Firebase con autenticacion. El teclado fisico tiene proteccion anti-intrusion: despues de 5 intentos fallidos de contrasena, se bloquea durante 10 minutos.

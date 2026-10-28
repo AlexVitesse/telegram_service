@@ -37,7 +37,8 @@ Se abre tocando la tarjeta del equipo o "Ver detalles y ajustes":
 - **Proteger equipo / Desarmar equipo**: arma o desarma solo ese equipo.
 - **Bengala**: tres modos: "Auto" (se dispara sola), "Pregunta" (Telegram pregunta antes de dispararla) y "Apagada" (no se dispara nunca).
 - **Modo de prueba**: "Simular disparo" muestra como se veria una alarma sin enviar nada a la central.
-- **Sensores LoRa**: lista de modulos, cada uno "Activo" u "Offline".
+- **Sensores nuevos**: aparece solo si hay sensores esperando permiso (ver "Que es un sensor nuevo o en cuarentena" en Preguntas Frecuentes). Cada uno tiene el boton "Autorizar", que pide confirmacion. Mientras no se autoriza, ese sensor no dispara la alarma.
+- **Sensores LoRa**: lista de modulos autorizados, cada uno "Activo" u "Offline". Cada sensor tiene dos botones: el lapiz para renombrarlo (hasta 32 caracteres) y la papelera para eliminarlo (pide confirmacion). Funcionan tambien sin internet si el telefono esta en la misma red WiFi que la central.
 - **Ajustes**: direccion MAC, destinatarios de Telegram y tiempo de salida.
 - **Editar**: cambiar el "Nombre del equipo", agregar o quitar destinatarios de Telegram ("Agregar usuario o grupo", hasta dos usuarios y un grupo) y ajustar el "Tiempo de salida" (60 por defecto). Se elige de 10 a 180 segundos. Se guarda con "Guardar cambios"; si la central esta sin conexion, el servidor se lo manda en cuanto vuelva a conectarse.
 - **Borrar dispositivo**: borra el equipo de tu cuenta y su configuracion en la nube. Con el firmware de octubre de 2026, el Master borrado tambien olvida su horario, tiempos y bengala (conserva la WiFi y el nombre). Con un firmware anterior solo se le apaga el horario y lo demas queda en su memoria; para dejarlo limpio hay que hacer el reset de fabrica (ver "Como desvinculo, quito o borro un dispositivo" en Preguntas Frecuentes).
