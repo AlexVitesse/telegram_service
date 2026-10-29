@@ -70,6 +70,17 @@ def test_responder_pasa_el_canal():
     assert r.texto == "canal=app", r.texto
 
 
+def test_textos_fijos_de_la_app_sin_comandos():
+    from escalation_handler import build_escalation_message
+    from config import SupportConfig
+    sin_contacto = SupportConfig(email="", phone="", hours="")
+    assert "/help" not in build_escalation_message("llm_error", sin_contacto, canal="app")
+    assert "/help" in build_escalation_message("llm_error", sin_contacto)
+    r = asyncio.run(knowledge_qa.responder("horarios", None, None, canal="app"))
+    assert "/help" not in r.texto and "no está disponible" in r.texto, r.texto
+    assert "/help" in asyncio.run(knowledge_qa.responder("horarios", None, None)).texto
+
+
 if __name__ == "__main__":
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0

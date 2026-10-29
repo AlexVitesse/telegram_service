@@ -89,7 +89,8 @@ def enlace_whatsapp(telefono: str, texto: str = "") -> str:
 
 
 def build_escalation_message(
-    reason: str, support: "SupportConfig", contexto: str = "", html: bool = False
+    reason: str, support: "SupportConfig", contexto: str = "", html: bool = False,
+    canal: str = "telegram",
 ) -> str:
     """
     Arma el texto que se le envia al usuario.
@@ -116,7 +117,8 @@ def build_escalation_message(
         return (
             f"{header}\n\n"
             "Por el momento no hay un canal de contacto disponible. "
-            "Vuelve a intentarlo más tarde o usa /help para ver lo que puedo resolver."
+            + ("Vuelve a intentarlo más tarde." if canal == "app" else
+               "Vuelve a intentarlo más tarde o usa /help para ver lo que puedo resolver.")
         )
 
     # html=True es para Telegram con parse_mode=HTML: el enlace con el texto

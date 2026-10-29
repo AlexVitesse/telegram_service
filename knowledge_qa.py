@@ -135,10 +135,8 @@ async def responder(
     """
     if not knowledge_base or not ai_handler:
         return RespuestaConocimiento(
-            texto=(
-                "ℹ️ La base de conocimiento no está disponible.\n"
-                "Usa /help para ver los comandos."
-            ),
+            texto="ℹ️ La base de conocimiento no está disponible."
+            + ("" if canal == "app" else "\nUsa /help para ver los comandos."),
             tipo="fallback",
             ok=False,
             error="kb_unavailable",
@@ -162,7 +160,7 @@ async def responder(
 
         if not resultados:
             return RespuestaConocimiento(
-                texto=build_escalation_message("no_results", config.support),
+                texto=build_escalation_message("no_results", config.support, canal=canal),
                 tipo="escalation",
                 ok=False,
                 error="rag_no_results",
@@ -182,7 +180,7 @@ async def responder(
         # la pregunta. Inventar es peor que mandar a soporte.
         if NO_INFO_SENTINEL in respuesta:
             return RespuestaConocimiento(
-                texto=build_escalation_message("no_results", config.support),
+                texto=build_escalation_message("no_results", config.support, canal=canal),
                 tipo="escalation",
                 ok=False,
                 error="llm_no_info",
@@ -232,7 +230,7 @@ async def responder(
         else:
             # Reintentar no va a servir: se le da un camino que si lleva a algun
             # sitio en vez de invitarle a repetir lo que acaba de fallar.
-            texto = build_escalation_message("llm_error", config.support)
+            texto = build_escalation_message("llm_error", config.support, canal=canal)
 
         return RespuestaConocimiento(
             texto=texto,
