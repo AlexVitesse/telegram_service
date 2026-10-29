@@ -189,6 +189,21 @@ def test_retenida_que_volvio_sin_quitarle_la_marca_no_se_avisa():
     assert dm.soltar_retenidos() == []
 
 
+def test_dos_retenidas_caidas_de_verdad_se_avisan_pasado_el_tope():
+    # Dos casas sin luz a media masiva: sin tope, la masiva no terminaria nunca.
+    dm = _h().device_manager
+    dm.devices_state.clear()
+    for mac in ("08_D1_F9_29_E4", "48_E7_29_97_36"):
+        _central_callada(dm, mac, 100)
+    for d in dm.check_offline_devices(timeout_seconds=90):
+        d["aviso_retenido"] = True
+    assert len(dm.calladas_a_la_vez()) == 2          # aun es masiva
+    for d in dm.devices_state.values():
+        d["last_telemetry_time"] = time.time() - 90 - dm.MAX_CAIDA_MASIVA - 1
+    assert dm.calladas_a_la_vez() == []              # se acabo la masiva
+    assert len(dm.soltar_retenidos()) == 2
+
+
 def test_central_sin_hora_manda_la_edad_y_el_vps_la_calcula():
     """Reiniciada sin internet y aun sin NTP: timestamp 0 + edad_s (15-oct)."""
     e = MqttEvent.from_json(json.dumps({
