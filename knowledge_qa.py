@@ -118,6 +118,7 @@ async def responder(
     knowledge_base: Any,
     ai_handler: Any,
     timeout: Optional[float] = None,
+    canal: str = "telegram",
 ) -> RespuestaConocimiento:
     """
     Busca en la documentacion y contesta. No lanza: los fallos vuelven como una
@@ -128,6 +129,9 @@ async def responder(
     que es lo que quiere el bot de Telegram: alli no hay un cliente cortando por
     su cuenta. El endpoint HTTP si lo pasa, porque reparte un presupuesto entre
     el clasificador y esta llamada.
+
+    `canal="app"` cambia COMO se explica (ruta en pantalla en vez de comandos
+    del bot), no QUE se responde: la busqueda y la documentacion son las mismas.
     """
     if not knowledge_base or not ai_handler:
         return RespuestaConocimiento(
@@ -168,7 +172,9 @@ async def responder(
         scores = [round(r.score, 3) for r in resultados]
 
         respuesta = await asyncio.wait_for(
-            ai_handler.chat_with_context(pregunta, [r.chunk.text for r in resultados]),
+            ai_handler.chat_with_context(
+                pregunta, [r.chunk.text for r in resultados], canal=canal
+            ),
             timeout=timeout or config.ai.llm_timeout_sec * 2 + _MARGEN_CADENA,
         )
 

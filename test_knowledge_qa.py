@@ -42,7 +42,7 @@ class IAFalsa:
         self._respuesta = respuesta
         self._tarda = tarda
 
-    async def chat_with_context(self, mensaje, chunks):
+    async def chat_with_context(self, mensaje, chunks, canal="telegram"):
         if self._tarda:
             await asyncio.sleep(self._tarda)
         if isinstance(self._respuesta, Exception):

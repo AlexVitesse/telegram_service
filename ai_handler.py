@@ -177,6 +177,45 @@ PRECISION OBLIGATORIA:
 """
 
 # ---------------------------------------------------------------------------
+# La misma pregunta hecha desde el chat de la APP (G7, 29-oct). La KB esta
+# escrita con los comandos del bot, y el prompt de arriba obliga a citarlos:
+# desde la app, "¿como activo los horarios?" se contestaba con "/horarios
+# activar", que alli no se puede escribir en ningun sitio. Aqui se cambia esa
+# regla por la ruta en pantalla. Los textos salen tal cual de la APP
+# (src/app, version 8.1.9 / vc19): si la app cambia un boton, se cambia aqui.
+# ---------------------------------------------------------------------------
+_REGLA_COMANDOS = "- Incluye comandos exactos tal como aparecen: /bengala, /adduser, /horarios, etc.\n"
+
+_MAPA_APP = """
+CANAL: esta pregunta llega desde el chat de Senti DENTRO de la app Sentinel Guard, no desde Telegram.
+- NUNCA escribas comandos de Telegram (nada que empiece con /, como /horarios, /bengala, /sensors, /on, /off). En la app no hay donde escribirlos.
+- Explica la ruta en la app: pantalla y boton, con los nombres exactos del MAPA DE LA APP. Ejemplo: "En Inicio toca tu equipo > Ver detalles y ajustes > Bengala > Pregunta".
+- Si la documentacion da un comando de Telegram, busca su equivalente en el MAPA DE LA APP y da esa ruta.
+- Si algo solo se puede hacer desde el bot de Telegram (alta y aprobacion de usuarios, permisos), di que eso se hace en el bot de Telegram de Sentinel, sin escribir el comando.
+- El MAPA DE LA APP cuenta como documentacion.
+
+MAPA DE LA APP:
+- Barra de abajo: Inicio, Agregar, Horarios, Perfil. A Senti se le abre con el boton redondo flotante.
+- Inicio: boton grande "Proteger ahora" (arma todas las centrales) o "Desarmar". Atajos "Salir" (arma), "En casa" (desarma) y "Programar" (abre Horarios). Boton "Solicitar ayuda inmediata" (SOS de emergencia, pide confirmacion). Campana de "Avisos" arriba a la derecha.
+- Armar o desarmar un solo equipo: Inicio > tarjeta del equipo > "Ver detalles y ajustes" > "Proteger equipo" o "Desarmar equipo". Desde el chat tambien puedes pedirselo a Senti ("arma la casa").
+- Ficha del equipo (Inicio > tarjeta del equipo > "Ver detalles y ajustes"):
+  - Bengala: "Auto" (se dispara sola al saltar la alarma), "Pregunta" (Telegram pregunta antes de dispararla, con botones) o "Apagada".
+  - Modo de prueba: "Probar sin disparar nada" y luego "Simular disparo". No suena nada ni avisa a nadie; se sale con "Salir" en la banda de arriba.
+  - "Sensores nuevos": boton "Autorizar" junto a cada sensor que espera permiso.
+  - "Sensores LoRa": el lapiz renombra el sensor y la papelera lo elimina (pide confirmacion).
+  - Ajustes > "Editar": "Nombre del equipo", destinatarios de los avisos de Telegram ("Agregar usuario o grupo"), "Tiempo de salida" de 10 a 180 segundos. Se confirma con "Guardar cambios".
+  - Ajustes > "Red WiFi": cambiar la red si cambiaste el modem o su contrasena.
+  - "Borrar dispositivo": desvincula la central de tu cuenta.
+- Horarios (barra de abajo): cada horario tiene un interruptor para activarlo o pausarlo, y "Editar" y "Eliminar". Para crear uno: "Nombre", "Cada semana" o "Vacaciones", la central (si tienes varias), "Se arma" y "Se desarma" (o "Sin hora de regreso"), los dias ("Entre semana", "Fin de semana", "Todos") y "Guardar horario".
+- Agregar (barra de abajo, o el + arriba a la derecha en Inicio): vincular una central nueva por Bluetooth; despues se elige la red WiFi de 2.4 GHz y se pone el nombre del dispositivo.
+- Perfil (pantalla Configuracion), pestana "Perfil": "Cambiar Nombre", "Chat ID de Telegram", "Ver los consejos", "Cambiar Correo", "Cambiar Contrasena"; Notificaciones: "Notificaciones Push", "Armado y desarmado", "Conexion de la central", "Avisos por Telegram", "Grupo de Telegram: todos los avisos", "Senti", "Sonidos"; "Tema"; "Cerrar Sesion" y "Eliminar Cuenta".
+- Perfil, pestana "Acerca de": "Catalogo Familia Sentinel", "Contacto y Soporte" (Email, WhatsApp, Sitio Web) y "Preguntas Frecuentes".
+"""
+
+assert _REGLA_COMANDOS in RAG_CHAT_PROMPT, "cambio la regla de comandos: actualiza RAG_CHAT_PROMPT_APP"
+RAG_CHAT_PROMPT_APP = RAG_CHAT_PROMPT.replace(_REGLA_COMANDOS, "") + _MAPA_APP
+
+# ---------------------------------------------------------------------------
 # Prompt para modo vendedor (usuarios NO registrados)
 # ---------------------------------------------------------------------------
 SALES_CHAT_PROMPT = """Sos un asesor comercial del sistema de alarma SentinelGuard.
@@ -583,13 +622,16 @@ class AIHandler:
     # RAG chat
     # ------------------------------------------------------------------
 
-    async def chat_with_context(self, user_message: str, context_chunks: List[str]) -> str:
+    async def chat_with_context(
+        self, user_message: str, context_chunks: List[str], canal: str = "telegram"
+    ) -> str:
         """
         Genera una respuesta conversacional usando documentación como contexto.
 
         Args:
             user_message: La pregunta del usuario.
             context_chunks: Fragmentos de documentación relevantes.
+            canal: "app" contesta con la ruta en pantalla en vez de comandos.
 
         Returns:
             Respuesta generada por el LLM.
@@ -602,7 +644,7 @@ class AIHandler:
 
         try:
             answer = await self._call_llm(
-                system_prompt=RAG_CHAT_PROMPT,
+                system_prompt=RAG_CHAT_PROMPT_APP if canal == "app" else RAG_CHAT_PROMPT,
                 user_prompt=user_prompt,
                 model=self._chat_model,
                 temperature=0.3,

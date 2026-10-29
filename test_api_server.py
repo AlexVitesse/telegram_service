@@ -522,6 +522,7 @@ async def caso_el_presupuesto_se_reparte_no_se_suma():
 
         async def responder(*a, timeout=None, **k):
             visto["timeout"] = timeout
+            visto["canal"] = k.get("canal")
             return RespuestaFalsa()
 
         api_server.knowledge_qa = SimpleNamespace(responder=responder)
@@ -531,6 +532,8 @@ async def caso_el_presupuesto_se_reparte_no_se_suma():
         )
         # 10 de presupuesto - 0.4 del clasificador - 2 de margen ≈ 7.6
         assert 7.0 < visto["timeout"] < 7.7, visto
+        # Desde la app, ruta en pantalla y no comandos del bot (G7).
+        assert visto["canal"] == "app", visto
         # Y el clasificador no pudo pedir mas de su cuarta parte.
         assert config.api.budget_sec * 0.25 == 2.5
 

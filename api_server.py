@@ -319,6 +319,8 @@ class ApiSenti:
             # contestar. Nunca menos de un segundo: pedir un techo de 0 s es
             # garantizar el timeout en vez de intentarlo.
             timeout=max(1.0, _restante(limite) - _MARGEN_RESPUESTA),
+            # Desde la app no hay donde escribir /horarios: ruta en pantalla.
+            canal="app",
         )
 
         # Mismo registro que el bot: las preguntas de la app cuentan igual para
