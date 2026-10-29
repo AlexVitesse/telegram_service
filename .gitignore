@@ -40,7 +40,7 @@ alarm_service.log
 .DS_Store
 
 # Test/Simulator files (development only)
-test_mqtt_simulator.py
+simulador_mqtt.py
 test_components.py
 esp32_simulator.py
 
