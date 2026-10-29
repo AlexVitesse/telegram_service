@@ -158,6 +158,37 @@ def test_la_retenida_sigue_contando_si_la_caida_dura_mas_que_la_ventana():
     assert len(dm.calladas_a_la_vez()) == 2
 
 
+def test_retenida_que_sigue_caida_se_avisa_al_terminar_la_masiva():
+    # 29-oct: masiva 10:51-11:03; 48_E7 se callo a las 10:55 y siguio caida
+    # hasta las 13:19 sin que nadie fuera avisado.
+    dm = _h().device_manager
+    dm.devices_state.clear()
+    for mac in ("08_D1_F9_29_E4", "C8_2E_18_26_60", "48_E7_29_97_36"):
+        _central_callada(dm, mac, 100)
+    for d in dm.check_offline_devices(timeout_seconds=90):
+        d["aviso_retenido"] = True          # lo que hace main.py en la masiva
+    assert len(dm.calladas_a_la_vez()) == 3
+    # Vuelven dos: la reconexion les quita la marca (main._handle_device_reconnect).
+    for mac in ("08_D1_F9_29_E4", "C8_2E_18_26_60"):
+        assert dm.update_telemetry_time(mac) is True
+        dm.devices_state[mac].pop("aviso_retenido")
+    assert dm.calladas_a_la_vez() == ["48_E7_29_97_36"]  # ya no es masiva
+    assert [d["id"] for d in dm.soltar_retenidos()] == ["48_E7_29_97_36"]
+    assert dm.soltar_retenidos() == []      # una sola vez
+    # Ya avisada: al volver si se le dice "reconectado".
+    assert "aviso_retenido" not in dm.devices_state["48_E7_29_97_36"]
+
+
+def test_retenida_que_volvio_sin_quitarle_la_marca_no_se_avisa():
+    dm = _h().device_manager
+    dm.devices_state.clear()
+    _central_callada(dm, "08_D1_F9_29_E4", 100)
+    dm.check_offline_devices(timeout_seconds=90)
+    dm.devices_state["08_D1_F9_29_E4"]["aviso_retenido"] = True
+    dm.update_telemetry_time("08_D1_F9_29_E4")
+    assert dm.soltar_retenidos() == []
+
+
 def test_central_sin_hora_manda_la_edad_y_el_vps_la_calcula():
     """Reiniciada sin internet y aun sin NTP: timestamp 0 + edad_s (15-oct)."""
     e = MqttEvent.from_json(json.dumps({

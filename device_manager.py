@@ -280,6 +280,19 @@ class DeviceManager:
             and (d.get("aviso_retenido") or d.get("last_telemetry_time", 0) > limite)
         ]
 
+    def soltar_retenidos(self) -> List[Dict[str, Any]]:
+        """
+        Terminada la caida masiva, las centrales con aviso retenido que siguen
+        sin conexion: ya no es el broker, hay que avisar (29-oct: 48_E7_29_97_36
+        se callo a media masiva y estuvo 2 h 20 min caida sin aviso). Las que
+        volvieron ya no estan retenidas: `_handle_device_reconnect` les quito
+        la marca.
+        """
+        return [
+            d for d in self.devices_state.values()
+            if d.pop("aviso_retenido", False) and d.get("offline_notified")
+        ]
+
     def marcar_desconectada(self, device_id: str):
         """
         Testamento del broker: la central dejo de responder. Cuenta como sin

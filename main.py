@@ -413,6 +413,8 @@ class AlarmBridgeService:
                 elif not masiva and en_caida_masiva:
                     logger.info("Caida masiva terminada")
                 en_caida_masiva = masiva
+                if not masiva:
+                    offline_devices += self.device_manager.soltar_retenidos()
 
                 for device_data in offline_devices:
                     device_id = device_data.get("id", "desconocido")
