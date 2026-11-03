@@ -45,6 +45,7 @@ def _handler(archivo):
     h.device_location = ""
     h.LORA_EDAD_SOSPECHOSA = 30
     h.last_telemetry, h.last_telemetry_time = {}, {}
+    h.ultimo_mensaje = {}
     h.last_arm_event_time, h.device_exit_time = {}, {}
     h.sensors_list, h.sensors_list_time = {}, {}
     h._on_event_callback = h._on_telemetry_callback = None
@@ -137,6 +138,28 @@ def test_un_envio_directo_descarta_el_pendiente_viejo():
     h.last_telemetry_time[MAC] = time.time()  # ahora esta online
     h.send_command("set_schedule", dict(HORARIO, on_hour=22), device_id=MAC)
     assert h.get_pending_commands_count() == 0
+
+
+def test_central_que_acaba_de_hablar_no_encola_la_orden():
+    """
+    2-nov 10:39: llega la lista de sensores de 48_E7 y 24 s despues remove_device
+    se encola porque la ultima telemetria (cada 2 min) tenia mas de 60 s.
+    Cualquier mensaje cuenta; un testamento posterior la da por desconectada.
+    """
+    h = _handler(_archivo())
+    _telemetria(h)
+    h.last_telemetry_time[MAC] -= 100                  # entre dos telemetrias
+    assert h.is_device_online(MAC)
+    h.last_telemetry_time[MAC] -= 100                  # 200 s sin nada
+    assert not h.is_device_online(MAC)
+    h._on_message(None, None, SimpleNamespace(topic="dispositivos/eventos", payload=json.dumps(
+        {"deviceId": MAC, "eventType": "sensors_list", "sensors": []}).encode()))
+    h.send_command("remove_device", {"sensorId": "MOV-1"}, device_id=MAC, queue_if_offline=True)
+    assert set(_publicados(h)) == {"remove_device"}
+    assert h.get_pending_commands_count() == 0
+    h.device_manager.marcar_desconectada(MAC)
+    h.device_manager.devices_state[MAC]["desconectada"] += 1  # llego despues del ultimo mensaje
+    assert not h.is_device_online(MAC)
 
 
 def test_archivo_roto_no_tumba_el_arranque():

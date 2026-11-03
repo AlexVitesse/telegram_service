@@ -78,6 +78,9 @@ class MqttHandler:
 
         self.last_telemetry: Dict[str, MqttTelemetry] = {}
         self.last_telemetry_time: Dict[str, float] = {}
+        #: Ultimo mensaje de cualquier tipo (telemetria, evento, cmd_ack, lista
+        #: de sensores) por central: ver is_device_online.
+        self.ultimo_mensaje: Dict[str, float] = {}
 
         # Timestamp del último evento de armado/desarmado por dispositivo
         # Usado para evitar que telemetría vieja sobrescriba el estado
@@ -172,6 +175,14 @@ class MqttHandler:
             payload = msg.payload.decode('utf-8')
 
             logger.debug(f"Mensaje recibido: {topic}")
+
+            if topic.startswith((Topics.EVENTOS, Topics.TELEMETRIA)):
+                try:
+                    visto = str(json.loads(payload).get("deviceId") or "")
+                    if visto:
+                        self.ultimo_mensaje[visto] = time.time()
+                except Exception:
+                    pass
 
             # Determinar tipo de mensaje y procesar
             if topic == Topics.EVENTOS or topic.startswith(Topics.EVENTOS):
@@ -838,25 +849,23 @@ class MqttHandler:
     # Utilidades
     # ========================================
 
-    def is_device_online(self, device_id: str = None, timeout_sec: int = 60) -> bool:
-        """Verifica si el dispositivo esta online (busca por ID completo y truncado)"""
+    def is_device_online(self, device_id: str = None, timeout_sec: int = 150) -> bool:
+        """
+        En linea si mando algo (telemetria, evento, cmd_ack, lista de sensores)
+        hace menos de `timeout_sec` y no llego testamento despues. Busca por ID
+        completo y truncado. La telemetria llega cada 2 min (firmware 23-oct):
+        con solo telemetria y 60 s, la mitad del tiempo una central conectada
+        salia offline y sus ordenes se encolaban hasta 2 min (2-nov).
+        """
         target = device_id or self.device_id
         if not target:
             return False
-
-        # Buscar por ID completo
-        if target in self.last_telemetry_time:
-            elapsed = time.time() - self.last_telemetry_time[target]
-            if elapsed < timeout_sec:
+        ahora = time.time()
+        for t in {target, self.truncate_device_id(target)}:
+            visto = max(self.last_telemetry_time.get(t, 0), self.ultimo_mensaje.get(t, 0))
+            testamento = (self.device_manager.devices_state.get(t) or {}).get("desconectada") or 0
+            if ahora - visto < timeout_sec and visto > testamento:
                 return True
-
-        # Buscar por ID truncado (fallback)
-        truncated = self.truncate_device_id(target)
-        if truncated != target and truncated in self.last_telemetry_time:
-            elapsed = time.time() - self.last_telemetry_time[truncated]
-            if elapsed < timeout_sec:
-                return True
-
         return False
 
     def get_online_devices(self, timeout_sec: int = 90) -> List[str]:
