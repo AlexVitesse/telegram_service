@@ -1171,7 +1171,12 @@ class AlarmBridgeService:
         except asyncio.CancelledError:
             logger.info("Servicio cancelado")
         finally:
-            await self.stop_async()
+            # Con tope: un stop que se cuelga (Telegram, scheduler) no puede dejar
+            # el proceso vivo y conectado al broker.
+            try:
+                await asyncio.wait_for(self.stop_async(), timeout=15)
+            except asyncio.TimeoutError:
+                logger.error("La parada ordenada tardo mas de 15 s; se sale igual")
 
 
 async def main_async():
@@ -1197,13 +1202,20 @@ async def main_async():
 
 def main():
     """Punto de entrada principal"""
+    codigo = 0
     try:
         asyncio.run(main_async())
     except KeyboardInterrupt:
         logger.info("Interrupcion de teclado")
     except Exception as e:
         logger.error(f"Error fatal: {e}")
-        sys.exit(1)
+        codigo = 1
+    # Hilos que no son daemon (MQTT, listener de Firebase) dejaban vivo el
+    # proceso tras salir de aqui: con SIGTERM no moria ni en 20 s, y tras un
+    # "Error fatal" (puerto 8765 ocupado) seguia conectado al broker con el
+    # mismo id que la instancia buena, echandose uno al otro (3-nov).
+    logging.shutdown()
+    os._exit(codigo)
 
 
 if __name__ == "__main__":
