@@ -576,7 +576,7 @@ class AIHandler:
 
     @staticmethod
     def _parse_intent_json(raw: str) -> Optional[Dict[str, Any]]:
-        """
+        r"""
         El JSON de la respuesta, aunque venga rodeado de texto.
 
         Antes esto era `re.search(r"\{.*\}", raw, re.DOTALL)`, y ese `.*` es
