@@ -256,10 +256,15 @@ class DeviceManager:
         Reinicia la cuenta de silencio de todas las centrales. Para cuando el
         VPS vuelve a tener broker: mientras no lo tenia no le llegaba nada de
         nadie, y sin esto a los 90 s las declaraba a todas "sin conexion".
+        Las ya caidas (o sembradas como caidas al arrancar) no: siguen caidas
+        desde cuando eran, y con la hora de ahora `calladas_a_la_vez` las
+        contaba como recien calladas y armaba una caida masiva falsa que
+        retenia ~12 min el aviso de una caida real (2-nov 09:46, y P5 al
+        arrancar el VPS).
         """
         ahora = time.time()
         for data in self.devices_state.values():
-            if data.get("last_telemetry_time", 0):
+            if data.get("last_telemetry_time", 0) and not data.get("offline_notified"):
                 data["last_telemetry_time"] = ahora
 
     #: Dos o mas centrales que se callan en esta ventana = fallo del broker,

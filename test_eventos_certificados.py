@@ -146,6 +146,25 @@ def test_una_central_muerta_hace_horas_no_cuenta():
     assert dm.calladas_a_la_vez() == ["A0_A3_B3_2F_A2"]
 
 
+def test_la_gracia_del_broker_no_revive_a_las_ya_caidas():
+    # 2-nov 09:46: al volver el broker, la gracia les puso la hora de ahora a
+    # centrales caidas hacia dias y salto "Caida masiva: 8 centrales"; el
+    # aviso real de 48_E7 se retuvo ~12 min. P5: lo mismo con las sembradas
+    # al arrancar el VPS (sembrar_caida antes del primer _on_connect).
+    dm = _h().device_manager
+    dm.devices_state.clear()
+    _central_callada(dm, "C8_2E_18_25_CA", 86400)
+    dm.check_offline_devices(timeout_seconds=90)          # caida hace dias
+    dm.sembrar_caida("C8_2E_18_26_60", time.time() - 7 * 86400, False)
+    _central_callada(dm, "48_E7_29_97_36", 30)            # viva
+    dm.dar_gracia_offline()
+    assert dm.calladas_a_la_vez() == []
+    assert dm.caida_desde("C8_2E_18_26_60") < time.time() - 6 * 86400
+    dm.devices_state["48_E7_29_97_36"]["last_telemetry_time"] -= 100
+    assert [d["id"] for d in dm.check_offline_devices(timeout_seconds=90)] == ["48_E7_29_97_36"]
+    assert dm.calladas_a_la_vez() == ["48_E7_29_97_36"]   # sola: no es masiva, se avisa
+
+
 def test_la_retenida_sigue_contando_si_la_caida_dura_mas_que_la_ventana():
     # La del 14-oct duro 18 min, mas que la ventana de 10.
     dm = _h().device_manager
