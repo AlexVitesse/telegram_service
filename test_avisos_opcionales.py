@@ -186,6 +186,19 @@ def test_apagar_lo_mio_no_calla_al_grupo():
     assert fb.quiere_aviso_telegram("-1001", "alarma"), "el grupo quedo silenciado"
 
 
+def test_chat_en_varias_cuentas_manda_el_dueno():
+    """
+    12-nov: el Telegram del dueño estaba también en dos cuentas de prueba con
+    Telegram apagado; salía la primera y la alarma no llegó.
+    """
+    fb = _fb({"ESP32/AA": {"ownerUid": "U1"},
+              "Usuarios/U0/alertas": {"telegram": False},
+              "Usuarios/U1/alertas": {"telegram": True}}, {"U0": "555", "U1": "555"})
+    assert fb.quiere_aviso_telegram("555", "alarma", "AA"), "la cuenta de prueba calló al dueño"
+    assert not fb.quiere_aviso_telegram("555", "alarma"), "sin central: la primera, como antes"
+    assert not fb.quiere_aviso_telegram("555", "alarma", "BB"), "central de otro: la primera"
+
+
 def test_grupo_solo_alarmas_si_el_dueno_lo_pide():
     """20-oct: el grupo se llenaba de armado/desarmado; solo queria intrusiones."""
     fb = _fb({"ESP32/AA": {"ownerUid": "U1"}, "Usuarios/U1/alertas/grupo": False}, {"U1": "555"})

@@ -1409,9 +1409,14 @@ class FirebaseManager:
                 return True
             return bool(device_id) and self._grupo_quiere_todo(device_id)
 
-        uid = self._uid_por_chat_id(chat_id)
-        if not uid:
+        uids = self._uids_por_chat_id(chat_id)
+        if not uids:
             return True
+        # Un Telegram en varias cuentas (12-nov: la del dueño y dos de prueba con
+        # Telegram apagado): la primera callaba las alarmas del dueño. Mandan las
+        # preferencias del dueño de esta central si es una de ellas.
+        dueno = str((self._nodo(device_id) or {}).get("ownerUid") or "") if device_id else ""
+        uid = dueno if dueno in uids else uids[0]
 
         try:
             alertas = self.db.reference(f"Usuarios/{uid}/alertas").get()
