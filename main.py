@@ -23,6 +23,9 @@ import sys
 import time as _time
 from typing import Dict, Any, Optional
 
+import dns_respaldo
+dns_respaldo.activar()  # antes que Firebase/Telegram: si el DNS del router falla, resuelve por DoH
+
 from config import config
 from device_manager import DeviceManager
 from mqtt_handler import MqttHandler
