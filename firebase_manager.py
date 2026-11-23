@@ -1225,8 +1225,10 @@ class FirebaseManager:
             if traspaso:
                 # Lo del dueno anterior fuera, aunque venga vacio: un Telegram
                 # suyo que se quedara seguiria mandando sobre la central.
+                # miembros y Orden (lleva el uid del ultimo miembro que mando):
+                # al nuevo dueno no le queda nada de la familia anterior.
                 cambios.update({"Telegram_ID": telegram_id, "Group_ID": group_id, "Telegram_ID_2": None,
-                                "miembros": None})
+                                "miembros": None, "Orden": None})
             else:
                 if telegram_id:
                     cambios["Telegram_ID"] = telegram_id

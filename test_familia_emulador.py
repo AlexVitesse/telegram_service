@@ -342,6 +342,67 @@ def e22_cuenta_sin_nodo_de_usuario():
     assert db.reference(f"Miembros/{MAC}/{D}/nombre").get() == "Sin nombre"
 
 
+def e23_un_miembro_da_de_alta_la_central_de_la_familia_por_ble():
+    """Resetea la central del dueño y la configura con su cuenta: con la central
+    en la mano se la queda (decisión del plan). El dueño y los demás miembros la pierden."""
+    _unir(B)
+    _unir(C)
+    assert _pedir(B, "GET", f"ESP32/{MAC}")                   # la app ve ownerUid ajeno → reclamar
+    (r,), fcm = _api([(B, "/equipos/reclamar", {"mac": MAC, "nombre": "Mía"})])
+    assert r == (200, {"ok": True, "traspaso": True}), r
+    nodo = db.reference(f"ESP32/{MAC}").get()
+    assert nodo["ownerUid"] == B and "miembros" not in nodo, nodo
+    assert not db.reference(f"Miembros/{MAC}").get()
+    assert not _pedir(A, "GET", f"ESP32/{MAC}") and not _pedir(C, "GET", f"ESP32/{MAC}")
+    assert db.reference(f"Usuarios/{B}/Dispositivos").get() == [MAC]
+    assert {c.args[0] for c in fcm.send_to_user.call_args_list} == {A, C}, "no se avisó al dueño y a Carla"
+
+
+def e24_un_miembro_da_de_alta_una_central_nueva_suya():
+    """Sigue siendo miembro de la de la familia y además es dueño de la suya."""
+    _unir(B)
+    nueva = "11_22_33_44_55"           # claves de 5 bloques, como las da la central
+    assert _pedir(B, "GET", f"ESP32/{nueva}")                 # no existe: la crea con su ownerUid
+    assert _pedir(B, "PUT", f"ESP32/{nueva}", {"Nombre": "Oficina", "ownerUid": B, "Answer": False})
+    assert _pedir(B, "PUT", f"Usuarios/{B}/Dispositivos", [MAC, nueva])
+    assert db.reference(f"ESP32/{MAC}/miembros/{B}").get() == {"rol": "familia"}
+    assert not _pedir(A, "GET", f"ESP32/{nueva}"), "el dueño de la familia ve la central de Beto"
+    (r,), _ = _api([(B, "/equipos/invitar", {"mac": MAC})])  # no puede invitar a la de Ana
+    assert r[0] == 403, r
+    (r,), _ = _api([(B, "/equipos/invitar", {"mac": nueva})])   # pero sí a la suya
+    assert r[0] == 200, r
+
+
+def e25_la_vendo_o_la_regalo_con_familia_y_olvido_borrarla():
+    """Ana la vende con Beto de familia y un código de WhatsApp pendiente. Dani
+    (ni familia ni plan) la resetea y la configura: se la queda, y no le llega
+    nada de Ana ni de su familia; a ellos se les corta todo."""
+    _unir(B)
+    db.reference(f"Usuarios/{B}/telegram_id").set("222")
+    _orden(B, "arm")                                          # deja su uid en Orden
+    assert _esperar(lambda: _enviados(Command.ARM.value))
+    pendiente = _invitar(remoto=True)
+    assert not _pedir(D, "GET", f"ESP32/{MAC}")               # Dani no la puede leer → reclamar
+    (r,), fcm = _api([(D, "/equipos/reclamar", {"mac": MAC, "nombre": "Casa de Dani", "telegram_id": "444"})])
+    assert r == (200, {"ok": True, "traspaso": True}), r
+    nodo = db.reference(f"ESP32/{MAC}").get()
+    assert nodo["ownerUid"] == D and nodo["Telegram_ID"] == "444", nodo
+    # A Dani no le queda nada de Ana ni de su familia.
+    sobra = {k: nodo.get(k) for k in ("miembros", "Telegram_ID_2", "Orden") if nodo.get(k)}
+    assert not sobra, f"a Dani le quedaron datos de la familia anterior: {sobra}"
+    assert not _pedir(D, "GET", f"Miembros/{MAC}") or not db.reference(f"Miembros/{MAC}").get()
+    assert not _pedir(D, "GET", f"Horarios/{A}/devices/{MAC}")
+    # A Ana y a Beto se les corta todo.
+    for uid in (A, B):
+        assert not _pedir(uid, "GET", f"ESP32/{MAC}"), f"{uid} sigue leyendo la central vendida"
+        assert not _orden(uid, "disarm"), f"{uid} sigue mandando a la central vendida"
+        assert MAC not in (db.reference(f"Usuarios/{uid}/Dispositivos").get() or [])
+    assert not db.reference(f"Horarios/{A}/devices/{MAC}").get(), "el horario de Ana seguiría armando la casa de Dani"
+    (u,), _ = _api([(C, "/equipos/unirse", {"codigo": pendiente})])
+    assert u[0] == 404, "el código de WhatsApp de Ana sigue metiendo gente a la central de Dani"
+    assert {c.args[0] for c in fcm.send_to_user.call_args_list} >= {A, B}, "no se avisó a Ana y a Beto"
+
+
 # --------------------------------------------------------------------------
 
 def main() -> int:
