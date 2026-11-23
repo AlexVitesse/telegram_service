@@ -290,6 +290,115 @@ def test_ocupado_tampoco_cae_a_la_reserva():
 
 
 # --------------------------------------------------------------------------
+# Ultima reserva: el Ollama local del VPS (23-nov)
+# --------------------------------------------------------------------------
+
+def _cadena(h, fallos):
+    """Sustituye los backends; `fallos` dice cual falla y con que. Devuelve las llamadas."""
+    llamadas = []
+
+    async def groq(*a, **k):
+        llamadas.append("groq")
+        if "groq" in fallos:
+            raise fallos["groq"]
+        return "groq"
+
+    async def ollama(*a, local=False, **k):
+        quien = "local" if local else "ollama"
+        llamadas.append(quien)
+        if quien in fallos:
+            raise fallos[quien]
+        return quien
+
+    h._call_groq, h._call_ollama = groq, ollama
+    return llamadas
+
+
+def test_si_fallan_la_nube_y_groq_contesta_el_ollama_local():
+    h = _handler(groq_api_key="x", ollama_local_url="http://127.0.0.1:11434")
+    caida = httpx.HTTPStatusError("401", request=None, response=SimpleNamespace(status_code=401))
+    llamadas = _cadena(h, {"ollama": caida, "groq": RuntimeError("404 model_not_found")})
+    assert asyncio.run(h._call_llm("s", "u")) == "local"
+    assert llamadas == ["ollama", "groq", "local"], llamadas
+
+
+def test_sin_ollama_local_configurado_la_cadena_es_la_de_siempre():
+    h = _handler(groq_api_key="x")
+    llamadas = _cadena(h, {"ollama": RuntimeError("x"), "groq": RuntimeError("y")})
+    try:
+        asyncio.run(h._call_llm("s", "u"))
+        raise AssertionError("sin reserva local el ultimo error tenia que salir")
+    except RuntimeError:
+        pass
+    assert llamadas == ["ollama", "groq"], llamadas
+
+
+def test_un_timeout_tampoco_salta_al_ollama_local():
+    h = _handler(groq_api_key="x", ollama_local_url="http://127.0.0.1:11434")
+    llamadas = _cadena(h, {"ollama": asyncio.TimeoutError()})
+    try:
+        asyncio.run(h._call_llm("s", "u"))
+        raise AssertionError("el timeout tenia que salir hacia arriba")
+    except asyncio.TimeoutError:
+        pass
+    assert llamadas == ["ollama"], llamadas
+
+
+def test_el_local_igual_al_principal_no_se_duplica():
+    h = _handler(ollama_base_url="http://localhost:11434/", ollama_local_url="http://localhost:11434")
+    assert h._ollama_local_url == ""
+
+
+def test_intent_con_json_invalido_se_reintenta_hasta_el_local():
+    h = _handler(groq_api_key="x", ollama_local_url="http://127.0.0.1:11434")
+    bueno = '{"intent": "arm", "device": "all", "confidence": 0.9, "reply": "Armando."}'
+    llamadas = []
+
+    async def ollama(*a, local=False, **k):
+        llamadas.append("local" if local else "ollama")
+        return bueno if local else "no es json"
+
+    async def groq(*a, **k):
+        llamadas.append("groq")
+        raise RuntimeError("404 model_not_found")
+
+    h._call_groq, h._call_ollama = groq, ollama
+    r = asyncio.run(h.parse_intent("arma la alarma", [{"id": "X", "name": "Casa"}]))
+    assert r and r["intent"] == "arm", r
+    assert llamadas == ["ollama", "groq", "local"], llamadas
+
+
+def test_el_local_va_a_su_url_y_sin_la_llave_de_la_nube():
+    h = _handler(ollama_api_key="clave", ollama_local_url="http://127.0.0.1:11434")
+    creado, enviado = {}, {}
+
+    class _Cliente:
+        def __init__(self, **kw):
+            creado.update(kw)
+
+        async def post(self, url, json):
+            enviado.update(url=url, modelo=json["model"])
+            return _RespuestaOllama()
+
+    real = ai_handler.httpx.AsyncClient
+    ai_handler.httpx.AsyncClient = _Cliente
+    try:
+        asyncio.run(h._call_ollama("s", "u", local=True))
+    finally:
+        ai_handler.httpx.AsyncClient = real
+    assert enviado == {"url": "http://127.0.0.1:11434/api/chat", "modelo": "gpt-oss:20b"}, enviado
+    assert "headers" not in creado, "la llave de Ollama Cloud viaja al Ollama local"
+
+
+def test_el_respaldo_de_groq_no_es_el_modelo_retirado():
+    """llama-3.1-8b-instant da 404 model_not_found en Groq desde nov-2026."""
+    fuente = inspect.getsource(config)
+    m = re.search(r'_get_env\(\s*"GROQ_MODEL"\s*,\s*"([^"]*)"', fuente)
+    assert m and m.group(1) != "llama-3.1-8b-instant", m and m.group(1)
+    assert inspect.signature(ai_handler.AIHandler.__init__).parameters["groq_model"].default == m.group(1)
+
+
+# --------------------------------------------------------------------------
 # Ollama Cloud
 # --------------------------------------------------------------------------
 

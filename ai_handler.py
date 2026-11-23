@@ -268,15 +268,22 @@ class AIHandler:
         ollama_model: str = "gpt-oss:20b",
         ollama_api_key: str = "",
         groq_api_key: str = "",
-        groq_model: str = "llama-3.1-8b-instant",
+        groq_model: str = "openai/gpt-oss-20b",
         intent_model: str = "",
         chat_model: str = "",
         timeout_sec: float = 20.0,
         max_concurrent: int = 2,
         max_cola: int = 8,
+        ollama_local_url: str = "",
+        ollama_local_model: str = "gpt-oss:20b",
     ):
         self._backend = llm_backend
         self._ollama_base_url = ollama_base_url.rstrip("/")
+        # Ultima reserva: Ollama del VPS. Si es el mismo que el principal, sobra.
+        local = ollama_local_url.rstrip("/")
+        self._ollama_local_url = "" if local == self._ollama_base_url else local
+        self._ollama_local_model = ollama_local_model
+        self._http_local: Optional[httpx.AsyncClient] = None
         self._ollama_model = ollama_model
         self._ollama_api_key = ollama_api_key
         self._groq_api_key = groq_api_key
@@ -328,7 +335,8 @@ class AIHandler:
             self._backend,
             self._intent_model,
             self._chat_model,
-            " (fallback Groq)" if self._groq_client else "",
+            (" (fallback Groq)" if self._groq_client else "")
+            + (f" (ultima reserva: Ollama local {self._ollama_local_model})" if self._ollama_local_url else ""),
         )
 
     async def _ensure_http_client(self):
@@ -377,10 +385,17 @@ class AIHandler:
     # LLM calls
     # ------------------------------------------------------------------
 
-    async def _call_ollama(self, system_prompt: str, user_prompt: str, model: str = "", temperature: float = 0.1, max_tokens: int = 512) -> str:
-        """Llama a Ollama REST API."""
-        await self._ensure_http_client()
-        effective_model = model or self._ollama_model
+    async def _call_ollama(self, system_prompt: str, user_prompt: str, model: str = "", temperature: float = 0.1, max_tokens: int = 512, local: bool = False) -> str:
+        """Llama a Ollama REST API. Con `local`, al Ollama del VPS (sin la llave de la nube)."""
+        if local:
+            if self._http_local is None:
+                self._http_local = httpx.AsyncClient(timeout=self._timeout_sec)
+            cliente, base = self._http_local, self._ollama_local_url
+            effective_model = model or self._ollama_local_model
+        else:
+            await self._ensure_http_client()
+            cliente, base = self._http_client, self._ollama_base_url
+            effective_model = model or self._ollama_model
         payload = {
             "model": effective_model,
             "messages": [
@@ -399,8 +414,8 @@ class AIHandler:
         if "gpt-oss" in effective_model:
             payload["think"] = "low"
         async with self._turno():
-            response = await self._http_client.post(
-                f"{self._ollama_base_url}/api/chat",
+            response = await cliente.post(
+                f"{base}/api/chat",
                 json=payload,
             )
         response.raise_for_status()
@@ -449,30 +464,31 @@ class AIHandler:
 
     async def _call_llm(self, system_prompt: str, user_prompt: str, model: str = "", temperature: float = 0.1, max_tokens: int = 512) -> str:
         """
-        Llama al LLM configurado. Si falla el principal, intenta el fallback.
-        El model se pasa al backend principal. El fallback usa su modelo default.
+        Llama al LLM configurado y, si falla, a las reservas en orden. El model
+        se pasa al principal; cada reserva usa su modelo default.
+
+        Cadena: principal → el otro backend (Groq u Ollama) → Ollama local del
+        VPS (si OLLAMA_LOCAL_URL). Un timeout o la pila llena cortan la cadena
+        (ver `_no_merece_reserva`): no se cobra dos veces el presupuesto.
         """
+        a = (system_prompt, user_prompt)
         if self._backend == "ollama":
-            try:
-                return await self._call_ollama(system_prompt, user_prompt, model, temperature, max_tokens)
-            except Exception as e:
-                if _no_merece_reserva(e):
-                    raise
-                logger.warning("🤖 Ollama falló (%s), intentando fallback Groq...", e)
-                if self._groq_client:
-                    # Fallback: usar modelo default de Groq, no el de Ollama
-                    return await self._call_groq(system_prompt, user_prompt, "", temperature, max_tokens)
-                raise
+            cadena = [("Ollama", lambda: self._call_ollama(*a, model, temperature, max_tokens))]
+            if self._groq_client:
+                cadena.append(("Groq", lambda: self._call_groq(*a, "", temperature, max_tokens)))
         else:
-            # Backend groq
+            cadena = [("Groq", lambda: self._call_groq(*a, model, temperature, max_tokens)),
+                      ("Ollama", lambda: self._call_ollama(*a, "", temperature, max_tokens))]
+        if self._ollama_local_url:
+            cadena.append(("Ollama local", lambda: self._call_ollama(*a, "", temperature, max_tokens, local=True)))
+
+        for i, (nombre, llamar) in enumerate(cadena):
             try:
-                return await self._call_groq(system_prompt, user_prompt, model, temperature, max_tokens)
+                return await llamar()
             except Exception as e:
-                if _no_merece_reserva(e):
+                if _no_merece_reserva(e) or i == len(cadena) - 1:
                     raise
-                logger.warning("🤖 Groq falló (%s), intentando fallback Ollama...", e)
-                # Fallback: usar modelo default de Ollama, no el de Groq
-                return await self._call_ollama(system_prompt, user_prompt, "", temperature, max_tokens)
+                logger.warning("🤖 %s falló (%s), intentando %s...", nombre, e, cadena[i + 1][0])
 
     # ------------------------------------------------------------------
     # Intent parsing
@@ -521,22 +537,28 @@ class AIHandler:
             logger.debug("🤖 Respuesta LLM (intent) model=%s: %s", self._intent_model, raw)
 
             result = self._parse_intent_json(raw)
-            if result is None:
-                # Fallback a Groq si es posible y aún no hemos fallado a Groq
-                if self._backend == "ollama" and self._groq_client:
-                    logger.warning(
-                        "🤖 Intent JSON invalido de Ollama (raw=%r). Reintentando con Groq...",
-                        raw[:500],
-                    )
-                    raw = await self._call_groq(
-                        system_prompt=INTENT_SYSTEM_PROMPT,
-                        user_prompt=user_prompt,
-                        model="",
-                        temperature=0.1,
-                        max_tokens=TOKENS_INTENT,
-                    )
-                    logger.debug("🤖 Respuesta LLM (intent/groq-fallback): %s", raw)
-                    result = self._parse_intent_json(raw)
+            # JSON invalido del principal: se reintenta con las reservas
+            # (Groq si el principal es Ollama, y luego el Ollama local).
+            reservas = []
+            if self._backend == "ollama" and self._groq_client:
+                reservas.append(("Groq", lambda: self._call_groq(
+                    INTENT_SYSTEM_PROMPT, user_prompt, "", 0.1, TOKENS_INTENT)))
+            if self._ollama_local_url:
+                reservas.append(("Ollama local", lambda: self._call_ollama(
+                    INTENT_SYSTEM_PROMPT, user_prompt, "", 0.1, TOKENS_INTENT, local=True)))
+            for nombre, llamar in reservas:
+                if result is not None:
+                    break
+                logger.warning("🤖 Intent JSON invalido (raw=%r). Reintentando con %s...", raw[:500], nombre)
+                try:
+                    raw = await llamar()
+                except Exception as e:
+                    if _no_merece_reserva(e):
+                        raise
+                    logger.warning("🤖 %s falló en el reintento del intent: %s", nombre, e)
+                    continue
+                logger.debug("🤖 Respuesta LLM (intent/%s): %s", nombre, raw)
+                result = self._parse_intent_json(raw)
 
             if result is None:
                 logger.warning("🤖 Respuesta LLM no es JSON valido: %r", raw[:500])
@@ -734,3 +756,6 @@ class AIHandler:
             await self._http_client.aclose()
             self._http_client = None
             logger.info("🤖 AI Handler HTTP client cerrado")
+        if self._http_local:
+            await self._http_local.aclose()
+            self._http_local = None

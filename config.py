@@ -93,7 +93,14 @@ class AIConfig:
     chat_model: str = _get_env("CHAT_MODEL", "")
     # Groq (fallback opcional)
     groq_api_key: str = _get_env("GROQ_API_KEY", "")
-    groq_model: str = _get_env("GROQ_MODEL", "llama-3.1-8b-instant")
+    # El default era "llama-3.1-8b-instant", que Groq retiro (404 model_not_found,
+    # visto el 23-nov): con el, la reserva de Groq estaba muerta sin avisar.
+    groq_model: str = _get_env("GROQ_MODEL", "openai/gpt-oss-20b")
+    # Ultima reserva: el Ollama del propio VPS (tiene gpt-oss:20b y GPU). Vacio =
+    # desactivada. Se usa solo si fallan el principal y Groq por un error que no
+    # sea timeout ni pila llena (esos no se cobran dos veces).
+    ollama_local_url: str = _get_env("OLLAMA_LOCAL_URL", "")
+    ollama_local_model: str = _get_env("OLLAMA_LOCAL_MODEL", "gpt-oss:20b")
     # Cuanto se espera a UNA llamada al LLM. 60 s era el default de httpx y solo
     # cubria Ollama; Groq iba sin techo. Para un chat, 20 s ya es mucho: por
     # encima de eso el usuario asume que se rompio. Subelo si vuestro Ollama va

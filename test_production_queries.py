@@ -298,38 +298,42 @@ async def run_case(ai: AIHandler, kb: KnowledgeBase, case: dict) -> tuple[bool, 
 
 
 async def main():
-    backend = "groq"
+    # La MISMA configuracion que produccion (config.ai, como telegram_bot.py).
+    # Antes el backend iba fijo en "groq", el modelo de intencion por defecto era
+    # "llama-3.1-8b-instant" (retirado por Groq) y no se pasaba la llave de
+    # Ollama Cloud: el 23-nov dio 0/14 con produccion funcionando bien.
+    from config import config
+    c = config.ai
+    backend = c.llm_backend
     if len(sys.argv) > 1 and sys.argv[1] == "--backend":
-        backend = sys.argv[2] if len(sys.argv) > 2 else "groq"
-
-    if backend == "groq" and not GROQ_API_KEY:
-        print(f"{RED}Error: GROQ_API_KEY no configurada en .env{RESET}")
-        sys.exit(1)
-
-    intent_model = os.getenv("INTENT_MODEL", "llama-3.1-8b-instant")
-    chat_model = os.getenv("CHAT_MODEL", "openai/gpt-oss-20b")
+        backend = sys.argv[2] if len(sys.argv) > 2 else backend
 
     print(f"{BOLD}Backend:      {backend}{RESET}")
-    print(f"Intent model: {intent_model}")
-    print(f"Chat model:   {chat_model}")
-    print(f"Embeddings:   {OLLAMA_EMBED_MODEL} (Ollama @ {OLLAMA_URL})")
+    print(f"Intent model: {c.intent_model or '(el del backend)'}")
+    print(f"Chat model:   {c.chat_model or '(el del backend)'}")
+    print(f"Reserva local: {c.ollama_local_url or '(no)'}")
+    print(f"Embeddings:   {'si' if c.use_embeddings else 'no (TF-IDF)'}")
 
     ai = AIHandler(
         llm_backend=backend,
-        ollama_base_url=OLLAMA_URL,
-        ollama_model=OLLAMA_MODEL,
-        groq_api_key=GROQ_API_KEY,
-        groq_model=GROQ_MODEL,
-        intent_model=intent_model,
-        chat_model=chat_model,
+        ollama_base_url=c.ollama_base_url,
+        ollama_model=c.ollama_model,
+        ollama_api_key=c.ollama_api_key,
+        groq_api_key=c.groq_api_key,
+        groq_model=c.groq_model,
+        intent_model=c.intent_model,
+        chat_model=c.chat_model,
+        timeout_sec=c.llm_timeout_sec,
+        ollama_local_url=c.ollama_local_url,
+        ollama_local_model=c.ollama_local_model,
     )
 
     kb_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "knowledge_base")
     kb = KnowledgeBase(
         kb_dir,
-        ollama_base_url=OLLAMA_URL,
-        embed_model=OLLAMA_EMBED_MODEL,
-        use_embeddings=True,
+        ollama_base_url=c.ollama_base_url,
+        embed_model=c.ollama_embed_model,
+        use_embeddings=c.use_embeddings,
     )
     count = kb.load()
     if count == 0:

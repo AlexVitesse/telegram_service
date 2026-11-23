@@ -349,6 +349,8 @@ class TelegramBot:
                 timeout_sec=config.ai.llm_timeout_sec,
                 max_concurrent=config.ai.llm_max_concurrent,
                 max_cola=config.ai.llm_max_cola,
+                ollama_local_url=config.ai.ollama_local_url,
+                ollama_local_model=config.ai.ollama_local_model,
             )
             # Knowledge Base para RAG
             if config.ai.rag_enabled:
