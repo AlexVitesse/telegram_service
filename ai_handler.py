@@ -335,7 +335,9 @@ class AIHandler:
             self._backend,
             self._intent_model,
             self._chat_model,
-            (" (fallback Groq)" if self._groq_client else "")
+            (" (fallback Groq)" if self._groq_client and self._backend == "ollama"
+             else f" (fallback Ollama {self._ollama_base_url} {self._ollama_model})" if self._backend != "ollama"
+             else "")
             + (f" (ultima reserva: Ollama local {self._ollama_local_model})" if self._ollama_local_url else ""),
         )
 
