@@ -30,6 +30,8 @@ class NotificationType(Enum):
     DOOR_OPEN = "door_open"
     DEVICE_TRANSFERRED = "device_transferred"
     SENSOR_PENDING = "sensor_pending"
+    ACCESS_CHANGED = "access_changed"   # alguien se unio / ya no tienes acceso (#124)
+    MIEMBRO_ACCION = "miembro_accion"   # un miembro armo, desarmo o pidio panico (#124 C2)
 
 
 @dataclass
@@ -77,7 +79,10 @@ class FCMHandler:
     """Manejador de Firebase Cloud Messaging para notificaciones push"""
 
     #: Avisos que nunca frena el rate limit: son el motivo de tener una alarma.
-    NUNCA_SE_DESCARTAN = {NotificationType.ALARM_TRIGGERED, NotificationType.BENGALA_ACTIVATED}
+    #: MIEMBRO_ACCION tampoco: el dueno tiene que enterarse siempre de quien
+    #: armo o desarmo su casa (#124 C2). Va con send_to_user, sin preferencias.
+    NUNCA_SE_DESCARTAN = {NotificationType.ALARM_TRIGGERED, NotificationType.BENGALA_ACTIVATED,
+                          NotificationType.MIEMBRO_ACCION}
 
     def __init__(self, firebase_manager: 'FirebaseManager'):
         self.firebase_manager = firebase_manager
@@ -245,13 +250,12 @@ class FCMHandler:
 
         return sent_count
 
-    def send_to_device_users(self, device_id: str, notification: PushNotification) -> int:
+    def send_to_device_users(self, device_id: str, notification: PushNotification,
+                             solo_dueno: bool = False) -> int:
         """
         Envía notificación a todos los usuarios autorizados de un dispositivo.
-
-        Args:
-            device_id: ID del dispositivo ESP32
-            notification: Objeto PushNotification
+        Con `solo_dueno`, solo al `ownerUid` (p. ej. sensor pendiente: un
+        miembro no puede autorizarlo).
 
         Returns:
             Total de notificaciones enviadas
@@ -261,6 +265,10 @@ class FCMHandler:
 
         # Obtener usuarios que tienen este dispositivo
         user_ids = self._get_users_for_device(device_id)
+        if solo_dueno:
+            nodo = self._nodo_de(device_id)
+            dueno = str((nodo or {}).get("ownerUid") or "")
+            user_ids = [u for u in user_ids if u == dueno] if dueno else user_ids
         if not user_ids:
             logger.debug(f"No hay usuarios asociados al dispositivo {device_id}")
             return 0
@@ -609,10 +617,41 @@ class FCMHandler:
             logger.error(f"Error obteniendo tokens de usuario {user_id}: {e}")
             return []
 
+    def _nodo_de(self, device_id: str) -> Optional[dict]:
+        """`ESP32/{clave}` de la central (resuelve MAC con `:` o legacy). None si no hay."""
+        fm = self.firebase_manager
+        clave = fm.resolver_equipo(device_id)
+        nodo = fm._nodo(clave) if isinstance(clave, str) else None
+        return nodo if isinstance(nodo, dict) else None
+
     def _get_users_for_device(self, device_id: str) -> List[str]:
-        """Obtiene los user_ids que tienen acceso a un dispositivo"""
+        """
+        Los user_ids que reciben los avisos de una central.
+
+        Con `ownerUid` (#124 C5): `{dueno} ∪ miembros` que ADEMAS la tengan en su
+        `Dispositivos`. La lista la escribe el cliente, asi que sola no autoriza:
+        antes bastaba con saber una MAC para recibir sus avisos. Sin `ownerUid`
+        (nodos sin migrar), como antes.
+        """
         if not self.firebase_manager.is_available():
             return []
+
+        nodo = self._nodo_de(device_id)
+        dueno = str((nodo or {}).get("ownerUid") or "")
+        if dueno:
+            try:
+                from firebase_manager import lista_macs
+                fm = self.firebase_manager
+                clave = fm.resolver_equipo(device_id)
+                miembros = nodo.get("miembros") if isinstance(nodo.get("miembros"), dict) else {}
+                return [
+                    uid for uid in [dueno, *sorted(set(miembros) - {dueno})]
+                    if any(fm._misma_mac(m, clave) for m in
+                           lista_macs(fm.db.reference(f"Usuarios/{uid}/Dispositivos").get()))
+                ]
+            except Exception as e:
+                logger.error(f"Error obteniendo usuarios del dispositivo {device_id}: {e}")
+                return []
 
         try:
             # Buscar en Usuarios todos los que tengan este dispositivo

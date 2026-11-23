@@ -162,6 +162,31 @@ La MAC se valida con `_MAC_VALIDA` (`AA_BB_CC_DD_EE`, y se acepta un carácter
 extra de las claves antiguas de 16 caracteres), porque acaba en una ruta de la
 base de datos.
 
+Si quien borra es **miembro de familia** (#124), sale de la central: se le quita
+la membresía, su nombre, la MAC de su lista y, si era él, el Usuario 2 de
+Telegram, y la central rota la llave local. Responde `"quitado": true`.
+
+### Familia (#124): `invitar`, `unirse`, `miembros/quitar`
+
+Las tres con token de Firebase y sin `_esta_habilitado` (quien se une todavía
+no tiene equipos). Plan: `docs/PLAN_FAMILIA_PARTICIPANTES_2026-11-18.md`.
+
+| Ruta | Cuerpo | Respuesta |
+|---|---|---|
+| `POST /equipos/invitar` | `{"mac", "remoto": bool}` | `200 {"ok", "codigo", "expira"}`. Solo el dueño (`403`). Con 10 miembros, `409`. El código vence a los 15 min (QR) o a las 24 h (`remoto`, para WhatsApp); generar otro anula el anterior |
+| `POST /equipos/unirse` | `{"codigo"}` (mayúsculas o minúsculas, con o sin guion) | `200 {"ok", "mac", "nombre"}`. `404` igual para formato raro, inexistente, vencido o usado. `409` si ya es el dueño o hay 10. `429` tras 5 fallos en 15 min, o con 30 intentos por minuto en total. Push `access_changed` al dueño |
+| `POST /equipos/miembros/quitar` | `{"mac", "uid"}` | `200 {"ok"}`. Solo el dueño (`403`); `404` si ya no era miembro. Lo mismo que «salir» y push `access_changed` al quitado |
+
+Escribe `ESP32/{mac}/miembros/{uid} = {rol: "familia"}` y `Miembros/{mac}/{uid}`
+(nombre, alta, invitadoPor) en un solo `update` multipath; la lista
+`Dispositivos`, después y en transacción. El código queda marcado con
+`usadoPor` hasta terminar, así que si la lista falla, el mismo usuario puede
+reintentar con el mismo código.
+
+Las órdenes del miembro no pasan por la API: escribe `ESP32/{mac}/Orden` y el
+listener manda el comando, sincroniza `Answer` y avisa al dueño (`miembro_accion`,
+obligatorio, con el nombre).
+
 ### `GET /salud`
 
 Sin autenticacion. `{"ok": true, "kb": true, "ia": true}`. Si `kb` o `ia` salen

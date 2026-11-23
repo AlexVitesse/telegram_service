@@ -106,6 +106,11 @@ class FirebaseManager:
         # Lo pone main.py: la app pidio eliminar o renombrar un sensor
         # (`Sensors/{id}/borrar = true` / `Sensors/{id}/renombrar = "texto"`).
         self.on_sensor_orden: Optional[Callable[[str, str, str, Optional[str]], None]] = None
+        # Lo pone main.py: un miembro armo, desarmo o pidio panico (#124 C2).
+        # (mac, dueno, nombre_miembro, accion, ts_ms, local). Aviso obligatorio.
+        self.on_orden_miembro: Optional[Callable[[str, str, str, str, int, bool], None]] = None
+        # mac -> ts de la ultima Orden atendida (dedup; ver _orden_de_miembro).
+        self._ultima_orden: Dict[str, int] = {}
 
         # Listener monitoring
         self._last_listener_event_time: float = 0
@@ -433,6 +438,14 @@ class FirebaseManager:
                     except Exception as e:  # el aviso nunca debe tumbar el listener
                         logger.error(f"[{device_id}] No se pudo avisar del SOS al grupo: {e}")
 
+            elif command_key == 'Orden' and len(parts) == 3:
+                # Orden de un miembro de familia (#124 C1): autor y accion en el
+                # mismo evento. Las reglas ya exigen `por == auth.uid`.
+                try:
+                    self._orden_de_miembro(device_id, event.data)
+                except Exception as e:  # nunca tumbar el listener
+                    logger.error(f"[{device_id}] No se pudo procesar la Orden {event.data}: {e}")
+
             elif command_key == 'Pendientes':
                 # /{mac}/Pendientes/{id}/autorizar = true, o el pendiente entero
                 # con autorizar dentro. Las escrituras del propio VPS (alta y
@@ -536,6 +549,46 @@ class FirebaseManager:
                         self._last_known_values[device_id]['BengalaHab'] = habilitada
                     else:
                         logger.debug(f"BengalaHab sin cambio para {device_id}: {habilitada}")
+
+    _ACCIONES_ORDEN = {"arm": Command.ARM, "disarm": Command.DISARM, "panic": Command.TRIGGER_ALARM}
+
+    def _orden_de_miembro(self, mac: str, orden) -> None:
+        """
+        `ESP32/{mac}/Orden = {accion, por, ts, local?}` (#124 C1/C2).
+
+        Manda el comando por MQTT (salvo `local`: ya salio por la LAN),
+        sincroniza `Answer` como patch del nodo -que no manda ordenes- y avisa
+        al dueno con el nombre del miembro. Deduplica por `ts`: el listener
+        reconecta y RTDB reentrega escrituras guardadas sin red.
+        """
+        if not isinstance(orden, dict):
+            return
+        accion, por, ts = orden.get("accion"), str(orden.get("por") or ""), orden.get("ts")
+        local = orden.get("local") is True
+        if accion not in self._ACCIONES_ORDEN or not por or not isinstance(ts, (int, float)):
+            return
+        nodo = self._nodo(mac) or {}
+        dueno = str(nodo.get("ownerUid") or "")
+        miembros = nodo.get("miembros") if isinstance(nodo.get("miembros"), dict) else {}
+        if por != dueno and por not in miembros:
+            logger.warning(f"[{mac}] Orden de {por}, que no es dueno ni miembro: se ignora")
+            return
+        if ts <= self._ultima_orden.get(mac, 0):
+            return
+        self._ultima_orden[mac] = ts
+
+        logger.info(f"Orden de miembro: {accion.upper()} para {mac} por {por} (local={local})")
+        if not local and self.mqtt_handler:
+            self.mqtt_handler.send_command(cmd=self._ACCIONES_ORDEN[accion].value, device_id=mac)
+        if accion in ("arm", "disarm"):
+            self.db.reference(f"ESP32/{mac}").update({"Answer": accion == "arm"})
+        elif self.on_sos:
+            self.on_sos(mac)   # aviso al grupo, tambien si la sirena salio por la LAN
+
+        if por != dueno and dueno and self.on_orden_miembro:
+            datos = self.db.reference(f"Miembros/{mac}/{por}").get() or {}
+            nombre = str(datos.get("nombre") or "") if isinstance(datos, dict) else ""
+            self.on_orden_miembro(mac, dueno, nombre or "Un miembro", accion, int(ts), local)
 
     @staticmethod
     def _parse_schedule_time(time_str: str) -> tuple:
@@ -1092,12 +1145,11 @@ class FirebaseManager:
         for uid, datos in usuarios.items():
             if uid == excepto or not isinstance(datos, dict):
                 continue
-            macs = lista_macs(datos.get("Dispositivos"))
-            quedan = [m for m in macs if not self._misma_mac(m, mac)]
-            if len(quedan) == len(macs):
+            if not any(self._misma_mac(m, mac) for m in lista_macs(datos.get("Dispositivos"))):
                 continue
-            ref = self.db.reference(f"Usuarios/{uid}/Dispositivos")
-            ref.set(quedan) if quedan else ref.delete()
+            # En transaccion (#124 C4): la app escribe esa lista a la vez.
+            if not self._quitar_de_mi_lista(uid, mac):
+                continue
             tocados.append(uid)
             logger.info(f"{mac} quitado de la lista de {uid}")
         return tocados
@@ -1140,7 +1192,10 @@ class FirebaseManager:
         nodo = nodo if isinstance(nodo, dict) else None
         dueno = str((nodo or {}).get("ownerUid") or "")
 
-        otros = self._quitar_de_listas(mac, excepto=uid)
+        # Re-reclamo del propio dueno: no es traspaso y las listas de sus
+        # miembros se quedan (#124 C3). Antes de mirar listas: un miembro con la
+        # MAC en la suya contaria como "otro" y borraria Telegram y horarios.
+        otros = [] if dueno == uid else self._quitar_de_listas(mac, excepto=uid)
         anteriores = sorted(set(otros) | ({dueno} if dueno and dueno != uid else set()))
         traspaso = bool(anteriores)
 
@@ -1159,7 +1214,8 @@ class FirebaseManager:
             if traspaso:
                 # Lo del dueno anterior fuera, aunque venga vacio: un Telegram
                 # suyo que se quedara seguiria mandando sobre la central.
-                cambios.update({"Telegram_ID": telegram_id, "Group_ID": group_id, "Telegram_ID_2": None})
+                cambios.update({"Telegram_ID": telegram_id, "Group_ID": group_id, "Telegram_ID_2": None,
+                                "miembros": None})
             else:
                 if telegram_id:
                     cambios["Telegram_ID"] = telegram_id
@@ -1167,14 +1223,13 @@ class FirebaseManager:
                     cambios["Group_ID"] = group_id
             ref.update(cambios)
 
+        if traspaso or nodo is None:
+            self.db.reference(f"Miembros/{mac}").delete()
         if traspaso:
             self._borrar_horarios_de(mac, excepto=uid)
             self._apagar_horario_central(mac)
 
-        lista = self.db.reference(f"Usuarios/{uid}/Dispositivos")
-        macs = lista_macs(lista.get())
-        if not any(self._misma_mac(m, mac) for m in macs):
-            lista.set(macs + [mac])
+        self._agregar_a_mi_lista(uid, mac)
 
         self.invalidate_cache()
         logger.info(f"{mac} reclamado por {uid} (traspaso={traspaso}, anteriores={anteriores})")
@@ -1209,6 +1264,130 @@ class FirebaseManager:
         self.db.reference(f"Usuarios/{uid}/Dispositivos").transaction(quitar)
         return quitada
 
+    def _agregar_a_mi_lista(self, uid: str, mac: str) -> None:
+        """Pone la MAC en `Usuarios/{uid}/Dispositivos` si no esta. En transaccion, idempotente."""
+        def agregar(actual):
+            macs = lista_macs(actual)
+            return actual if any(self._misma_mac(m, mac) for m in macs) else macs + [mac]
+
+        self.db.reference(f"Usuarios/{uid}/Dispositivos").transaction(agregar)
+
+    # ------------------------------------------------------------------
+    # Familia (#124): invitar, unirse, quitar. Plan en
+    # docs/PLAN_FAMILIA_PARTICIPANTES_2026-11-18.md (C3, C4, C7).
+    # ------------------------------------------------------------------
+
+    ALFABETO_CODIGO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"   # sin 0/O, 1/I
+    TOPE_MIEMBROS = 10
+    VIGENCIA_QR = 15 * 60
+    VIGENCIA_REMOTO = 24 * 3600
+
+    @staticmethod
+    def _miembros(nodo) -> Dict[str, Any]:
+        m = (nodo or {}).get("miembros") if isinstance(nodo, dict) else None
+        return m if isinstance(m, dict) else {}
+
+    def crear_invitacion(self, uid: str, mac: str, remoto: bool = False) -> Any:
+        """
+        Codigo de un solo uso para unirse a la central. Solo el dueno. Anula los
+        anteriores de esa central (y limpia los vencidos de todas).
+        Devuelve {"codigo", "expira"} o "no_es_dueno" / "tope".
+        """
+        import secrets
+        with self._lock_propiedad:
+            nodo = self.db.reference(f"ESP32/{mac}").get()
+            if not isinstance(nodo, dict) or str(nodo.get("ownerUid") or "") != uid:
+                return "no_es_dueno"
+            if len(self._miembros(nodo)) >= self.TOPE_MIEMBROS:
+                return "tope"
+            ahora = int(time.time())
+            vivas = self.db.reference("Invitaciones").get() or {}
+            fuera = {f"Invitaciones/{c}": None for c, inv in vivas.items()
+                     if not isinstance(inv, dict) or inv.get("mac") == mac or (inv.get("expira") or 0) < ahora}
+            if fuera:
+                self.db.reference("/").update(fuera)
+            while True:
+                codigo = "".join(secrets.choice(self.ALFABETO_CODIGO) for _ in range(8))
+                if codigo not in vivas:
+                    break
+            expira = ahora + (self.VIGENCIA_REMOTO if remoto else self.VIGENCIA_QR)
+            self.db.reference(f"Invitaciones/{codigo}").set({"mac": mac, "invitadoPor": uid, "expira": expira})
+            logger.info(f"Invitacion para {mac} creada por {uid} (remoto={remoto})")
+            return {"codigo": codigo, "expira": expira}
+
+    def unirse(self, uid: str, codigo: str) -> Any:
+        """
+        Canjea un codigo. Devuelve {"mac", "nombre", "dueno", "miembro"} o
+        "no_existe" (no existe, vencido, usado o de un dueno que ya no lo es:
+        indistinguibles), "es_dueno" o "tope".
+
+        El canje es un `update` multipath de la raiz (membresia, nombre y el
+        codigo marcado como usado); la lista va despues en transaccion. Si la
+        lista falla, el mismo uid puede reintentar con el mismo codigo (C4).
+        """
+        with self._lock_propiedad:
+            ref_inv = self.db.reference(f"Invitaciones/{codigo}")
+            inv = ref_inv.get()
+            if not isinstance(inv, dict) or (inv.get("expira") or 0) < time.time() \
+                    or inv.get("usadoPor") not in (None, uid):
+                return "no_existe"
+            mac = str(inv.get("mac") or "")
+            nodo = self.db.reference(f"ESP32/{mac}").get() if mac else None
+            dueno = str(nodo.get("ownerUid") or "") if isinstance(nodo, dict) else ""
+            if not dueno or dueno != inv.get("invitadoPor"):
+                ref_inv.delete()   # la central cambio de dueno o ya no existe
+                return "no_existe"
+            if dueno == uid:
+                return "es_dueno"
+            miembros = self._miembros(nodo)
+            if uid not in miembros and len(miembros) >= self.TOPE_MIEMBROS:
+                return "tope"
+
+            cuenta = self.db.reference(f"Usuarios/{uid}").get() or {}
+            cuenta = cuenta if isinstance(cuenta, dict) else {}
+            nombre_miembro = str(cuenta.get("userName") or cuenta.get("email") or "").strip()[:60] or "Sin nombre"
+            self.db.reference("/").update({
+                f"ESP32/{mac}/miembros/{uid}": {"rol": "familia"},
+                f"Miembros/{mac}/{uid}": {"nombre": nombre_miembro, "alta": int(time.time() * 1000),
+                                          "invitadoPor": dueno},
+                f"Invitaciones/{codigo}/usadoPor": uid,
+            })
+            self._agregar_a_mi_lista(uid, mac)
+            ref_inv.delete()
+            self.invalidate_cache()
+            logger.info(f"{uid} se unio a {mac} (dueno {dueno})")
+            return {"mac": mac, "nombre": nodo.get("Nombre") or mac, "dueno": dueno, "miembro": nombre_miembro}
+
+    def quitar_miembro(self, uid_dueno: str, mac: str, uid: str) -> Any:
+        """El dueno quita a un miembro. Devuelve el nombre de la central, o "no_es_dueno" / "no_es_miembro"."""
+        with self._lock_propiedad:
+            nodo = self.db.reference(f"ESP32/{mac}").get()
+            if not isinstance(nodo, dict) or str(nodo.get("ownerUid") or "") != uid_dueno:
+                return "no_es_dueno"
+            if not self._revocar(mac, uid, nodo):
+                return "no_es_miembro"
+            return {"nombre": nodo.get("Nombre") or mac}
+
+    def _revocar(self, mac: str, uid: str, nodo: dict) -> bool:
+        """
+        Quita a un miembro de todo (C3), para "quitar" y "salir": membresia,
+        nombre, su lista, Usuario 2 de Telegram si era el, y llave local nueva
+        (su telefono guarda la de ahora). False si no era miembro: no se toca nada.
+        Llamar con `_lock_propiedad` tomado.
+        """
+        if uid not in self._miembros(nodo):
+            return False
+        self.db.reference("/").update({f"ESP32/{mac}/miembros/{uid}": None, f"Miembros/{mac}/{uid}": None})
+        self._quitar_de_mi_lista(uid, mac)
+        chat = str(self.db.reference(f"Usuarios/{uid}/telegram_id").get() or "").strip()
+        if chat and chat == str(nodo.get("Telegram_ID_2") or "").strip():
+            self.db.reference(f"ESP32/{mac}/Telegram_ID_2").delete()
+        if self.mqtt_handler:
+            self.mqtt_handler.send_command(Command.LOCAL_ROTATE.value, device_id=mac, queue_if_offline=True)
+        self.invalidate_cache()
+        logger.info(f"{uid} ya no es miembro de {mac}")
+        return True
+
     def _borrar_equipo(self, uid: str, mac: str) -> str:
         """
         Borra la central para todos: listas, horarios bajo cualquier clave, el
@@ -1230,6 +1409,10 @@ class FirebaseManager:
         nodo = self.db.reference(f"ESP32/{mac}").get()
         dueno = str(nodo.get("ownerUid") or "") if isinstance(nodo, dict) else ""
         if (dueno and dueno != uid) or not isinstance(nodo, dict):
+            # Un miembro que "borra" sale de la central (#124): se le revoca todo,
+            # aunque la MAC ya no estuviera en su lista.
+            if isinstance(nodo, dict) and self._revocar(mac, uid, nodo):
+                return "quitado"
             if not self._quitar_de_mi_lista(uid, mac):
                 return "no_es_dueno"
             logger.info(f"{mac} quitado de la lista de {uid} (central ajena o inexistente)")
@@ -1242,6 +1425,7 @@ class FirebaseManager:
         self._quitar_de_listas(mac)
         self._borrar_horarios_de(mac)
         self.db.reference(f"ESP32/{mac}").delete()
+        self.db.reference(f"Miembros/{mac}").delete()
         self._apagar_horario_central(mac)
         if self.mqtt_handler:
             self._olvidar(mac)

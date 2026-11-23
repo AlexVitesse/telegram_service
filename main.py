@@ -568,8 +568,10 @@ class AlarmBridgeService:
         location = firebase_manager.get_device_location(device_id) or device_id
         logger.info(f"[{device_id}] Sensor nuevo en cuarentena: {sensor} ({tipo}); se avisa al dueño")
         if self.fcm.is_available():
+            # Solo al dueño: un miembro de familia no puede autorizar sensores.
             self.fcm.send_to_device_users(
-                device_id, self.fcm.create_sensor_pending_notification(sensor, location, device_id))
+                device_id, self.fcm.create_sensor_pending_notification(sensor, location, device_id),
+                solo_dueno=True)
         self._a_los_duenos(
             device_id,
             f"🆕 *Sensor nuevo en {escape_md(location)}*\n\n"
@@ -614,6 +616,29 @@ class AlarmBridgeService:
                      f"⚠️ *{location}* no tiene el sensor `{sensor}`: no se pudo renombrar.")
         logger.info(f"[{device_id}] {orden} de {sensor}: {'ok' if ok else 'rechazada'}")
         self._a_los_duenos(device_id, texto)
+
+    _VERBO_ORDEN = {"arm": "armó", "disarm": "desarmó", "panic": "pidió pánico en"}
+
+    def _avisar_orden_miembro(self, mac: str, dueno: str, nombre: str, accion: str, ts: int, local: bool):
+        """
+        Aviso obligatorio al dueño: un miembro de familia armó, desarmó o pidió
+        pánico (#124 C2). Sin preferencias ni rate limit; la hora es la de la
+        orden (`ts`), que puede llegar tarde si el teléfono estaba sin red.
+        """
+        if not self.fcm.is_available():
+            return
+        from datetime import datetime
+        from fcm_handler import NotificationType, PushNotification
+        central = (firebase_manager._nodo(mac) or {}).get("Nombre") or mac
+        hora = datetime.fromtimestamp(ts / 1000).strftime("%H:%M")
+        texto = f"{nombre} {self._VERBO_ORDEN.get(accion, accion)} {central} a las {hora}"
+        if local:
+            texto += " (desde la red de la casa)"
+        self.fcm.send_to_user(dueno, PushNotification(
+            title=central, body=texto,
+            data={"device_id": mac, "action": "view_status", "accion": accion},
+            notification_type=NotificationType.MIEMBRO_ACCION,
+        ))
 
     def _avisar_sos(self, device_id: str):
         """
@@ -1055,6 +1080,7 @@ class AlarmBridgeService:
         # Iniciar listener de comandos de la App en Firebase
         if self.firebase_available: # Only start if Firebase is connected
             firebase_manager.on_sos = self._avisar_sos
+            firebase_manager.on_orden_miembro = self._avisar_orden_miembro
             firebase_manager.on_autorizar = self._pedir_autorizacion
             firebase_manager.on_sensor_orden = self._orden_de_sensor
             self.mqtt.on_sensor_ack = self._sensor_ack

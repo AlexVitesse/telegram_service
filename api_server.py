@@ -14,6 +14,9 @@ red del VPS, y las peticiones llevan un ID token de Firebase.
     GET  /salud       sin auth, para comprobar que está vivo
     POST /equipos/reclamar  {"mac", "nombre", "telegram_id", "group_id"}
     POST /equipos/borrar    {"mac"}   (siempre con token de Firebase)
+    POST /equipos/invitar   {"mac", "remoto"}  -> {"ok", "codigo", "expira"}   (familia, #124)
+    POST /equipos/unirse    {"codigo"}         -> {"ok", "mac", "nombre"}
+    POST /equipos/miembros/quitar {"mac", "uid"}
 
 Quien contesta es `knowledge_qa.responder()`, el mismo que usa el bot, así que
 los dos canales dan **la misma respuesta a la misma pregunta**.
@@ -75,6 +78,17 @@ VENTANA_PRUEBA_FISICA = 15 * 60
 # borrarlas. Sigue siendo solo hex y `_`, nada que forme otra ruta.
 _MAC_VALIDA = re.compile(r"[0-9A-F]{2}(_[0-9A-F]{2}){4}(_[0-9A-F])?")
 
+#: Codigo de invitacion (#124 C7): 8 del alfabeto sin ambiguos. Acaba en una
+#: ruta de la base, asi que se valida antes de usarlo. Un uid de Firebase Auth
+#: es alfanumerico (hasta 128).
+_CODIGO_VALIDO = re.compile(r"[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}")
+_UID_VALIDO = re.compile(r"[A-Za-z0-9]{1,128}")
+
+#: Fuerza bruta en /equipos/unirse: fallos por uid en una ventana, y un tope
+#: global por minuto. En memoria: se reinicia con el proceso (aceptado en C7).
+FALLOS_UNIRSE, VENTANA_FALLOS_SEG = 5, 15 * 60
+INTENTOS_UNIRSE_POR_MIN = 30
+
 
 def _restante(limite: float) -> float:
     """Segundos que quedan del presupuesto. Nunca negativo."""
@@ -115,6 +129,8 @@ class ApiSenti:
         self._limitador = Limitador(
             config.api.max_por_hora, config.api.espera_min_seg
         )
+        self._fallos_unirse: dict = {}    # uid -> [instantes de fallo]
+        self._intentos_unirse: list = []  # instantes de todos los intentos (tope global)
         self._runner: Optional[web.AppRunner] = None
         # Guardada a proposito: asyncio solo tiene una referencia debil a las
         # tareas, y una que nadie sujeta puede irsele al recolector a medias.
@@ -540,6 +556,105 @@ class ApiSenti:
         # para quien quiera decirlo distinto.
         return web.json_response({"ok": True, "quitado": r == "quitado"})
 
+    # ------------------------------------------------------------------
+    # Familia (#124): /equipos/invitar, /equipos/unirse, /equipos/miembros/quitar
+    # ------------------------------------------------------------------
+
+    async def invitar(self, request: web.Request) -> web.Response:
+        uid, error = await self._uid_obligatorio(request)
+        if error is not None:
+            return error
+        cuerpo, mac, error = await self._cuerpo_con_mac(request)
+        if error is not None:
+            return error
+        try:
+            r = await asyncio.to_thread(self._firebase.crear_invitacion, uid, mac, cuerpo.get("remoto") is True)
+        except Exception as e:
+            logger.error("No se pudo crear la invitacion de %s para %s: %s", mac, uid, e)
+            return web.json_response({"error": "No se pudo crear la invitación. Inténtalo de nuevo."}, status=503)
+        if r == "no_es_dueno":
+            return web.json_response({"error": "Solo el dueño de la central puede invitar."}, status=403)
+        if r == "tope":
+            return web.json_response({"error": "Esta central ya tiene 10 personas con acceso."}, status=409)
+        return web.json_response({"ok": True, **r})
+
+    def _puede_intentar_unirse(self, uid: str, ahora: float) -> bool:
+        self._intentos_unirse = [t for t in self._intentos_unirse if ahora - t < 60]
+        fallos = [t for t in self._fallos_unirse.get(uid, []) if ahora - t < VENTANA_FALLOS_SEG]
+        self._fallos_unirse[uid] = fallos
+        if len(fallos) >= FALLOS_UNIRSE or len(self._intentos_unirse) >= INTENTOS_UNIRSE_POR_MIN:
+            return False
+        self._intentos_unirse.append(ahora)
+        return True
+
+    async def unirse(self, request: web.Request) -> web.Response:
+        uid, error = await self._uid_obligatorio(request)
+        if error is not None:
+            return error
+        ahora = time.monotonic()
+        if not self._puede_intentar_unirse(uid, ahora):
+            return web.json_response({"error": "Demasiados intentos. Espera unos minutos."}, status=429)
+        try:
+            cuerpo = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            cuerpo = None
+        codigo = str(cuerpo.get("codigo") or "") if isinstance(cuerpo, dict) else ""
+        codigo = re.sub(r"[\s-]", "", codigo).upper()   # "abcd-efgh" vale
+
+        r = "no_existe"
+        if _CODIGO_VALIDO.fullmatch(codigo):
+            try:
+                r = await asyncio.to_thread(self._firebase.unirse, uid, codigo)
+            except Exception as e:
+                logger.error("No se pudo canjear un codigo para %s: %s", uid, e)
+                return web.json_response({"error": "No se pudo completar. Inténtalo de nuevo."}, status=503)
+        if r == "no_existe":
+            # Mismo mensaje para formato raro, inexistente, vencido o usado (C7).
+            self._fallos_unirse.setdefault(uid, []).append(ahora)
+            return web.json_response({"error": "Código no válido o vencido. Pídele uno nuevo al dueño."}, status=404)
+        if r == "es_dueno":
+            return web.json_response({"error": "Ya eres el dueño de esta central."}, status=409)
+        if r == "tope":
+            return web.json_response({"error": "Esta central ya tiene 10 personas con acceso."}, status=409)
+
+        await self._push(r["dueno"], "Nueva persona con acceso",
+                         f"{r['miembro']} se unió a {r['nombre']}.", r["mac"])
+        return web.json_response({"ok": True, "mac": r["mac"], "nombre": r["nombre"]})
+
+    async def quitar_miembro(self, request: web.Request) -> web.Response:
+        uid, error = await self._uid_obligatorio(request)
+        if error is not None:
+            return error
+        cuerpo, mac, error = await self._cuerpo_con_mac(request)
+        if error is not None:
+            return error
+        quitado = str(cuerpo.get("uid") or "")
+        if not _UID_VALIDO.fullmatch(quitado):
+            return web.json_response({"error": "Usuario no válido."}, status=400)
+        try:
+            r = await asyncio.to_thread(self._firebase.quitar_miembro, uid, mac, quitado)
+        except Exception as e:
+            logger.error("No se pudo quitar a %s de %s: %s", quitado, mac, e)
+            return web.json_response({"error": "No se pudo quitar. Inténtalo de nuevo."}, status=503)
+        if r == "no_es_dueno":
+            return web.json_response({"error": "Solo el dueño de la central puede quitar a alguien."}, status=403)
+        if r == "no_es_miembro":
+            return web.json_response({"error": "Esa persona ya no tiene acceso."}, status=404)
+        await self._push(quitado, "Acceso retirado", f"Ya no tienes acceso a {r['nombre']}.", mac)
+        return web.json_response({"ok": True})
+
+    async def _push(self, uid: str, titulo: str, texto: str, mac: str) -> None:
+        """ACCESS_CHANGED a una cuenta. Un fallo aqui no deshace lo ya hecho."""
+        if self._fcm is None:
+            return
+        from fcm_handler import NotificationType, PushNotification
+        try:
+            await asyncio.to_thread(self._fcm.send_to_user, uid, PushNotification(
+                title=titulo, body=texto, data={"device_id": mac, "action": "view_status"},
+                notification_type=NotificationType.ACCESS_CHANGED))
+        except Exception as e:
+            logger.error("No se pudo avisar por push a %s: %s", uid, e)
+
     async def _avisar_dueno_anterior(self, mac: str, r: dict) -> None:
         """Que el dueno anterior no se entere porque su central desaparecio de la app."""
         nombre = r.get("nombre") or mac
@@ -615,6 +730,9 @@ class ApiSenti:
         app.router.add_get("/salud", self.salud)
         app.router.add_post("/equipos/reclamar", self.reclamar)
         app.router.add_post("/equipos/borrar", self.borrar)
+        app.router.add_post("/equipos/invitar", self.invitar)
+        app.router.add_post("/equipos/unirse", self.unirse)
+        app.router.add_post("/equipos/miembros/quitar", self.quitar_miembro)
         app.router.add_route("OPTIONS", "/{cualquiera:.*}", self._preflight)
 
         self._runner = web.AppRunner(app, access_log=None)
