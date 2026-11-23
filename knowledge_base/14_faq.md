@@ -61,7 +61,14 @@ Los modulos LoRa tienen los siguientes alcances aproximados:
 
 ## Puedo tener varios usuarios?
 
-Si. El administrador puede agregar usuarios con el comando /adduser, o el dueño puede poner su Chat ID en la ficha del equipo en la app. Cada equipo admite hasta 3 destinatarios de Telegram: 2 usuarios y 1 grupo; con un grupo pueden enterarse mas personas. La cuenta de la app es personal: no hay opcion para compartir un equipo con otra cuenta de la app.
+Si, de dos formas:
+
+- **En la app (desde la version 8.2):** el dueño comparte la central con su familia en la ficha del equipo, en "Personas con acceso" > "Invitar" (codigo QR de 15 minutos) o "Invitar por WhatsApp" (codigo de 24 horas). La otra persona entra con su propia cuenta y toca "Tengo un codigo". Hasta 10 personas por central; pueden armar, desarmar y pedir panico, y al dueño le llega un aviso con el nombre de quien lo hizo.
+- **En Telegram:** el administrador agrega usuarios con /adduser, o el dueño pone su Chat ID en la ficha del equipo en la app. Cada equipo admite hasta 3 destinatarios de Telegram: 2 usuarios y 1 grupo; con un grupo pueden enterarse mas personas.
+
+## Como comparto mi central con mi familia?
+
+Desde la version 8.2 de la app: abre la ficha de la central ("Ver detalles y ajustes"), baja a "Personas con acceso" y toca "Invitar". Si la persona esta contigo, que escanee el QR con "Tengo un codigo" en la pantalla de Inicio de su app (vence en 15 minutos). Si no, usa "Invitar por WhatsApp", que manda un codigo que vence en 24 horas. Para quitar a alguien, toca "Quitar" junto a su nombre; un miembro puede irse con "Salir de esta central".
 
 ## Como se cuanto dura la bateria de los sensores?
 

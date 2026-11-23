@@ -1,8 +1,43 @@
 # Usuarios y Permisos
 
+Hay dos formas de darle acceso a otra persona, y son cosas distintas:
+
+- **Desde la app: compartir la central con tu familia** (desde la version 8.2). La otra persona usa su propia cuenta de la app y puede armar, desarmar y pedir panico. Ver "Compartir la central con tu familia desde la app".
+- **Desde Telegram: permisos del bot** (/adduser y /approve). La otra persona controla y recibe avisos por Telegram. Ver "Como se configuran o programan los permisos del sistema".
+
+## Compartir la central con tu familia desde la app
+
+Desde la version 8.2 de la app, el dueño de una central puede compartirla con otras cuentas de la app (familia). Cada persona entra con su propia cuenta; no se comparte la contraseña.
+
+### Invitar a alguien (solo el dueño)
+
+1. Abre la ficha de la central ("Ver detalles y ajustes") y baja a **"Personas con acceso"**.
+2. Si la persona esta contigo: toca **"Invitar"**. Aparece un **codigo QR** y el mismo codigo en texto (por ejemplo ABCD-EFGH). Vence a los **15 minutos** y sirve una sola vez. "Generar otro" anula el anterior.
+3. Si la persona no esta contigo: toca **"Invitar por WhatsApp (codigo de 24 h)"**. Se abre WhatsApp con el mensaje ya escrito y el codigo, que vence a las **24 horas** y sirve una sola vez.
+4. La otra persona instala la app, entra con su cuenta y en Inicio toca **"Tengo un codigo"** (junto a "Agregar"): puede **escanear el QR** o escribir el codigo.
+5. Al dueño le llega un aviso: "[Nombre] se unio a [central]".
+
+Cada central admite hasta **10 personas** ademas del dueño. Solo el dueño ve la lista de personas con acceso.
+
+### Que puede hacer un miembro de la familia
+
+- **Si puede:** ver el estado de la central, armar, desarmar, usar el boton de panico (SOS), recibir las notificaciones push y usar el modo local en la red de la casa. Ve los horarios del dueño, pero **solo para leerlos**.
+- **No puede:** editar la central (nombre, tiempos, bengala, WiFi), autorizar, borrar ni renombrar sensores, cambiar los destinatarios de Telegram ni invitar o quitar a otras personas.
+- **Cada vez que un miembro arma, desarma o pide panico, al dueño le llega un aviso con su nombre.** Ese aviso no se puede apagar.
+
+### Quitar a alguien o salir
+
+- **El dueño quita a alguien:** en "Personas con acceso", toca **"Quitar"** junto a su nombre. Esa persona deja de ver la central al momento y le llega el aviso "Ya no tienes acceso". Si esa persona era el "Usuario 2" de Telegram de la central, tambien se le quita de ahi. La central cambia su llave de modo local, asi que tampoco la puede controlar desde la red de la casa.
+- **Un miembro se sale:** en la ficha de la central, el boton de abajo dice **"Salir de esta central"**. La central sigue igual para el dueño y los demas.
+- **Si la central cambia de dueño** (alguien la resetea y la da de alta con su cuenta) o el dueño la borra, todos los miembros pierden el acceso y los codigos pendientes dejan de valer.
+
+### Familia de la app y destinatarios de Telegram son cosas distintas
+
+Ser miembro de la familia en la app **no** te da acceso por Telegram, y estar en Telegram no te pone en la familia de la app. Los destinatarios de Telegram (dos usuarios y un grupo) se siguen editando en la ficha del equipo, en "Editar".
+
 ## Como se configuran o programan los permisos del sistema
 
-Los permisos de usuario se configuran (o programan) desde Telegram. Configurar o programar un permiso significa dar acceso a un nuevo usuario para que pueda controlar los dispositivos. Los permisos se configuran y programan paso a paso con los comandos del bot y no requieren la app ni hardware adicional. Solo los administradores pueden configurar o programar permisos.
+Los permisos de usuario del bot se configuran (o programan) desde Telegram. Configurar o programar un permiso significa dar acceso a un nuevo usuario para que pueda controlar los dispositivos por Telegram. Los permisos del bot se configuran y programan paso a paso con los comandos del bot. Solo los administradores pueden configurar o programar permisos. Para compartir la central con otra cuenta de la app, ver "Compartir la central con tu familia desde la app".
 
 ### Pasos para configurar un nuevo permiso
 
@@ -16,7 +51,7 @@ Los permisos de usuario se configuran (o programan) desde Telegram. Configurar o
 
 Asi se configura un permiso nuevo en el sistema. Como se configuran los permisos: con los comandos /adduser, /approve_CHATID, /desvincular y /permisos desde Telegram. Para revisar quien recibe los avisos de cada equipo, mira la ficha del equipo en la app (Ajustes > Avisos de Telegram).
 
-**Que si se hace desde la app.** El alta y la aprobacion de usuarios -invitar, aceptar, revocar- son solo de Telegram. Pero los DESTINATARIOS de cada equipo si se editan en la app, en la ficha del dispositivo: hasta tres por equipo, dos usuarios y un grupo de Telegram. Son los que reciben las notificaciones de ese equipo. Es una cosa distinta del alta de usuarios, aunque las dos hablen de "quien tiene acceso".
+**Que si se hace desde la app.** El alta y la aprobacion de usuarios del bot -/adduser, /approve, /desvincular- son de Telegram. En la app se hacen dos cosas: compartir la central con otras cuentas de la app (familia, desde la version 8.2, en "Personas con acceso") y editar los DESTINATARIOS de Telegram de cada equipo, en la ficha del dispositivo: hasta tres por equipo, dos usuarios y un grupo de Telegram. Son los que reciben las notificaciones de ese equipo por Telegram.
 
 ### Configurar permisos: resumen de comandos
 

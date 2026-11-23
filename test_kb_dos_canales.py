@@ -132,6 +132,11 @@ CASOS = [
      "12_usuarios_permisos.md", "destinatarios"),
     ("como armo la alarma desde la app",
      "07_armado_desarmado.md", "Senti"),
+    # Familia (#124, app 8.2): antes la KB decia que no se podia compartir.
+    ("como comparto mi central con mi familia",
+     "12_usuarios_permisos.md", "Personas con acceso"),
+    ("me invitaron a una central donde pongo el codigo",
+     "12_usuarios_permisos.md", "Tengo un codigo"),
 ]
 
 
