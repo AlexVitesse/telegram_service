@@ -119,7 +119,7 @@ class _Ref:
         return copy.deepcopy(d)
 
     def set(self, valor):
-        if valor is None:
+        if valor is None or valor == [] or valor == {}:   # la RTDB no guarda vacios
             return self.delete()
         d = self.arbol.datos
         for p in self.partes[:-1]:
@@ -127,8 +127,11 @@ class _Ref:
         d[self.partes[-1]] = copy.deepcopy(valor)
 
     def transaction(self, fn):
-        """Como la de firebase_admin: aplica fn al valor actual; None borra."""
+        """Como la de firebase_admin: aplica fn al valor actual. None no vale
+        (firebase_admin: "Value must not be none"); para borrar, [] o {}."""
         nuevo = fn(self.get())
+        if nuevo is None:
+            raise ValueError("Value must not be none.")
         self.set(nuevo)
         return nuevo
 

@@ -109,8 +109,8 @@ class FirebaseManager:
         # Lo pone main.py: un miembro armo, desarmo o pidio panico (#124 C2).
         # (mac, dueno, nombre_miembro, accion, ts_ms, local). Aviso obligatorio.
         self.on_orden_miembro: Optional[Callable[[str, str, str, str, int, bool], None]] = None
-        # mac -> ts de la ultima Orden atendida (dedup; ver _orden_de_miembro).
-        self._ultima_orden: Dict[str, int] = {}
+        # mac -> (por, ts) de la ultima Orden atendida (dedup; ver _orden_de_miembro).
+        self._ultima_orden: Dict[str, tuple] = {}
 
         # Listener monitoring
         self._last_listener_event_time: float = 0
@@ -502,6 +502,14 @@ class FirebaseManager:
 
             # Caso 2: Patch a nivel dispositivo (ej: path=/device_id, data={'Tiempo_Bomba': 180, ...})
             elif command_key == "" and isinstance(event.data, dict):
+                # Una Orden escrita con update() del nodo llega aqui como patch:
+                # las reglas la aceptan igual, asi que tambien se atiende.
+                if 'Orden' in event.data:
+                    try:
+                        self._orden_de_miembro(device_id, event.data['Orden'])
+                    except Exception as e:
+                        logger.error(f"[{device_id}] No se pudo procesar la Orden {event.data['Orden']}: {e}")
+
                 # Inicializar cache de valores para este dispositivo si no existe
                 if device_id not in self._last_known_values:
                     self._last_known_values[device_id] = {}
@@ -573,9 +581,12 @@ class FirebaseManager:
         if por != dueno and por not in miembros:
             logger.warning(f"[{mac}] Orden de {por}, que no es dueno ni miembro: se ignora")
             return
-        if ts <= self._ultima_orden.get(mac, 0):
+        # Solo la repeticion exacta (misma persona, mismo ts). Comparar contra el
+        # ts mas alto de la central dejaba que el reloj adelantado de un
+        # telefono -o un ts absurdo- tirara las ordenes de los demas.
+        if self._ultima_orden.get(mac) == (por, ts):
             return
-        self._ultima_orden[mac] = ts
+        self._ultima_orden[mac] = (por, ts)
 
         logger.info(f"Orden de miembro: {accion.upper()} para {mac} por {por} (local={local})")
         if not local and self.mqtt_handler:
@@ -1258,8 +1269,10 @@ class FirebaseManager:
             quedan = [m for m in macs if not self._misma_mac(m, mac)]
             quitada = len(quedan) != len(macs)
             if not quitada:
-                return actual
-            return quedan or None  # None borra el nodo
+                return actual if actual is not None else []   # sin lista: nada que escribir
+            # [] y no None: firebase_admin rechaza None en una transaccion
+            # ("Value must not be none") y la RTDB guarda [] como borrado.
+            return quedan
 
         self.db.reference(f"Usuarios/{uid}/Dispositivos").transaction(quitar)
         return quitada
