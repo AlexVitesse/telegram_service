@@ -368,6 +368,27 @@ def test_intent_con_json_invalido_se_reintenta_hasta_el_local():
     assert llamadas == ["ollama", "groq", "local"], llamadas
 
 
+def test_groq_principal_con_json_invalido_prueba_el_ollama_de_respaldo():
+    # #282: con LLM_BACKEND=groq (produccion desde el 23-nov) la lista de
+    # reservas del intent salia vacia y un JSON roto de Groq acababa en None.
+    h = _handler(llm_backend="groq", groq_api_key="x", ollama_base_url="http://127.0.0.1:11434")
+    bueno = '{"intent": "arm", "device": "all", "confidence": 0.9, "reply": "Armando."}'
+    llamadas = []
+
+    async def groq(*a, **k):
+        llamadas.append("groq")
+        return "no es json"
+
+    async def ollama(*a, local=False, **k):
+        llamadas.append("local" if local else "ollama")
+        return bueno
+
+    h._call_groq, h._call_ollama = groq, ollama
+    r = asyncio.run(h.parse_intent("arma la alarma", [{"id": "X", "name": "Casa"}]))
+    assert r and r["intent"] == "arm", r
+    assert llamadas == ["groq", "ollama"], llamadas
+
+
 def test_el_local_va_a_su_url_y_sin_la_llave_de_la_nube():
     h = _handler(ollama_api_key="clave", ollama_local_url="http://127.0.0.1:11434")
     creado, enviado = {}, {}

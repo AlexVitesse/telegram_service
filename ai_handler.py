@@ -464,15 +464,8 @@ class AIHandler:
         async with self._turno():
             return await asyncio.to_thread(_blocking_call)
 
-    async def _call_llm(self, system_prompt: str, user_prompt: str, model: str = "", temperature: float = 0.1, max_tokens: int = 512) -> str:
-        """
-        Llama al LLM configurado y, si falla, a las reservas en orden. El model
-        se pasa al principal; cada reserva usa su modelo default.
-
-        Cadena: principal → el otro backend (Groq u Ollama) → Ollama local del
-        VPS (si OLLAMA_LOCAL_URL). Un timeout o la pila llena cortan la cadena
-        (ver `_no_merece_reserva`): no se cobra dos veces el presupuesto.
-        """
+    def _cadena(self, system_prompt: str, user_prompt: str, model: str, temperature: float, max_tokens: int):
+        """[(nombre, llamar)]: principal, el otro backend y el Ollama local si lo hay."""
         a = (system_prompt, user_prompt)
         if self._backend == "ollama":
             cadena = [("Ollama", lambda: self._call_ollama(*a, model, temperature, max_tokens))]
@@ -483,7 +476,18 @@ class AIHandler:
                       ("Ollama", lambda: self._call_ollama(*a, "", temperature, max_tokens))]
         if self._ollama_local_url:
             cadena.append(("Ollama local", lambda: self._call_ollama(*a, "", temperature, max_tokens, local=True)))
+        return cadena
 
+    async def _call_llm(self, system_prompt: str, user_prompt: str, model: str = "", temperature: float = 0.1, max_tokens: int = 512) -> str:
+        """
+        Llama al LLM configurado y, si falla, a las reservas en orden. El model
+        se pasa al principal; cada reserva usa su modelo default.
+
+        Cadena: principal → el otro backend (Groq u Ollama) → Ollama local del
+        VPS (si OLLAMA_LOCAL_URL). Un timeout o la pila llena cortan la cadena
+        (ver `_no_merece_reserva`): no se cobra dos veces el presupuesto.
+        """
+        cadena = self._cadena(system_prompt, user_prompt, model, temperature, max_tokens)
         for i, (nombre, llamar) in enumerate(cadena):
             try:
                 return await llamar()
@@ -539,15 +543,10 @@ class AIHandler:
             logger.debug("🤖 Respuesta LLM (intent) model=%s: %s", self._intent_model, raw)
 
             result = self._parse_intent_json(raw)
-            # JSON invalido del principal: se reintenta con las reservas
-            # (Groq si el principal es Ollama, y luego el Ollama local).
-            reservas = []
-            if self._backend == "ollama" and self._groq_client:
-                reservas.append(("Groq", lambda: self._call_groq(
-                    INTENT_SYSTEM_PROMPT, user_prompt, "", 0.1, TOKENS_INTENT)))
-            if self._ollama_local_url:
-                reservas.append(("Ollama local", lambda: self._call_ollama(
-                    INTENT_SYSTEM_PROMPT, user_prompt, "", 0.1, TOKENS_INTENT, local=True)))
+            # JSON invalido del principal: se reintenta con las mismas reservas
+            # que _call_llm. Antes, con Groq de principal, la lista salia vacia
+            # y no se probaba el Ollama de respaldo (auditoria 23-nov, #282).
+            reservas = self._cadena(INTENT_SYSTEM_PROMPT, user_prompt, "", 0.1, TOKENS_INTENT)[1:]
             for nombre, llamar in reservas:
                 if result is not None:
                     break
