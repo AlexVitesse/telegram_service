@@ -321,6 +321,23 @@ def _evento(mac, datos, ruta="Orden"):
     return SimpleNamespace(event_type="put", path=f"/{mac}/{ruta}", data=datos)
 
 
+def test_orden_de_miembro_sin_broker_no_se_da_por_hecha():
+    # #278: con la publicacion fallida se escribia Answer=True y se avisaba al
+    # dueno de que Ana armo; la dedup impedia el reintento.
+    fm = _fm(_arbol())
+    fm._last_listener_event_time, fm._all_devices_cache = 0, None
+    fm._update_cache_from_event = lambda e: None
+    fm._ultima_orden, fm.on_sos, fm.on_orden_miembro = {}, MagicMock(), MagicMock()
+    fm.mqtt_handler.send_command.return_value = False
+    fm._app_command_listener(_evento(MAC, {"accion": "arm", "por": "ana", "ts": 1000}))
+    assert fm.db.datos["ESP32"][MAC]["Answer"] is False
+    fm.on_orden_miembro.assert_not_called()
+    fm.mqtt_handler.send_command.return_value = True          # vuelve el broker
+    fm._app_command_listener(_evento(MAC, {"accion": "arm", "por": "ana", "ts": 1000}))
+    assert fm.db.datos["ESP32"][MAC]["Answer"] is True       # la reentrega si pasa
+    fm.on_orden_miembro.assert_called_once()
+
+
 def test_orden_de_miembro_manda_sincroniza_y_avisa_al_dueno():
     fm = _fm(_arbol())
     fm._last_listener_event_time, fm._all_devices_cache = 0, None

@@ -567,7 +567,14 @@ class FirebaseManager:
 
         logger.info(f"Orden de miembro: {accion.upper()} para {mac} por {por} (local={local})")
         if not local and self.mqtt_handler:
-            self.mqtt_handler.send_command(cmd=self._ACCIONES_ORDEN[accion].value, device_id=mac)
+            enviada = self.mqtt_handler.send_command(cmd=self._ACCIONES_ORDEN[accion].value, device_id=mac)
+            if not enviada and accion in ("arm", "disarm"):
+                # Sin broker no se da por hecha (#278): antes se escribia Answer y
+                # se avisaba al dueno de que armo, y la dedup impedia reintentar.
+                # No se encola: armar/desarmar horas despues seria peor.
+                self._ultima_orden.pop(mac, None)
+                logger.error(f"[{mac}] {accion.upper()} de {por} no se pudo publicar por MQTT: no se aplica ni se avisa")
+                return
         if accion in ("arm", "disarm"):
             self.db.reference(f"ESP32/{mac}").update({"Answer": accion == "arm"})
         elif self.on_sos:
