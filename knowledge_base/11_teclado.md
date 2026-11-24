@@ -2,9 +2,9 @@
 
 ## Descripcion general
 
-El teclado es un modulo LoRa inalambrico que permite armar y desarmar el sistema de alarma sin necesidad de usar el telefono. Puede utilizarse como control remoto portatil o montarse fijo en la pared, preferiblemente cerca de la puerta principal.
+El teclado es un modulo inalambrico que permite armar y desarmar el sistema de alarma sin necesidad de usar el telefono. Puede utilizarse como control remoto portatil o montarse fijo en la pared, preferiblemente cerca de la puerta principal.
 
-Importante: el teclado es un modulo independiente que se comunica con el Master via LoRa. Toda la logica de contrasenas, menus y bloqueos ocurre internamente dentro del modulo teclado. El Master solamente recibe una senal de "clave correcta" y ejecuta la accion correspondiente (armar o desarmar). El Master no conoce ni gestiona la contrasena del teclado fisico.
+Importante: la contrasena, el menu y el bloqueo viven dentro del propio teclado. El Master solo recibe el aviso de "clave correcta" y arma o desarma. Por eso la contrasena del teclado no se ve ni se cambia desde la app ni desde Telegram.
 
 ## Uso basico del teclado
 
@@ -14,7 +14,7 @@ Para armar o desarmar el sistema:
 
 1. Ingresar la contrasena usando las teclas numericas.
 2. Presionar la tecla **#** para enviar la contrasena.
-3. Si la contrasena es correcta: el LED verde parpadea 3 veces y el teclado envia la senal al Master via LoRa. Si el sistema estaba desarmado, se arma: el Master da 1 pitido y empieza el tiempo de salida. Si estaba armado, se desarma: el Master da 3 pitidos y luego 2 mas. El teclado funciona aunque no haya internet, porque habla directo con el Master.
+3. Si la contrasena es correcta: el LED verde parpadea 3 veces y el teclado envia la orden al Master. Si el sistema estaba desarmado, se arma: el Master da 1 pitido y empieza el tiempo de salida. Si estaba armado, se desarma: el Master da 3 pitidos y luego 2 mas. El teclado funciona aunque no haya internet, porque habla directo con el Master.
 4. Si la contrasena es incorrecta: el LED rojo parpadea 2 veces. No se envia ninguna senal al Master.
 
 Para borrar lo que se ha escrito (si se cometio un error al teclear), presionar la tecla **\***. El LED rojo parpadea 1 vez confirmando que la entrada fue borrada.
@@ -39,9 +39,9 @@ Este proceso ocurre internamente en el modulo teclado:
 
 1. Entrar al menu de configuracion (mantener * por 3 segundos).
 2. Presionar la tecla **1** para seleccionar "Cambiar contrasena".
-3. Ingresar la contrasena actual y presionar **#**.
+3. Ingresar la contrasena actual y presionar **#** (el LED verde destella 1 vez).
 4. Ingresar la nueva contrasena (debe tener entre 4 y 6 digitos) y presionar **#**.
-5. Si el cambio fue exitoso, el LED verde parpadea 3 veces.
+5. Si el cambio fue exitoso, el LED verde parpadea 3 veces y el teclado sale del menu.
 
 La nueva contrasena se almacena localmente en el modulo teclado.
 
@@ -68,9 +68,8 @@ Como medida de seguridad contra intentos de intrusion (gestionado internamente p
 
 ## Comunicacion con el Master
 
-El teclado se comunica con el Master unicamente a traves de LoRa. El Master recibe dos posibles senales:
+El teclado habla directo con el Master, sin cables y sin internet. Con una clave correcta, el Master alterna el estado del sistema: si esta desarmado lo arma, si esta armado lo desarma. Con una clave incorrecta no le llega nada.
 
-- **Valor 1 (clave correcta)**: El Master alterna el estado del sistema (si esta desarmado lo arma, si esta armado lo desarma).
-- **Valor 0**: Senal no reconocida, el Master no realiza ninguna accion.
+Como cualquier modulo nuevo, el teclado hay que autorizarlo una vez en la app o en Telegram ("Sensores nuevos" > "Autorizar").
 
-El alcance de comunicacion LoRa es de hasta 50 metros en espacio abierto, reduciendose con obstaculos (35m madera, 20m ladrillo, 5m metal).
+El alcance inalambrico es de hasta 50 metros en espacio abierto, reduciendose con obstaculos (35m madera, 20m ladrillo, 5m metal).

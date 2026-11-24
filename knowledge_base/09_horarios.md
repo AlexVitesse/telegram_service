@@ -22,26 +22,33 @@ Para configurar, programar, activar o desactivar los horarios automaticos desde 
 - **/horarios off** - Deshabilitar la programacion (el sistema no se armara ni desarmara automaticamente).
 - **/horarios activar HH:MM** - Configurar la hora de armado automatico en formato 24 horas (ejemplo: /horarios activar 22:00).
 - **/horarios desactivar HH:MM** - Configurar la hora de desarmado automatico en formato 24 horas (ejemplo: /horarios desactivar 07:00).
+- **/horarios cambiar** - Elegir otro dispositivo, si tienes varios.
 - **/horarios dias** - Configurar los dias activos. Opciones: todos (lunes a domingo), semana (lunes a viernes), finde (sabado y domingo) o una lista de dias, por ejemplo /horarios dias L,M,X,J,V.
 
 La hora de armado y la de desarmado no pueden ser la misma.
 
-Si la central esta desconectada cuando cambias el horario desde Telegram (comandos /horarios o lenguaje natural, incluido /horarios off), el bot te avisa: "esta sin conexion: el horario se aplicara cuando la central se conecte". El cambio queda guardado en el servidor y se le manda en cuanto vuelva a conectarse. Mientras tanto, la central sigue con su horario anterior.
+Si la central esta desconectada cuando cambias el horario desde Telegram (comandos /horarios o lenguaje natural, incluido /horarios off), el bot te avisa: "esta sin conexion: el horario se aplicara cuando la central se conecte". El cambio queda guardado en la nube y se le manda en cuanto vuelva a conectarse. Mientras tanto, la central sigue con su horario anterior.
 
 ## Configurar horarios desde la App
 
-La pestaña "Horarios" de la app (titulo "Programar Alarma") incluye presets rapidos y configuracion manual. Tocar un preset solo rellena el formulario; el horario se guarda al tocar "Programar Alarma" y confirmar con "Programar".
+La pestaña "Horarios" de la app (titulo "Programar horario") permite crear, editar, pausar y eliminar horarios. Para crear uno:
 
-Presets rapidos disponibles:
+1. Toca "Programar" (o "Agregar otro horario") y ponle un "Nombre", por ejemplo Trabajo, Noche o Playa.
+2. Elige el tipo: "Cada semana" o "Vacaciones".
+3. Si tienes varias centrales, elige una o "Todas mis centrales".
+4. Cada semana: usa un atajo o elige tu hora "Se arma", tu hora "Se desarma" y los dias ("Entre semana", "Fin de semana", "Todos" o dia por dia). Si solo quieres que se arme, marca "Sin hora de regreso": la desarmas tu al volver.
+5. Vacaciones: elige las fechas "Desde" y "Hasta" en el calendario y la hora a la que se arma el primer dia y se desarma el ultimo.
+6. Toca "Guardar horario".
 
-- **Salida al Trabajo**: Arma a las 7:00, desarma a las 18:00, activo de lunes a viernes.
-- **Hora de Dormir**: Arma a las 22:00, desarma a las 7:00, activo todos los dias.
-- **Fin de Semana**: Arma a las 10:00, desarma a las 23:00, activo sabado y domingo.
-- **Viaje/Vacaciones**: Arma a las 00:00, desarma a las 23:59, activo 24/7 los 7 dias.
+Atajos rapidos disponibles en "Cada semana" (solo rellenan el formulario; se guarda con "Guardar horario"):
 
-La configuracion manual permite seleccionar libremente la hora de activacion, la hora de desactivacion ("Hora exacta" para cualquier hora) y los dias de la semana (seleccionables individualmente). Si tienes varios equipos, el campo "Equipo" permite elegir uno o "Todos mis equipos".
+- **Trabajo**: Arma a las 7:00, desarma a las 18:00, de lunes a viernes.
+- **Noche**: Arma a las 22:00, desarma a las 7:00, todos los dias.
+- **Fin de semana**: Arma a las 10:00, desarma a las 23:00, sabado y domingo.
 
-Los horarios guardados aparecen en "Alarmas Programadas", con una papelera para eliminarlos. No se pueden editar: para cambiar uno, programalo de nuevo.
+Cada horario guardado aparece en la lista con su interruptor para pausarlo, "Editar" y "Eliminar". Una central actualizada admite hasta 4 horarios que no se enciman; una sin actualizar admite uno solo (el nuevo reemplaza al anterior) y no acepta "Vacaciones" ni "Sin hora de regreso".
+
+Los horarios con nombre, varios por central, "Vacaciones" y "Sin hora de regreso" se crean en la app; desde Telegram se ajustan la hora de armado, la de desarmado y los dias.
 
 ## Lenguaje natural para horarios
 
@@ -49,17 +56,15 @@ El bot de Telegram entiende instrucciones en lenguaje natural para configurar ho
 
 ## Sincronizacion de horarios
 
-Los horarios se sincronizan automaticamente entre todas las plataformas del sistema:
+Los horarios se guardan en la nube de Sentinel Guard y en la propia central, y se ven igual en la app y en Telegram.
 
-App movil <-> Firebase <-> Servidor Python (VPS) <-> ESP32 (Master)
+Un cambio solo tiene efecto en la central cuando esta en linea y lo recibe. Si esta desconectada, el Master sigue usando el horario que tenia guardado hasta que se conecte: los cambios hechos desde la app o desde Telegram quedan guardados en la nube, sin caducar, y se le mandan en cuanto vuelve. Al conectarse, la central recibe tambien el horario vigente.
 
-Un cambio solo tiene efecto en la central cuando esta en linea y lo recibe. Si esta desconectada, el Master sigue usando el horario que tenia guardado hasta que se conecte: los cambios hechos desde la app o desde Telegram quedan guardados en el servidor, sin caducar, y se le mandan en cuanto vuelve. Al conectarse, la central recibe tambien el horario vigente.
+## La central cumple el horario aunque no haya internet
 
-## Ejecucion autonoma en el ESP32
+La central guarda su horario y lo ejecuta por su cuenta, incluso si pierde la conexion a internet. Toma la hora de internet y la sigue contando sola, asi que se arma y desarma a su hora durante un corte de internet.
 
-El ESP32 guarda su horario y lo ejecuta de forma autonoma, incluso si pierde conexion a internet. Utiliza NTP (protocolo de tiempo de red) para conocer la hora. Esto garantiza que la alarma se arme y desarme en horario durante cortes de internet.
-
-Limite: el Master no tiene reloj propio. Si se reinicia o se va la luz y vuelve sin internet, no ejecuta los horarios hasta que recupera la conexion y sincroniza la hora. Un armado programado tambien pasa por el tiempo de salida.
+Limite: el Master no tiene reloj con pila. Si se reinicia o se va la luz y vuelve sin internet, no ejecuta los horarios hasta que recupera la conexion y vuelve a tomar la hora. Un armado programado tambien pasa por el tiempo de salida.
 
 ## Notificacion previa
 
@@ -68,7 +73,3 @@ El bot de Telegram envia un aviso "RECORDATORIO" por chat privado 5 minutos ante
 ## Ejecucion unica por dia
 
 Cada accion programada (armar o desarmar) se ejecuta una sola vez por dia. Si la hora ya paso cuando se habilita la programacion, no se ejecuta retroactivamente.
-
-## Almacenamiento de horarios
-
-La configuracion de horarios se almacena en el archivo schedule_config.json del servidor y en Firebase para sincronizacion con la app movil.

@@ -2,47 +2,43 @@
 
 ## Que es Sentinel Guard
 
-Sentinel Guard (tambien escrito SentinelGuard) es un sistema de alarma IoT profesional diseñado para proteger hogares y negocios. Como producto, Sentinel Guard es un sistema de seguridad integral. Combina hardware propio (sensores, sirena, bengala de humo, teclado) con conectividad en la nube, permitiendo control y monitoreo desde una app movil, Telegram o un teclado fisico.
+Sentinel Guard (tambien escrito SentinelGuard) es un sistema de alarma inteligente diseñado para proteger hogares y negocios. Como producto, Sentinel Guard es un sistema de seguridad integral. Combina equipos propios (central, sensores, sirena, bengala de humo, teclado) con conexion a internet, permitiendo control y monitoreo desde una app movil, Telegram o un teclado fisico.
 
 ## Componentes del sistema
 
-- **Modulo Master (ESP32)**: Es el cerebro del sistema. Coordina todos los modulos, sensores y actuadores. Cuenta con conectividad WiFi para internet y LoRa para comunicacion inalambrica con los demas modulos. Alcance LoRa: hasta 50 metros en campo abierto.
+- **Modulo Master (la central)**: Es el cerebro del sistema. Coordina todos los modulos, sensores y actuadores. Se conecta a tu WiFi para tener internet y se comunica sin cables con los demas modulos (por radio LoRa, por eso la app habla de "Sensores LoRa"). Alcance: hasta 50 metros en campo abierto.
 - **Sensores PIR (movimiento)**: Detectan presencia mediante infrarrojo. Angulo de deteccion de 110 grados y alcance de 7 metros.
 - **Sensores Magneticos**: Detectan apertura de puertas y ventanas. Constan de dos piezas: la pieza principal y un iman.
-- **Sirena**: Actuador sonoro de 110dB con proteccion IP65 contra polvo y agua.
-- **Bengala de humo**: Actuador que libera una cortina de humo disuasoria. Para los datos del cartucho, consulta su ficha tecnica.
+- **Sirena**: Alarma sonora de 110dB con proteccion IP65 contra polvo y agua.
+- **Bengala de humo**: Libera una cortina de humo disuasoria (hasta 20 m³ segun el manual del equipo). Para los datos del cartucho, consulta su ficha tecnica.
 - **Teclado**: Control local inalambrico para armar y desarmar el sistema. Acepta codigos de 4 a 6 digitos.
 
-## Arquitectura del sistema
+## Como se comunica el sistema
 
-El flujo de comunicacion sigue esta cadena:
+La central esta conectada a internet por tu WiFi. Por esa conexion, siempre cifrada, recibe las ordenes que das desde la app o desde Telegram y envia los avisos. Los ajustes (horarios, bengala, tiempo de salida) quedan guardados en la nube de Sentinel Guard y en la propia central.
 
-ESP32 (Master) <-> MQTT (HiveMQ con TLS) <-> Servidor Python en VPS <-> Telegram Bot + Firebase <-> App Ionic
+Los sensores, la sirena, la bengala y el teclado hablan directo con la central, sin internet.
 
-El protocolo MQTT con cifrado TLS garantiza comunicacion segura entre el hardware y la nube. El servidor VPS en Python actua como puente central, procesando comandos y distribuyendo notificaciones.
+## Que pasa ante una deteccion
 
-## Flujo de datos ante una deteccion
+1. Un sensor detecta un evento (movimiento, apertura de puerta, etc.).
+2. La central recibe la señal del sensor y, si esta armada, activa la sirena (y la bengala segun su modo).
+3. La central avisa por internet.
+4. Te llega el aviso por Telegram y como notificacion en la app, con el nombre del sensor.
 
-1. Un sensor detecta un evento (movimiento, apertura de puerta, etc.)
-2. El Master recibe la señal del sensor via LoRa y procesa la alerta
-3. El Master envia el evento al broker MQTT (HiveMQ)
-4. El servidor VPS recibe el mensaje MQTT
-5. El VPS notifica al usuario via Telegram y actualiza Firebase
-6. La app movil Ionic recibe la actualizacion desde Firebase
+## Alcance inalambrico entre modulos
 
-## Comunicacion LoRa entre modulos
-
-La comunicacion LoRa entre el Master y los modulos (sensores, sirena, bengala, teclado) tiene los siguientes alcances segun el material:
+La comunicacion inalambrica entre el Master y los modulos (sensores, sirena, bengala, teclado) tiene los siguientes alcances segun el material:
 
 - Campo abierto: hasta 50 metros
 - A traves de madera: hasta 35 metros
-- A traves de ladrillo: hasta 20 metros
+- A traves de ladrillo o block: hasta 20 metros
 - A traves de metal: hasta 5 metros
 
 ## Formas de control del sistema
 
 El usuario puede controlar Sentinel Guard desde tres interfaces:
 
-- **App movil Sentinel Guard**: Aplicacion Ionic con control completo, estado en tiempo real y configuracion.
+- **App movil Sentinel Guard**: Aplicacion para Android e iOS con control completo, estado en tiempo real y configuracion.
 - **Telegram**: Chatbot para recibir alertas, armar/desarmar y consultar estado.
 - **Teclado fisico**: Control local para armar y desarmar ingresando la contrasena, sin necesidad de telefono.

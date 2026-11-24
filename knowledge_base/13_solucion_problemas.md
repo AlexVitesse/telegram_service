@@ -6,26 +6,27 @@
 - Verificar la conexion WiFi del Master: debe estar ubicado cerca del router.
 - El Master envia su estado cada 30 segundos. La app y el bot lo marcan "Sin conexion" si pasan 90 segundos sin noticias.
 - Si se perdio la conexion WiFi, el Master intenta reconectar solo cada minuto.
-- Si cambiaste el nombre o la contrasena de tu red WiFi, el Master no se reconecta: hay que emparejarlo otra vez desde la app con los datos nuevos.
-- Si el Master tiene WiFi e internet pero sigue "Sin conexion", puede que tu proveedor de internet bloquee el puerto 8883. Los equipos con el firmware de octubre de 2026 lo resuelven solos: tras dos intentos fallidos se conectan por el puerto 8884 (WebSocket seguro) y lo recuerdan. Con un firmware anterior, contacta a soporte.
+- Si cambiaste de modem o el nombre o la contrasena de tu red WiFi, el Master no se reconecta solo. El dueño puede darle la red nueva desde la ficha del equipo > Ajustes > "Red WiFi": la app busca las redes que oye la central (si el router viejo ya no funciona, se une a la red propia de la central y el telefono te pide permiso), eliges la nueva, escribes su contrasena y tocas "Cambiar". La central solo la guarda si logra conectarse; si no, sigue con la anterior. Si esa opcion no aparece o no funciona, empareja el equipo otra vez desde la app (clip) con los datos nuevos.
+- Si el Master tiene WiFi e internet pero sigue "Sin conexion", puede que tu proveedor de internet bloquee el tipo de conexion segura que usa la central. Los equipos actualizados (octubre de 2026 en adelante) lo resuelven solos: tras dos intentos fallidos prueban otra via segura y la recuerdan. En equipos sin actualizar, contacta a soporte.
 - Como ultimo recurso: reiniciar el Master desconectando la alimentacion y reconectando despues de unos segundos.
 
 ## Bot de Telegram no responde
 
 - Verificar que el telefono tiene conexion a internet.
 - Intentar enviar el comando /start para reiniciar la sesion con el bot.
-- Si el servicio en el VPS esta caido, contactar al administrador del sistema.
-- Los comandos tienen un cooldown de 5 segundos entre cada uso (8 segundos para /disparo); si repites antes, el bot lo ignora. Esperar antes de reintentar.
+- Si el bot no contesta a nada durante un buen rato, escribe a soporte (correo o WhatsApp en la app: Perfil > Acerca de > "Contacto y Soporte").
+- Los comandos tienen una espera de 5 segundos entre cada uso (8 segundos para /disparo); si repites antes, el bot lo ignora. Esperar antes de reintentar.
 - Los comandos no funcionan dentro de un grupo de Telegram: el grupo solo recibe avisos. Escribe al bot por chat privado.
 
 ## BLE no detecta el dispositivo
 
 - Verificar que el Bluetooth del telefono esta activado.
-- Asegurar que el Master esta en modo emparejamiento: presionar el clip unos 3 segundos y soltar al oir los cinco pitidos; no llegar a 10 segundos (eso borra el equipo). El LED de estado debe quedar parpadeando.
+- Asegurar que el Master esta en modo emparejamiento: presionar el clip unos 5 segundos (entra a partir de 3 segundos) y soltar al oir los cinco pitidos; no llegar a 10 segundos (eso borra el equipo). El LED de estado debe quedar parpadeando.
 - Acercar el telefono al Master. La distancia maxima de BLE es aproximadamente 10 metros.
-- En la app el equipo aparece como "Sentinel Master". Si no aparece en la lista: reiniciar el proceso presionando nuevamente el clip.
+- Acepta el permiso de Bluetooth (y en Android el de ubicacion o dispositivos cercanos, si lo pide) cuando la app lo solicite.
+- En la app el equipo aparece como "Sentinel Master". Si no aparece o no conecta en un minuto: apaga y enciende el Master y vuelve a ponerlo en modo emparejamiento con el clip.
 - El modo emparejamiento tiene un timeout de 5 minutos; despues el Master se reinicia solo. Si se pasa el tiempo, hay que volver a activarlo.
-- En iPhone, si la app dice "No se pudo leer el identificador de la central", el firmware del equipo es anterior a marzo de 2026: usa un telefono Android o actualiza el firmware.
+- En iPhone, si la app dice "No se pudo leer el identificador de la central", el equipo tiene una version anterior a marzo de 2026: usa un telefono Android o contacta a soporte para actualizarlo.
 
 ## WiFi no conecta durante configuracion
 
@@ -61,7 +62,7 @@ Si pusiste mal la contraseña de la WiFi al vincular, emparejar o dar de alta la
 
 ## Olvide la contrasena del teclado
 
-- Usar el reset de fabrica: mantener presionado Menu (*) durante 3 segundos, luego presionar 2, ingresar el codigo maestro proporcionado por el proveedor y presionar #.
+- Usar el reset de fabrica del teclado: mantener presionada la tecla * durante 3 segundos, luego presionar 2, ingresar el codigo maestro proporcionado por el proveedor y presionar #.
 - La contrasena vuelve al valor por defecto: 1234.
 - Si no tienes el codigo maestro, contactar directamente al proveedor del sistema.
 

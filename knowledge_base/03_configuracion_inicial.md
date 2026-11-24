@@ -6,13 +6,22 @@ Para configurar Sentinel Guard por primera vez, la forma mas rapida es seguir es
 
 https://youtu.be/SpDamcPJXHs
 
-Se recomienda ver el video antes de comenzar la configuracion. Muestra como empezar desde cero: como configurar el Modulo Master, como vincularlo con la red WiFi, como vincularlo con Telegram y como dejar el equipo listo para operar. Este video es la guia rapida recomendada para todo usuario nuevo que recien recibe el kit y necesita empezar a usarlo.
+Se recomienda ver el video antes de comenzar la configuracion. En el video la app aparece con un diseño anterior: los pasos son los mismos, pero los nombres de algunas pantallas y botones cambiaron (abajo estan los actuales). Muestra como empezar desde cero: como configurar el Modulo Master, como vincularlo con la red WiFi, como vincularlo con Telegram y como dejar el equipo listo para operar. Este video es la guia rapida recomendada para todo usuario nuevo que recien recibe el kit y necesita empezar a usarlo.
+
+## Instalar la app Sentinel Guard (Android e iOS)
+
+La guia rapida impresa que viene en la caja trae un codigo QR para cada sistema:
+
+- **iPhone (iOS)**: el QR lleva directo a la App Store; se instala como cualquier app.
+- **Android**: el QR lleva a una carpeta de descarga con el instalador de la app y el manual completo. Descarga el instalador, abrelo y acepta los permisos que pida el telefono para instalarlo.
+
+Al abrir la app por primera vez, acepta los permisos de Bluetooth y de notificaciones: sin Bluetooth no se puede vincular la central y sin notificaciones no te llegan las alarmas.
 
 ## Requisitos previos
 
 Antes de comenzar la configuracion, asegurese de tener:
 
-- La app Sentinel Guard descargada en el telefono, con el Bluetooth activado.
+- La app Sentinel Guard instalada en el telefono, con el Bluetooth activado.
 - El Modulo Master encendido y alimentado.
 - El nombre (SSID) y la contrasena de la red WiFi de 2.4 GHz donde se conectara el Master. El equipo no se conecta a redes de 5 GHz.
 - Opcional: Telegram instalado y tu ID de Telegram, si quieres recibir los avisos por Telegram.
@@ -23,8 +32,8 @@ Para crear una cuenta en la app:
 
 1. Abrir la app Sentinel Guard.
 2. Tocar "Registrate" (debajo de "¿No tienes cuenta?").
-3. En "Crear Cuenta" ingresar nombre de usuario (minimo 3 caracteres), correo electronico y contrasena.
-4. La contrasena debe tener entre 6 y 20 caracteres.
+3. En "Crear Cuenta" ingresar nombre de usuario (de 3 a 30 caracteres), un correo electronico valido y contrasena.
+4. La contrasena debe tener entre 6 y 20 caracteres; admite mayusculas, minusculas, numeros y caracteres especiales.
 5. Tocar "Crear Cuenta" y luego iniciar sesion con ese correo y contrasena.
 
 Tambien se puede entrar con Google o Apple sin crear una cuenta aparte.
@@ -35,11 +44,11 @@ Asi se da de alta, se agrega, se registra o se vincula el Master a tu cuenta: se
 
 ### Paso 1: Abrir la pantalla Agregar
 
-En la app toca "Agregar" en la barra inferior, o el boton "Agregar" (o el icono +) en la pantalla Inicio. Si todavia no tienes ningun equipo, el boton principal dice "Vincular un equipo". La tarjeta "Antes de empezar" resume lo que necesitas.
+En la app toca "Agregar" en la barra inferior, o el boton "Agregar" (o el icono +) en la pantalla Inicio. Si todavia no tienes ningun equipo, el boton principal dice "Vincular un equipo". Se abre la pantalla "Vincula tu Sentinel". La tarjeta "Antes de empezar" resume lo que necesitas; "Entendido, no volver a mostrar" la oculta. Si el Bluetooth esta apagado, la app pide activarlo.
 
 ### Paso 2: Poner el Master en modo emparejamiento
 
-Insertar un clip en el orificio trasero del Modulo Master y mantenerlo pulsado unos 3 segundos y soltar al oir los cinco pitidos cortos; no llegar a 10 segundos (eso borra el equipo). Desde ese momento el LED de estado del Master parpadea: el equipo esta en modo emparejamiento.
+Insertar un clip en el orificio trasero del Modulo Master y mantenerlo pulsado unos 5 segundos (el equipo entra a partir de 3 segundos) y soltar al oir los cinco pitidos cortos, que suenan tan seguidos que parecen un solo pitido; no llegar a 10 segundos (eso borra el equipo). Desde ese momento el LED de estado del Master parpadea: el equipo esta en modo emparejamiento.
 
 Precaucion: si se mantiene pulsado 10 segundos o mas, se ejecuta un reset de fabrica que borra toda la configuracion guardada en el Master: red WiFi, nombre, modo de bengala, tiempo de salida, horarios y estado de armado.
 
@@ -48,6 +57,7 @@ Precaucion: si se mantiene pulsado 10 segundos o mas, se ejecuta un reset de fab
 1. Acercate al Master: el Bluetooth alcanza unos 10 metros.
 2. La app busca sola ("Buscando dispositivos cercanos…"). El equipo aparece como "Sentinel Master" con el texto "Listo para vincular".
 3. Toca el equipo. Si solo hay uno cerca, la app se conecta sola ("Conectando con la central…").
+4. Si en un minuto no aparece o no conecta, apaga y enciende el Master y repite desde el Paso 2.
 
 ### Paso 4: Configurar dispositivo (WiFi, Telegram y nombre)
 
@@ -55,14 +65,14 @@ Se abre "Configurar dispositivo" (PASO 2 DE 3):
 
 1. **Red WiFi (Requerido)**: elige tu red de la lista. Si no aparece, elige "Escribirla a mano..." y escribela en "Nombre de tu red WiFi". Si no aparece en la lista puede ser de 5 GHz. Tambien puedes usar "Escanear el QR de la red".
 2. **Contraseña de la WiFi (Requerido)**: la contrasena de la red WiFi.
-3. **Avisos por Telegram (opcional)**: tu CHATID y, si quieres avisos en un grupo, el CHATID GRUPAL.
+3. **Avisos por Telegram (opcional)**: tu CHATID y, si quieres avisos en un grupo, el CHATID GRUPAL. Si tu cuenta ya esta vinculada con Telegram, la seccion dice "vinculado" y tu CHATID aparece solo. El boton "?" junto a CHATID abre el bot de Sentinel Guard, que te da tu ID; el "?" junto a CHATID GRUPAL explica como sacar el del grupo.
 4. **Nombre del dispositivo (Requerido)**: un nombre para identificar al Master, por ejemplo "Recepcion", "Oficina principal" o "Casa playa".
 
-Toca "Confirmar". Por Bluetooth solo viajan al Master la red WiFi, la contrasena y el nombre; los IDs de Telegram los guarda la app en tu cuenta.
+Toca "Confirmar" ("Cancelar" vuelve a "Vincula tu Sentinel"). Por Bluetooth solo viajan al Master la red WiFi, la contrasena y el nombre; los IDs de Telegram los guarda la app en tu cuenta.
 
 ### Paso 5: Conexion y registro
 
-El Master intenta conectarse a la red WiFi; mientras tanto la app muestra "Comprobando la conexión a tu WiFi…" y espera hasta 50 segundos. Si conecta, muestra "Conectado a Wi-Fi exitosamente.", registra el equipo en tu cuenta y espera a que se reinicie ("Dispositivo reiniciando en: N segundos"). Al final aparece "CONFIGURACION COMPLETA - Tu Sentinel ya esta en linea" y el boton "Ir al inicio".
+El Master intenta conectarse a la red WiFi; mientras tanto la app muestra "Comprobando la conexión a tu WiFi…" y espera hasta 50 segundos. Si conecta, muestra "Conectado a Wi-Fi exitosamente.", registra el equipo en tu cuenta y espera a que se reinicie ("Dispositivo reiniciando en: N segundos", una cuenta de unos 30 segundos). Al arrancar de nuevo, el Master pita para confirmar. Al final aparece "CONFIGURACION COMPLETA - Tu Sentinel ya esta en linea" y el boton "Ir al inicio".
 
 Si el equipo ya estaba en otra cuenta, al emparejarlo pasa a la tuya; la app puede mostrar "Esperando a que la central se conecte…" mientras tanto.
 
@@ -70,7 +80,7 @@ Si el equipo ya estaba en otra cuenta, al emparejarlo pasa a la tuya; la app pue
 
 Mensajes que puede mostrar la app y que hacer:
 
-- "No se pudo conectar a la WiFi. Revisa la contraseña (la red debe ser de 2.4 GHz).": con el firmware de octubre de 2026 sale a los pocos segundos si la contrasena es incorrecta. La central sigue en emparejamiento y conserva la WiFi que tenia antes, asi que puedes corregir la contrasena y tocar "Confirmar" otra vez. Si ya estaba bien, apaga y enciende la central y vuelve a empezar.
+- "No se pudo conectar a la WiFi. Revisa la contraseña (la red debe ser de 2.4 GHz).": en los equipos actualizados (octubre de 2026 en adelante) sale a los pocos segundos si la contrasena es incorrecta. La central sigue en emparejamiento y conserva la WiFi que tenia antes, asi que puedes corregir la contrasena y tocar "Confirmar" otra vez. Si ya estaba bien, apaga y enciende la central y vuelve a empezar.
 - "La conexion tardo demasiado": puede ser una red de 5 GHz, un SSID o contrasena incorrectos, o que la central ya salio del modo emparejamiento.
 - "Se perdio la conexion con la central" o "No hay conexion con la central": vuelve a ponerla en modo emparejamiento con el clip e intentalo otra vez.
 
@@ -78,15 +88,16 @@ Si la contrasena WiFi esta mal, el Master sigue en modo emparejamiento hasta que
 
 ## Tiempo limite de emparejamiento
 
-El modo emparejamiento dura 5 minutos desde los pitidos. Si no se completa en ese tiempo, el Master apaga el Bluetooth, sale del modo emparejamiento y se reinicia solo. Sera necesario repetir el proceso desde el Paso 2 (clip unos 3 segundos, hasta los cinco pitidos).
+El modo emparejamiento dura 5 minutos desde los pitidos. Si no se completa en ese tiempo, el Master apaga el Bluetooth, sale del modo emparejamiento y se reinicia solo. Sera necesario repetir el proceso desde el Paso 2 (clip unos 5 segundos, hasta los cinco pitidos).
 
 ## Vinculacion con Telegram
 
-Telegram es opcional y se vincula dentro del mismo emparejamiento, en "Avisos por Telegram (opcional)":
+Telegram es opcional: la app funciona sola. Si quieres los avisos tambien por Telegram:
 
-1. Para conocer tu ID de Telegram, toca "Obtenerlo ahora" en la tarjeta "Antes de empezar" (abre el bot de Sentinel Guard, @esp32_space_bot, que te muestra tu ID), o envia /id al bot. El bot contesta "Tu Chat ID es: ...".
-2. Escribe ese numero en CHATID al configurar el dispositivo.
-3. Si lo agregas mas tarde, se hace en la ficha del equipo ("Ver detalles y ajustes" > "Editar" > "Agregar usuario o grupo"), o en Perfil > "Chat ID de Telegram" para tu cuenta.
+1. Instala Telegram y abre el bot de Sentinel Guard ("Sentinel Guard Bot", usuario @esp32_space_bot). Lo mas facil es escanear el QR de la guia rapida de la caja, o tocar "Obtenerlo ahora" en la tarjeta "Antes de empezar" de la app. Pulsa "Iniciar" en Telegram.
+2. Vincula tu cuenta desde la app: en Perfil toca "Chat ID de Telegram" y luego "Abrir el bot". En Telegram pulsa "Iniciar"; el bot te confirma y te da tu ID. Al volver a la app el numero se rellena solo; si vuelves antes de que conteste el bot, toca "Comprobar ahora".
+3. Tambien puedes escribirlo a mano: envia /id al bot (contesta "Tu Chat ID es: ...") y escribe ese numero en "Chat ID de Telegram" o en CHATID al configurar el dispositivo. El Chat ID no es tu numero de telefono.
+4. Para un equipo concreto, los destinatarios se cambian en su ficha ("Ver detalles y ajustes" > "Editar" > "Agregar usuario o grupo").
 
 Cada equipo admite hasta tres destinatarios de Telegram: dos usuarios y un grupo. Para que otra persona controle el equipo desde Telegram, el administrador usa /adduser (ver Usuarios y Permisos).
 
@@ -94,14 +105,15 @@ Cada equipo admite hasta tres destinatarios de Telegram: dos usuarios y un grupo
 
 Si se desea que varias personas reciban notificaciones de alarma en un grupo compartido:
 
-1. Crear un grupo en Telegram.
-2. Agregar al bot de Sentinel Guard como miembro del grupo y escribir /id en el grupo. El bot contesta con el numero del grupo (empieza por -).
+1. Crear un grupo en Telegram con las personas que deben enterarse.
+2. Agregar al bot de Sentinel Guard (@esp32_space_bot) como miembro del grupo y escribir /id en el grupo. El bot contesta con el numero del grupo (empieza por -).
 3. Copiar ese numero en "CHATID GRUPAL" al emparejar, o en la ficha del equipo con "Agregar usuario o grupo" > "Grupo".
-4. El grupo solo recibe alertas y notificaciones. No es posible enviar comandos al sistema desde el grupo, solo desde el chat directo con el bot.
+4. El grupo solo recibe avisos. No es posible enviar comandos al sistema desde el grupo, solo desde el chat directo con el bot.
+5. Que avisos recibe el grupo se elige en Perfil > Notificaciones > "Grupo de Telegram: todos los avisos": apagado, el grupo solo recibe alarmas y SOS; encendido, tambien sabe cuando armas y desarmas.
 
 ## Configuracion del kit completo paso a paso
 
-El kit Sentinel Guard incluye el Modulo Master (ESP32 + LoRa), sensores PIR, sensores magneticos, sirena, modulo de bengala y teclado. Para configurar todo el sistema como un kit nuevo:
+El kit Sentinel Guard incluye el Modulo Master, sensores PIR, sensores magneticos, sirena, modulo de bengala y teclado. Para configurar todo el sistema como un kit nuevo:
 
 ### Paso 1: Encender el Master
 
@@ -113,16 +125,17 @@ El kit Sentinel Guard incluye el Modulo Master (ESP32 + LoRa), sensores PIR, sen
 
 Crear la cuenta en la app (si no existe) y seguir el procedimiento de la seccion "Configuracion del Master via Bluetooth (BLE)". Al terminar, el Master queda conectado a WiFi y registrado en tu cuenta; no hay que agregarlo otra vez.
 
-### Paso 3: Encender los modulos secundarios (slaves)
+### Paso 3: Encender y vincular los demas modulos
 
-Los modulos no vienen vinculados de fabrica con el Master (no todos los kits usan todos los modulos). No se dan de alta a mano, pero cada uno hay que autorizarlo una vez:
+Los modulos no vienen vinculados de fabrica con el Master (no todos los kits usan todos los modulos). El Master tiene que estar ya configurado y en linea: no se pueden vincular modulos antes. No se dan de alta a mano, pero cada uno hay que autorizarlo una vez:
 
 1. Colocar cada modulo en su ubicacion fisica definitiva.
 2. Conectar o insertar sus pilas segun el caso.
 3. Verificar que cada modulo parpadee su LED de encendido.
-4. Autorizarlo: al encenderse, el Master lo escucha por LoRa y lo deja en espera ("sensor nuevo"). Al dueño le llega una notificacion y un mensaje de Telegram; se autoriza en la app (ficha del equipo > "Sensores nuevos" > "Autorizar") o con el boton del mensaje de Telegram. Hasta entonces ese modulo no dispara la alarma.
+4. Autorizarlo: al encenderse, el Master lo detecta y lo deja en espera ("sensor nuevo"). Al dueño le llega una notificacion y un mensaje de Telegram ("Sensor nuevo"); se autoriza en la app (ficha del equipo > "Sensores nuevos" > "Autorizar" y confirmar con "Autorizar") o con el boton "Autorizar" del mensaje de Telegram ("Ignorar" si no lo reconoces). Hasta entonces ese modulo no dispara la alarma. Ya autorizado, pasa a "Sensores LoRa" como "Activo".
+5. Si no llega el aviso, apaga y enciende el modulo.
 
-Esto aplica a los sensores de movimiento (PIR) y de puerta/ventana (magneticos), al teclado y a la bengala. La sirena no necesita autorizacion. Conviene encenderlos de uno en uno: el Master guarda como mucho 5 modulos en espera a la vez.
+Esto aplica a los sensores de movimiento (PIR) y de puerta/ventana (magneticos), al teclado y a la bengala. La sirena no necesita autorizacion. Conviene encenderlos de uno en uno: el Master guarda como mucho 5 modulos en espera de autorizacion a la vez (ese limite es de modulos en espera, no del total de modulos).
 
 ### Paso 4: Telegram (opcional)
 

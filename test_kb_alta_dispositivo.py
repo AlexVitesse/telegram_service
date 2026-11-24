@@ -155,6 +155,22 @@ def test_bengala_sin_datos_inventados():
         assert "20 metros cuadrados" not in t, f
 
 
+#: Lo que Senti no debe poder repetirle a un cliente (revision 24-nov-2026:
+#: contesto "python"). @esp32_space_bot es el usuario real del bot y se queda.
+_JERGA = re.compile(
+    r"python|\bvps\b|mqtt|firebase|rtdb|hivemq|\btls\b|broker|websocket|\bntp\b"
+    r"|puerto 88|\.json|\.py\b|firmware|reload_kb|stop_alarm|device_id"
+    r"|chatid_central|\(rag\)|servidor|backend|cooldown|slaves?\b|ionic"
+    r"|esp32(?!_space_bot)"
+)
+
+
+def test_kb_sin_jerga_interna():
+    for f, t in _kb_texto().items():
+        m = _JERGA.search(t)
+        assert not m, f"{f}: '{m.group(0)}' en ...{t[max(0, m.start() - 40):m.end() + 40]}..."
+
+
 if __name__ == "__main__":
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0

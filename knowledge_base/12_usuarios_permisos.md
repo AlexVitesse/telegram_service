@@ -21,13 +21,13 @@ Cada central admite hasta **10 personas** ademas del dueño. Solo el dueño ve l
 
 ### Que puede hacer un miembro de la familia
 
-- **Si puede:** ver el estado de la central, armar, desarmar, usar el boton de panico (SOS), recibir las notificaciones push y usar el modo local en la red de la casa. Ve los horarios del dueño, pero **solo para leerlos**.
-- **No puede:** editar la central (nombre, tiempos, bengala, WiFi), autorizar, borrar ni renombrar sensores, cambiar los destinatarios de Telegram ni invitar o quitar a otras personas.
+- **Si puede:** ver el estado de la central, armar, desarmar, usar el boton de panico (SOS) y recibir las notificaciones push. Ve los horarios del dueño, pero **solo para leerlos**.
+- **No puede:** editar la central (nombre, tiempos, bengala, WiFi), autorizar, borrar ni renombrar sensores, cambiar los destinatarios de Telegram ni invitar o quitar a otras personas. Tampoco tiene el control sin internet (cuando la app habla directo con la central en la red de la casa): eso es solo del dueño, asi que un miembro necesita internet para armar o desarmar.
 - **Cada vez que un miembro arma, desarma o pide panico, al dueño le llega un aviso con su nombre.** Ese aviso no se puede apagar.
 
 ### Quitar a alguien o salir
 
-- **El dueño quita a alguien:** en "Personas con acceso", toca **"Quitar"** junto a su nombre. Esa persona deja de ver la central al momento y le llega el aviso "Ya no tienes acceso". Si esa persona era el "Usuario 2" de Telegram de la central, tambien se le quita de ahi. La central cambia su llave de modo local, asi que tampoco la puede controlar desde la red de la casa.
+- **El dueño quita a alguien:** en "Personas con acceso", toca **"Quitar"** junto a su nombre. Esa persona deja de ver la central al momento y le llega el aviso "Ya no tienes acceso". Si esa persona era el "Usuario 2" de Telegram de la central, tambien se le quita de ahi.
 - **Un miembro se sale:** en la ficha de la central, el boton de abajo dice **"Salir de esta central"**. La central sigue igual para el dueño y los demas.
 - **Si la central cambia de dueño** (alguien la resetea y la da de alta con su cuenta) o el dueño la borra, todos los miembros pierden el acceso y los codigos pendientes dejan de valer.
 
@@ -42,21 +42,21 @@ Los permisos de usuario del bot se configuran (o programan) desde Telegram. Conf
 ### Pasos para configurar un nuevo permiso
 
 1. Paso 1: El dueño de la central envia /adduser al bot de Telegram, en chat privado.
-2. Paso 2: El bot genera un codigo de invitacion con el formato /join_DEVICE_ID.
+2. Paso 2: El bot genera un codigo de invitacion: un comando que empieza por /join_ seguido de un codigo.
 3. Paso 3: El administrador comparte ese codigo con el nuevo usuario por un medio externo (WhatsApp, SMS, correo).
-4. Paso 4: El nuevo usuario envia /join_DEVICE_ID al bot desde un chat privado (no desde un grupo).
+4. Paso 4: El nuevo usuario envia ese comando /join_... al bot desde un chat privado (no desde un grupo).
 5. Paso 5: El bot notifica al dueño del equipo con la solicitud del nuevo usuario. La solicitud expira en 5 minutos.
-6. Paso 6: El dueño aprueba el permiso con el comando que le llega en el aviso (/approve_CHATID_CENTRAL). Solo el dueño de esa central puede aprobarlo.
+6. Paso 6: El dueño aprueba el permiso tocando el comando /approve_... que le llega ya escrito en el aviso. Solo el dueño de esa central puede aprobarlo.
 7. Paso 7: El nuevo usuario queda registrado con permisos de acceso configurados.
 
-Asi se configura un permiso nuevo en el sistema. Como se configuran los permisos: con los comandos /adduser, /approve_CHATID, /desvincular y /permisos desde Telegram. Para revisar quien recibe los avisos de cada equipo, mira la ficha del equipo en la app (Ajustes > Avisos de Telegram).
+Asi se configura un permiso nuevo en el sistema. Como se configuran los permisos: con los comandos /adduser, /approve_..., /desvincular y /permisos desde Telegram. Para revisar quien recibe los avisos de cada equipo, mira la ficha del equipo en la app (Ajustes > Avisos de Telegram).
 
 **Que si se hace desde la app.** El alta y la aprobacion de usuarios del bot -/adduser, /approve, /desvincular- son de Telegram. En la app se hacen dos cosas: compartir la central con otras cuentas de la app (familia, desde la version 8.2, en "Personas con acceso") y editar los DESTINATARIOS de Telegram de cada equipo, en la ficha del dispositivo: hasta tres por equipo, dos usuarios y un grupo de Telegram. Son los que reciben las notificaciones de ese equipo por Telegram.
 
 ### Configurar permisos: resumen de comandos
 
 - /adduser - configurar un nuevo permiso, agregar un nuevo usuario.
-- /approve_CHATID - aprobar la configuracion del permiso del nuevo usuario.
+- /approve_... - aprobar el permiso del nuevo usuario (el bot te lo da ya escrito).
 - /desvincular quita tu propio acceso; /permisos en la version actual no muestra la lista de usuarios.
 
 ## Roles del sistema
@@ -75,11 +75,11 @@ El dueño de un equipo es la cuenta que lo empareja en la app por Bluetooth. Su 
 Solo un administrador puede agregar usuarios. El proceso es el siguiente:
 
 1. El admin ejecuta el comando **/adduser** en el bot.
-2. El bot genera un codigo de invitacion unico con formato: `/join_DEVICE_ID`.
+2. El bot genera un codigo de invitacion unico: un comando que empieza por `/join_`.
 3. El admin comparte ese codigo con el nuevo usuario por cualquier medio externo (WhatsApp, SMS, correo, en persona, etc.).
-4. El nuevo usuario abre el bot de Telegram y envia el comando `/join_DEVICE_ID` que recibio.
+4. El nuevo usuario abre el bot de Telegram y envia el comando `/join_...` que recibio.
 5. El bot notifica al admin: "Nueva solicitud de acceso de [Nombre del usuario]".
-6. El admin ejecuta **/approve_CHATID** (donde CHATID es el identificador del solicitante).
+6. El admin toca el comando **/approve_...** que le llega en el aviso.
 7. El usuario queda registrado con acceso a los dispositivos asignados y recibe "¡Acceso aprobado!". Ocupa un hueco libre de usuario del equipo (o el de grupo, si el ID es de un grupo).
 
 Otra forma, sin invitacion: el dueño puede agregar el Chat ID de otra persona en la ficha del equipo en la app ("Editar" > "Agregar usuario o grupo" > "Usuario").

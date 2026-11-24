@@ -48,6 +48,15 @@ def test_app_da_la_ruta_y_no_comandos():
         assert boton in p, f"falta {boton!r} en el mapa de la app"
 
 
+def test_los_dos_canales_prohiben_la_jerga_interna():
+    # 23-nov: Senti le dijo "python" a un cliente. La regla va en los dos
+    # prompts del RAG y manda sobre "no parafrasees".
+    for p in (ai_handler.RAG_CHAT_PROMPT, ai_handler.RAG_CHAT_PROMPT_APP):
+        assert "LENGUAJE DE CLIENTE" in p
+        for palabra in ("Python", "VPS", "Firebase", "MQTT", "ESP32", "firmware"):
+            assert palabra in p, f"la regla no nombra {palabra}"
+
+
 class _KB:
     def search(self, *a, **k):
         class T:

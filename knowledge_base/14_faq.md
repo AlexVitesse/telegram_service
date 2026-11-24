@@ -23,7 +23,7 @@ La app es una de las tres formas de controlar Sentinel Guard; las otras son el b
 Si te preguntas como vinculo un dispositivo, como registro un dispositivo, como agrego, añado o emparejo mi equipo, o como doy de alta un dispositivo nuevo (el Master o central del equipo): se hace desde la app Sentinel Guard por Bluetooth. Antes de empezar ten a mano tu red WiFi de 2.4 GHz con su contraseña y, si quieres recibir avisos, tu ID de Telegram.
 
 1. En la app, pulsa "Agregar" en la barra inferior (o el icono + de la pantalla Inicio).
-2. Pon el equipo en modo emparejamiento: busca el orificio trasero del Master, inserta un clip, mantén pulsado unos 3 segundos y suelta al oír los cinco pitidos; no llegues a 10 segundos (eso borra el equipo con un reset de fabrica).
+2. Pon el equipo en modo emparejamiento: busca el orificio trasero del Master, inserta un clip, mantén pulsado unos 5 segundos (entra a partir de 3 segundos) y suelta al oír los cinco pitidos; no llegues a 10 segundos (eso borra el equipo con un reset de fabrica).
 3. Acercate al dispositivo. El Bluetooth alcanza unos 10 metros.
 4. Cuando aparezca "Sentinel Master", tocalo. En la pantalla "Configurar dispositivo" (Paso 2 de 3) ingresa el nombre de tu red WiFi (de la lista o con "Escribirla a mano..."), su contraseña, tu ID de Telegram en "Avisos por Telegram (opcional)" y el "Nombre del dispositivo". Pulsa "Confirmar".
 5. El Master se conecta a WiFi, queda registrado en tu cuenta y se reinicia. La app termina con "CONFIGURACION COMPLETA".
@@ -40,7 +40,7 @@ Puedes tener multiples dispositivos en una misma cuenta. Cada dispositivo se vin
 
 ## Funciona sin internet?
 
-Parcialmente. Sin internet el Master sigue vigilando: los sensores, la sirena y el teclado funcionan por LoRa directamente con el Master, y ejecuta los horarios programados de forma autonoma usando la hora que sincronizo por NTP. Si el Master se reinicia sin internet, no ejecuta horarios hasta recuperar la hora. Sin internet no recibiras notificaciones ni podras controlar el sistema de forma remota desde la app o Telegram.
+Parcialmente. Sin internet el Master sigue vigilando: los sensores, la sirena y el teclado hablan directo con el Master, y ejecuta los horarios programados por su cuenta con la hora que tomo de internet. Si el Master se reinicia sin internet, no ejecuta horarios hasta recuperar la hora. Sin internet no recibiras notificaciones ni podras controlar el sistema a distancia desde la app o Telegram. Estando en casa, la app del dueño puede armar y desarmar hablando directo con una central actualizada, por la WiFi de la casa o por la red propia de la central (el telefono puede pedirte permiso para unirse); el teclado tambien funciona sin internet.
 
 ## Puedo usar el bot en un grupo de Telegram?
 
@@ -48,7 +48,7 @@ Si, pero con limitaciones. El grupo solo recibe notificaciones de alerta (alarma
 
 ## Que pasa si se va la luz?
 
-El Master (ESP32) y la sirena necesitan alimentacion electrica continua para funcionar. Los sensores LoRa funcionan con bateria propia y seguiran operando. Si se va la luz, el Master se desconecta, pero al volver la electricidad se reconecta automaticamente y retoma su operacion normal: recuerda si estaba armado, su red WiFi, el modo de bengala y el horario.
+El Master, la sirena y la bengala necesitan alimentacion electrica continua para funcionar. Los sensores LoRa funcionan con bateria propia y seguiran operando. Si se va la luz, el Master se desconecta, pero al volver la electricidad se reconecta automaticamente y retoma su operacion normal: recuerda si estaba armado, su red WiFi, el modo de bengala y el horario.
 
 ## Cuanto alcance tiene el sistema?
 
@@ -70,6 +70,14 @@ Si, de dos formas:
 
 Desde la version 8.2 de la app: abre la ficha de la central ("Ver detalles y ajustes"), baja a "Personas con acceso" y toca "Invitar". Si la persona esta contigo, que escanee el QR con "Tengo un codigo" en la pantalla de Inicio de su app (vence en 15 minutos). Si no, usa "Invitar por WhatsApp", que manda un codigo que vence en 24 horas. Para quitar a alguien, toca "Quitar" junto a su nombre; un miembro puede irse con "Salir de esta central".
 
+## Como instalo la app en Android o en iPhone?
+
+Con los codigos QR de la guia rapida impresa de la caja: en iPhone te lleva a la App Store; en Android, a una carpeta de descarga con el instalador de la app y el manual completo. Al abrirla, acepta los permisos de Bluetooth y notificaciones. Detalle en "Instalar la app Sentinel Guard (Android e iOS)".
+
+## Como vinculo mi Telegram con la app?
+
+En la app, Perfil > "Chat ID de Telegram" > "Abrir el bot". En Telegram pulsa "Iniciar": el bot te confirma y, al volver a la app, tu Chat ID aparece solo (si no, toca "Comprobar ahora"). Tambien puedes enviar /id al bot y escribir el numero a mano.
+
 ## Como se cuanto dura la bateria de los sensores?
 
 Los sensores LoRa son de bajo consumo energetico. La duracion de la bateria depende del modelo del sensor y la frecuencia de uso. El sistema no mide el nivel de bateria, pero con el comando /sensors en Telegram puedes ver cada sensor, su senal y hace cuanto se escucho por ultima vez; un sensor que lleva mucho sin oirse puede tener la bateria agotada.
@@ -78,12 +86,12 @@ Los sensores LoRa son de bajo consumo energetico. La duracion de la bateria depe
 
 Por seguridad, cuando el Master escucha un sensor LoRa que no conoce, no lo deja disparar la alarma hasta que el dueño lo autorice. Al dueño le llega una notificacion "Sensor nuevo" y un mensaje privado de Telegram con botones. Se autoriza de dos formas:
 - En la app: ficha del equipo > "Sensores nuevos" > "Autorizar".
-- En Telegram: con el boton del aviso, o con /sensors y la palomita junto al sensor.
+- En Telegram: con el boton "Autorizar" del aviso, o con /sensors y su boton "Autorizar".
 Autorizalo solo si acabas de instalar ese sensor tu. Si la app o Telegram dicen que la central ya no lo tiene en espera (pasa si el Master se reinicio o si llegaron mas de 5 sensores nuevos a la vez), apaga y enciende el sensor para que vuelva a pedir permiso.
 
 ## Como elimino o renombro un sensor?
 
-- **Eliminar**: en la app, ficha del equipo > "Sensores LoRa" > papelera; o en Telegram con /sensors y la papelera junto al sensor (solo el dueño, en chat privado). Pide confirmacion porque esa zona deja de vigilarse. Si el sensor sigue encendido, la proxima vez que se active volvera a pedir permiso como sensor nuevo; para quitarlo del todo, apagalo o quitale la bateria.
+- **Eliminar**: en la app, ficha del equipo > "Sensores LoRa" > papelera; o en Telegram con /sensors y el boton "Eliminar" del sensor (solo el dueño, en chat privado). Pide confirmacion porque esa zona deja de vigilarse. Si el sensor sigue encendido, la proxima vez que se active volvera a pedir permiso como sensor nuevo; para quitarlo del todo, apagalo o quitale la bateria.
 - **Renombrar**: solo desde la app, con el lapiz junto al sensor (hasta 32 caracteres, se permiten acentos y ñ). El nombre es el que sale en los avisos de alarma.
 Al dueño siempre le llega un mensaje privado cuando se elimina o renombra un sensor, para que se entere si lo hizo otra persona.
 
@@ -93,7 +101,7 @@ Cada sensor avisa al Master que sigue vivo una vez al dia. Si pasan mas de 25 ho
 
 ## Es seguro el sistema?
 
-Si. La comunicacion MQTT utiliza cifrado TLS a traves del puerto 8883 (o del 8884, WebSocket tambien cifrado, si el proveedor de internet bloquea el 8883). Los datos se almacenan en Firebase con autenticacion. El teclado fisico tiene proteccion anti-intrusion: despues de 5 intentos fallidos de contrasena, se bloquea durante 10 minutos.
+Si. La comunicacion de la central con la nube va cifrada, y las ordenes que la app del dueño manda directo a la central en casa van firmadas, para que nadie mas pueda darlas. Tus datos se guardan en la nube y solo se accede a ellos con tu cuenta. Un sensor nuevo no puede disparar la alarma hasta que el dueño lo autoriza. El teclado fisico tiene proteccion anti-intrusion: despues de 5 intentos fallidos de contrasena, se bloquea durante 10 minutos.
 
 ## Puedo cambiar el nombre de un dispositivo?
 
@@ -107,7 +115,7 @@ Es el periodo que tienes para salir del area protegida despues de armar el siste
 
 Si te preguntas como desvinculo un dispositivo, como borro un dispositivo, como quito un equipo o como elimino un equipo de mi cuenta, hay dos cosas distintas:
 
-- **Borrar el equipo de la app**: abre la ficha del equipo y toca "Borrar dispositivo", luego "Eliminar". Se borra el equipo de tu cuenta y su configuracion en la nube: listas de cuentas, destinatarios de Telegram y horarios. Ademas se manda a la central la orden de apagar su horario; si esta desconectada, se la manda el servidor en cuanto vuelva a conectarse, aunque pasen dias. Con el firmware de octubre de 2026, si la central esta conectada al borrarla (o en cuanto se reinicie), tambien olvida su horario, tiempo de salida y modo de bengala; conserva la WiFi y su nombre. Con un firmware anterior, la memoria local del Master (nombre, tiempo de salida y modo de bengala) no se borra. Para dejarla limpia del todo, haz el reset de fabrica (clip 10 segundos o mas). El equipo sigue funcionando, pero para volver a controlarlo desde la app hay que emparejarlo otra vez por Bluetooth (pestaña "Agregar", clip unos 3 segundos hasta los cinco pitidos). Solo el dueño de la central puede borrarla con toda su configuracion. Si la central ya es de otra cuenta (en la app sale como "Error al cargar"), "Borrar dispositivo" solo la quita de tu lista, sin tocar la central ni la cuenta de su dueño.
+- **Borrar el equipo de la app**: abre la ficha del equipo y toca "Borrar dispositivo", luego "Eliminar". Se borra el equipo de tu cuenta y su configuracion en la nube: listas de cuentas, destinatarios de Telegram y horarios. Ademas se manda a la central la orden de apagar su horario; si esta desconectada, se le manda en cuanto vuelva a conectarse, aunque pasen dias. En los equipos actualizados (octubre de 2026 en adelante), si la central esta conectada al borrarla (o en cuanto se reinicie), tambien olvida su horario, tiempo de salida y modo de bengala; conserva la WiFi y su nombre. En un equipo sin actualizar, la memoria local del Master (nombre, tiempo de salida y modo de bengala) no se borra. Para dejarla limpia del todo, haz el reset de fabrica (clip 10 segundos o mas). El equipo sigue funcionando, pero para volver a controlarlo desde la app hay que emparejarlo otra vez por Bluetooth (pestaña "Agregar", clip unos 5 segundos hasta los cinco pitidos). Solo el dueño de la central puede borrarla con toda su configuracion. Si la central ya es de otra cuenta (en la app sale como "Error al cargar"), "Borrar dispositivo" solo la quita de tu lista, sin tocar la central ni la cuenta de su dueño.
 - **Quitar solo tu Telegram**: el comando /desvincular quita tu chat de los destinatarios de un equipo. Dejas de recibir sus avisos por Telegram y de controlarlo desde ahi, pero el equipo sigue en la app. Para volver, pide al administrador un nuevo codigo con /adduser, o que el dueño vuelva a poner tu Chat ID en la ficha del equipo.
 
 ## Puedo programar horarios diferentes por dispositivo?
@@ -122,4 +130,4 @@ Tu Chat ID se pone en la app en Perfil > "Chat ID de Telegram", en "Avisos por T
 
 ## Que pasa si mantengo el clip mas de 10 segundos (reset de fabrica)?
 
-Con el clip pulsado unos 3 segundos el Master entra en modo emparejamiento y suenan cinco pitidos: suelta en ese momento. Si sigues pulsando hasta 10 segundos o mas, hace un reset de fabrica: borra la red WiFi, el nombre, el modo de bengala, el tiempo de salida, los horarios y el estado de armado guardados en el Master, y se reinicia. Despues hay que emparejarlo otra vez desde la app.
+Con el clip pulsado a partir de 3 segundos el Master entra en modo emparejamiento y suenan cinco pitidos muy seguidos (se oyen casi como uno): suelta en ese momento; lo recomendable es soltar hacia los 5 segundos. Si sigues pulsando hasta 10 segundos o mas, hace un reset de fabrica: borra la red WiFi, el nombre, el modo de bengala, el tiempo de salida, los horarios y el estado de armado guardados en el Master, y se reinicia. Despues hay que emparejarlo otra vez desde la app.

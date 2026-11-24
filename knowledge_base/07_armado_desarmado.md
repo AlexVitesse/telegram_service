@@ -2,7 +2,7 @@
 
 ## Armar desde la App
 
-Como armo la alarma desde la app: toca "Proteger ahora" (o el atajo "Salir") en la pantalla Inicio: arma todas tus centrales. Para armar solo un equipo, abre su ficha y toca "Proteger equipo". Tambien puedes pedirselo a Senti por escrito ("arma la alarma") tocando el boton flotante del asistente. El estado pasa de "Desarmado" a "Armado" y el cambio se envia en tiempo real al Master via MQTT.
+Como armo la alarma desde la app: toca "Proteger ahora" (o el atajo "Salir") en la pantalla Inicio: arma todas tus centrales. Para armar solo un equipo, abre su ficha y toca "Proteger equipo". Tambien puedes pedirselo a Senti por escrito ("arma la alarma") tocando el boton flotante del asistente. El estado pasa de "Desarmado" a "Armado" y la orden llega a la central en tiempo real.
 
 ## Armar desde Telegram
 
@@ -10,17 +10,17 @@ Usa el comando /on en el chat con el bot de Telegram. Si tienes multiples dispos
 
 ## Armar desde el Teclado fisico
 
-Ingresa tu codigo de seguridad (4 a 6 digitos) seguido de la tecla #. El teclado envia la instruccion al Master via LoRa.
+Ingresa tu codigo de seguridad (4 a 6 digitos) seguido de la tecla #. El teclado envia la orden directo al Master, sin internet.
 
 ## Respuesta del sistema al armar
 
 Cuando se arma el sistema ocurre la siguiente secuencia:
 
-1. El Master pita para confirmar (3 pitidos si se armo desde la app o Telegram, 1 pitido si fue con el teclado) y enciende el LED de armado.
+1. El Master pita para confirmar (3 pitidos cortos si se armo desde la app o Telegram, 1 pitido si fue con el teclado) y enciende el LED de armado.
 2. Inicia el tiempo de salida (60 segundos por defecto, configurable en la ficha del equipo).
 3. Durante el tiempo de salida suena un pitido doble cada 5 segundos.
 4. En los ultimos 10 segundos el zumbador suena de forma continua.
-5. Al terminar, una serie de 10 pitidos cortos indica que el armado esta completo y el sistema esta en vigilancia activa.
+5. Al terminar, una serie de 10 pitidos muy seguidos (se oye como un pitido final largo) indica que el armado esta completo y el sistema esta en vigilancia activa.
 
 El tiempo de salida permite al usuario abandonar el area protegida sin activar la alarma.
 

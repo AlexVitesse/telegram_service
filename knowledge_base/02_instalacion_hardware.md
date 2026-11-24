@@ -4,7 +4,7 @@
 
 El Master debe colocarse cerca del modem o router de internet, en un punto lo mas central posible del lugar a proteger. Requiere alimentacion electrica permanente. Puede montarse en pared o colocarse sobre un estante.
 
-Al encender el Master, los LEDs y el zumbador se activan durante un segundo como prueba. Despues el LED de estado parpadea rapido mientras se conecta a la red WiFi y queda encendido fijo cuando ya esta conectado. Si el equipo estaba armado antes de apagarse, vuelve armado. Antes de montar el Master en su ubicacion definitiva, se recomienda emparejarlo desde la app por Bluetooth (red WiFi de 2.4 GHz y nombre del dispositivo).
+Al encender el Master, a los pocos segundos (el manual habla de unos 10) los LEDs y el zumbador se activan durante un segundo como prueba: es la señal de que arranco bien. Despues el LED de estado parpadea rapido mientras se conecta a la red WiFi y queda encendido fijo cuando ya esta conectado. Si el equipo estaba armado antes de apagarse, vuelve armado. Antes de montar el Master en su ubicacion definitiva, hay que emparejarlo desde la app por Bluetooth (red WiFi de 2.4 GHz y nombre del dispositivo). Conviene que el enchufe quede a menos de 1 metro.
 
 ## Instalacion del Sensor PIR (movimiento)
 
@@ -38,20 +38,21 @@ La sirena emite una alerta sonora de 110dB y tiene proteccion IP65 contra polvo 
 
 ## Instalacion de la Bengala de Humo
 
-La bengala libera una cortina de humo que dificulta la vision del intruso. Para los datos del cartucho (composicion, cobertura, duracion), consulta su ficha tecnica.
+La bengala libera una cortina de humo que dificulta la vision del intruso: segun el manual del equipo cubre hasta 20 m³ y el humo sale durante 10 a 20 segundos. Para los demas datos del cartucho (composicion, advertencias), consulta su ficha tecnica.
 
 - Colocar el modulo a un maximo de 1 metro de un enchufe electrico.
 - Instalar a altura baja o media, ya que el humo sube naturalmente y asi se logra mejor cobertura.
 - Fijar firmemente el modulo a la superficie, ya que el cartucho genera un leve retroceso al detonarse.
-- LED verde encendido: indica que el cartucho de bengala esta correctamente instalado.
-- LED rojo encendido: indica que no se detecta cartucho de bengala (falta o mal colocado).
+- LED verde (parpadea al encender o al colocar el cartucho): el cartucho de bengala esta correctamente instalado.
+- LED rojo (parpadea al encender o al retirar el cartucho): no se detecta cartucho de bengala (falta o mal colocado).
+- Para colocar el cartucho hace falta presion firme y constante hasta que el LED parpadee en verde.
 - Mantener el modulo alejado de cortinas, papel y otros materiales inflamables.
-- Importante: despues de una detonacion, no tocar el cartucho usado hasta que se haya enfriado.
+- Importante: despues de una detonacion, no tocar el cartucho usado: esta muy caliente. Espera al menos 10 minutos a que se enfrie.
 
 ## Instalacion del Teclado
 
 El teclado es inalambrico y puede utilizarse de dos formas: como control remoto portatil o fijo en la pared.
 
 - Si se instala fijo, colocarlo cerca de la puerta principal para facilitar el armado y desarmado al entrar o salir.
-- Debe estar dentro del rango de comunicacion LoRa del Master (hasta 50 metros en campo abierto).
+- Debe estar dentro del alcance inalambrico del Master (hasta 50 metros en campo abierto).
 - No requiere alimentacion electrica por cable, funciona con bateria interna.

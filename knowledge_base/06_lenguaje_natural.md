@@ -87,9 +87,9 @@ Para ver o cambiar con seguridad el horario de un equipo, usa tambien /horarios 
 ### Disparo de emergencia
 No hay frase en lenguaje natural para disparar la sirena a mano. Usa /disparo en el bot o el boton Emergencia (SOS) de la app.
 
-## Preguntas informativas (RAG)
+## Preguntas informativas
 
-Ademas de ejecutar comandos, puedes hacer preguntas informativas y el bot buscara la respuesta en su base de conocimiento:
+Ademas de ejecutar comandos, puedes hacer preguntas informativas y el asistente buscara la respuesta en la guia de ayuda de Sentinel Guard:
 
 - "como configuro la bengala?"
 - "que es el modo pregunta?"
@@ -99,7 +99,7 @@ Ademas de ejecutar comandos, puedes hacer preguntas informativas y el bot buscar
 - "como cambio la contrasena del teclado?"
 - "como funciona el sistema de horarios?"
 
-El bot busca la informacion relevante en su documentacion interna y responde de forma clara y concisa.
+El asistente busca la informacion en la guia de ayuda y responde de forma clara y concisa. Si no la encuentra, te ofrece hablar con soporte.
 
 ## Tips para mejores resultados
 
