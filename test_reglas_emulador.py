@@ -85,13 +85,14 @@ def _sembrar():
             OTRA: {"ownerUid": A, "Nombre": "Oficina"},
         },
         "Miembros": {MAC: {B: {"nombre": "Beto", "alta": 1}}},
+        "Locales": {MAC: {"key": "ab" * 32, "pass": "p", "ssid": "Sentinel-1"}},
         "Horarios": {A: {"devices": {MAC: {"h1": {"activationTime": "22:00"}},
                                      OTRA: {"h1": {"activationTime": "08:00"}}}}},
         "Invitaciones": {"ABCDEFGH": {"mac": MAC, "invitadoPor": A, "expira": 1}},
     })
 
 
-ORDEN = lambda por, **extra: {"accion": "arm", "por": por, "ts": 1, **extra}
+ORDEN = lambda por, **extra: {"accion": "arm", "por": por, "ts": 1764000000000, **extra}
 
 # (quien, metodo, ruta, cuerpo, esperado, descripcion)
 CASOS = [
@@ -111,6 +112,13 @@ CASOS = [
     (B, "PUT", f"ESP32/{MAC}/Orden", ORDEN(A), False, "familia no firma como otro"),
     (B, "PUT", f"ESP32/{MAC}/Orden", {**ORDEN(B), "accion": "borrar"}, False, "acción inventada"),
     (B, "PUT", f"ESP32/{MAC}/Orden", {**ORDEN(B), "ts": "1"}, False, "ts no numérico"),
+    (B, "PUT", f"ESP32/{MAC}/Orden", {**ORDEN(B), "ts": 10 ** 15}, False, "ts del año 33658 (#273)"),
+    (B, "PUT", f"ESP32/{MAC}/Orden", {**ORDEN(B), "ts": 1}, False, "ts de 1970 (#273)"),
+    # Llave local fuera del nodo que lee familia (#274)
+    (A, "GET", f"Locales/{MAC}", None, True, "dueño lee la llave local"),
+    (B, "GET", f"Locales/{MAC}", None, False, "familia no lee la llave local"),
+    (C, "GET", f"Locales/{MAC}", None, False, "ajeno no lee la llave local"),
+    (A, "PUT", f"Locales/{MAC}/key", "x", False, "nadie escribe la llave desde la app"),
     (B, "PUT", f"ESP32/{MAC}/Orden", ORDEN(B, extra=1), False, "hijo extra en Orden"),
     (B, "PUT", f"ESP32/{MAC}/Orden", {"accion": "arm", "por": B}, False, "Orden sin ts"),
     (B, "DELETE", f"ESP32/{MAC}/Orden", None, False, "familia no borra Orden"),

@@ -1340,6 +1340,9 @@ class FirebaseManager:
             nombre_miembro = str(cuenta.get("userName") or cuenta.get("email") or "").strip()[:60] or "Sin nombre"
             self.db.reference("/").update({
                 f"ESP32/{mac}/miembros/{uid}": {"rol": "familia"},
+                # La copia de la llave local para apps < 8.2 sale en el mismo
+                # update: un miembro lee ESP32/{mac} entero (#274).
+                f"ESP32/{mac}/Local": None,
                 f"Miembros/{mac}/{uid}": {"nombre": nombre_miembro, "alta": int(time.time() * 1000),
                                           "invitadoPor": dueno},
                 f"Invitaciones/{codigo}/usadoPor": uid,
@@ -1418,6 +1421,7 @@ class FirebaseManager:
         self._borrar_horarios_de(mac)
         self.db.reference(f"ESP32/{mac}").delete()
         self.db.reference(f"Miembros/{mac}").delete()
+        self.db.reference(f"Locales/{mac}").delete()
         self._apagar_horario_central(mac)
         if self.mqtt_handler:
             self._olvidar(mac)

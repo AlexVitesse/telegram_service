@@ -3,7 +3,8 @@
 Modo local (Fase 3): el servidor guarda lo que la app necesita para hablar con
 la central sin internet.
 
-  - local_creds va a ESP32/<id>/Local, sin avisar a nadie ni loguear secretos.
+  - local_creds va a Locales/<id> (solo el dueno), sin avisar a nadie ni loguear
+    secretos; la copia de ESP32/<id>/Local (apps < 8.2) solo sin miembros (#274).
   - Incompletas o de una central sin alta: se ignoran.
   - La IP de la telemetria llega a la app.
   - Traspaso: la central cambia su llave (local_rotate).
@@ -23,12 +24,12 @@ MAC = "08_D1_F9_29_E4"
 LLAVE = "ab" * 32
 
 
-def _handler(dispositivos=(MAC,)):
+def _handler(dispositivos=(MAC,), nodo=None):
     h = MqttHandler.__new__(MqttHandler)
     h.device_id = MAC
     h.device_location = ""
     h.firebase_manager = MagicMock()
-    h.firebase_manager._get_all_devices.return_value = {d: {} for d in dispositivos}
+    h.firebase_manager._get_all_devices.return_value = {d: dict(nodo or {}) for d in dispositivos}
     h.firebase_manager.get_device_location.return_value = ""
     h.device_manager = MagicMock()
     h.last_arm_event_time = {}
@@ -65,13 +66,24 @@ def test_creds_se_guardan_sin_avisar_ni_loguear():
     finally:
         raiz.removeHandler(cap)
         raiz.setLevel(nivel)
-    h.firebase_manager.update_data.assert_called_once()
-    ruta, datos = h.firebase_manager.update_data.call_args.args
-    assert ruta == f"ESP32/{MAC}/Local", ruta
+    llamadas = [c.args for c in h.firebase_manager.update_data.call_args_list]
+    assert [r for r, _ in llamadas] == [f"Locales/{MAC}", f"ESP32/{MAC}"], llamadas
+    datos = llamadas[0][1]
+    assert llamadas[1][1] == {"Local": datos}, llamadas   # sin miembros: copia para apps < 8.2
     assert datos["key"] == LLAVE and datos["pass"] == "abcdefgh2345" and datos["port"] == 8080, datos
     h._on_event_callback.assert_not_called()
     filtrado = [t for t in cap.textos if LLAVE in t or "abcdefgh2345" in t]
     assert not filtrado, filtrado
+
+
+def test_creds_con_miembros_no_dejan_la_llave_en_el_nodo():
+    # Un miembro de familia lee ESP32/<id> entero: la llave (sirve para WiFi,
+    # horarios y sensores) no puede quedar ahi.
+    h = _handler(nodo={"miembros": {"u2": {"rol": "familia"}}})
+    h._handle_event(_creds())
+    llamadas = [c.args for c in h.firebase_manager.update_data.call_args_list]
+    assert llamadas[0][0] == f"Locales/{MAC}" and llamadas[0][1]["key"] == LLAVE, llamadas
+    assert llamadas[1] == (f"ESP32/{MAC}", {"Local": None}), llamadas
 
 
 def test_creds_incompletas_se_ignoran():

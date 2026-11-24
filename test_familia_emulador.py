@@ -194,7 +194,7 @@ def e06_reloj_adelantado_de_un_miembro_no_bloquea_a_otro():
 
 def e07_el_mismo_miembro_con_el_reloj_mal_no_se_bloquea_a_si_mismo():
     _unir(B)
-    assert _orden(B, "arm", 10 ** 15)                         # año 33658
+    assert _orden(B, "arm", 4 * 10 ** 12)                     # año 2096 (las reglas cortan en 2100)
     assert _esperar(lambda: _enviados(Command.ARM.value))
     assert _orden(B, "disarm")                                # ya con la hora bien
     assert _esperar(lambda: _enviados(Command.DISARM.value)), \

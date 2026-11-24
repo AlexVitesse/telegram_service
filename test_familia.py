@@ -77,6 +77,7 @@ def test_invitar_solo_el_dueno_y_otro_codigo_anula_el_anterior():
 
 def test_unirse_escribe_membresia_lista_y_nombre_y_borra_el_codigo():
     fm = _fm(_arbol())
+    fm.db.datos["ESP32"][MAC]["Local"] = {"key": "ab" * 32}   # copia de apps < 8.2
     codigo = _invitar(fm)
     (r, otra), fcm = _llamar(fm, "pedro", [("/equipos/unirse", {"codigo": codigo[:4].lower() + "-" + codigo[4:]}),
                                            ("/equipos/unirse", {"codigo": codigo})])
@@ -84,6 +85,7 @@ def test_unirse_escribe_membresia_lista_y_nombre_y_borra_el_codigo():
     assert otra[0] == 404, otra                               # un solo uso
     d = fm.db.datos
     assert d["ESP32"][MAC]["miembros"]["pedro"] == {"rol": "familia"}   # solo rol (C3)
+    assert "Local" not in d["ESP32"][MAC], d["ESP32"][MAC]          # la llave no queda al alcance (#274)
     assert d["Miembros"][MAC]["pedro"]["nombre"] == "Pedro"
     assert d["Usuarios"]["pedro"]["Dispositivos"] == [MAC]
     assert not d.get("Invitaciones"), d.get("Invitaciones")

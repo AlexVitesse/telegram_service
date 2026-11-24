@@ -947,19 +947,24 @@ class MqttHandler:
 
     def _guardar_creds_locales(self, device_id: str, d: dict) -> None:
         """
-        Credenciales del modo local (red propia y API firmada) a
-        ESP32/<id>/Local, que solo lee el dueno (reglas de la RTDB). Solo si
-        la central esta dada de alta: si no, el update crearia el nodo.
+        Credenciales del modo local (red propia y API firmada) a Locales/<id>,
+        que solo lee el dueno. La llave sirve para TODO (WiFi, horarios,
+        sensores), y un miembro de familia puede leer ESP32/<id> entero, asi que
+        no puede vivir ahi (auditoria 23-nov, #274). La copia vieja en
+        ESP32/<id>/Local, que leen las apps < 8.2, solo se deja si la central no
+        tiene miembros. Solo si la central esta dada de alta.
         """
         datos = {k: d.get(k) for k in ("ssid", "pass", "key", "port")}
         if not all(datos.values()) or len(str(datos["key"])) != 64:
             logger.warning(f"{device_id}: local_creds incompletas, se ignoran")
             return
-        if device_id not in (self.firebase_manager._get_all_devices() or {}):
+        nodo = (self.firebase_manager._get_all_devices() or {}).get(device_id)
+        if not isinstance(nodo, dict):
             logger.info(f"{device_id}: local_creds de una central sin alta, se ignoran")
             return
         datos["actualizado"] = int(time.time())
-        self.firebase_manager.update_data(f"ESP32/{device_id}/Local", datos)
+        self.firebase_manager.update_data(f"Locales/{device_id}", datos)
+        self.firebase_manager.update_data(f"ESP32/{device_id}", {"Local": None if nodo.get("miembros") else datos})
         logger.info(f"{device_id}: credenciales del modo local guardadas")
 
     def _ya_visto(self, event: MqttEvent) -> bool:
