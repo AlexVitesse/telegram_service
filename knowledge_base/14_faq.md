@@ -4,6 +4,27 @@
 
 Este documento reune las preguntas frecuentes (FAQ) mas comunes sobre el uso y funcionamiento del sistema de alarma Sentinel Guard. Incluye dudas generales sobre dispositivos, conectividad, bateria, alcance LoRa, multiples usuarios y cobertura sin internet. Para dudas especificas sobre instalacion o solucion de problemas, consulta los documentos dedicados.
 
+## Que es Senti y como se configura
+
+Senti es el asistente de Sentinel Guard. Vive dentro de la app: es el boton flotante que aparece en todas las
+pantallas. Le puedes escribir dudas sobre tu alarma ("como agrego un sensor?", "que hace la bengala en modo
+pregunta?") y tambien darle ordenes en tus palabras ("arma la alarma", "esta armada la casa?", "desarma la
+bodega"). Antes de desarmar te pregunta con dos botones y te dice que equipo va a desarmar.
+
+Senti no necesita configuracion: viene incluido en la app y funciona en cuanto inicias sesion. Solo necesitas:
+- Tener la app Sentinel Guard instalada y haber iniciado sesion con tu cuenta.
+- Tener tus equipos dados de alta en esa cuenta (o compartidos contigo por la familia): Senti solo arma y desarma
+  los equipos que ves en la app.
+- Conexion a internet en el telefono.
+
+Si no ves el boton de Senti, revisa en Perfil > Notificaciones > Senti que este encendido: desde ahi se muestra u
+oculta el asistente. Si quieres usar frases en lugar de comandos en Telegram, el bot tambien las entiende, sin
+configurar nada.
+
+Si te preguntas como configuro a Senti, como activo a Senti, como enciendo el asistente, como pongo el chat del
+asistente o como ajusto a Senti: no hay nada que configurar. Senti queda listo al iniciar sesion en la app y, si lo
+ocultaste, se vuelve a encender en Perfil > Notificaciones > Senti.
+
 ## Para que sirve la app Sentinel Guard
 
 La app Sentinel Guard sirve para controlar y vigilar tu alarma desde el telefono, en Android e iOS. Desde la app puedes:

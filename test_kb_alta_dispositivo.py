@@ -73,6 +73,14 @@ def _top_es_borrar(pregunta):
     assert "Borrar dispositivo" in top.text, donde
 
 
+def test_que_es_y_como_se_configura_senti():
+    # 24-nov: "como configuro a Senti?" traia la configuracion de la central y
+    # "que es Senti?" no encontraba nada.
+    for q in ("¿Cómo configuro a Senti?", "¿Qué es Senti?", "¿Cómo activo el asistente?"):
+        textos = [r.chunk.text for r in _buscar(q)]
+        assert any("Senti es el asistente" in t for t in textos), (q, [t[:40] for t in textos])
+
+
 def test_desvincular():
     _top_es_borrar("como desvinculo un dispositivo")
 
