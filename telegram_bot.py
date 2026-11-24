@@ -2783,8 +2783,8 @@ class TelegramBot:
                 "🛡️ Sistema IoT con sensores PIR, magnéticos, sirena y bengala de humo.",
                 "📱 Control desde app móvil, Telegram o teclado físico.",
                 "🔔 Notificaciones en tiempo real cuando algo pasa.",
-                "🔥 Disuasión activa: el humo cubre 20 m² en segundos.",
-                "🔐 Comunicación cifrada (MQTT con TLS).",
+                "🔥 Disuasión activa: una cortina de humo de hasta 20 m³ en segundos.",
+                "🔐 Comunicación cifrada con la nube.",
                 "",
                 "Hacé tu pregunta concreta o tocá '🛒 Quiero comprar'.",
             ]
