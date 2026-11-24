@@ -140,6 +140,11 @@ CASOS = [
     (B, "PUT", f"ESP32/{MAC}/miembros/{C}", {"rol": "familia"}, False, "familia no invita"),
     (C, "PUT", f"ESP32/{MAC}/miembros/{C}", {"rol": "familia"}, False, "ajeno no se mete solo"),
     (A, "PUT", f"ESP32/{MAC}/miembros/{C}", {"rol": "admin"}, False, "rol inventado"),
+    (A, "PUT", f"ESP32/{MAC}/miembros/{C}", {"rol": "familia"}, False, "dueño no mete miembros sin invitación (#279)"),
+    (A, "PATCH", f"ESP32/{MAC}", {"Nombre": "Casa 2", f"miembros/{C}": {"rol": "familia"}}, False,
+     "ni colado en un update del nodo (#279)"),
+    (A, "PATCH", f"ESP32/{MAC}", {"Nombre": "Casa"}, True, "el dueño sigue editando su central"),
+    (A, "PUT", f"ESP32/{MAC}/miembros/{B}", {"rol": "familia"}, True, "reescribir uno que ya existe, igual"),
     (A, "PUT", f"ESP32/{MAC}/miembros/{C}", {"rol": "familia", "nombre": "x"}, False, "miembros solo lleva rol"),
     (A, "PUT", f"ESP32/{MAC}/miembros/{C}", {}, True, "vacío = borrar (no existía)"),
     # Nombres de los miembros: solo los lee el dueño
