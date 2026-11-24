@@ -23,7 +23,7 @@ La app es una de las tres formas de controlar Sentinel Guard; las otras son el b
 Si te preguntas como vinculo un dispositivo, como registro un dispositivo, como agrego, añado o emparejo mi equipo, o como doy de alta un dispositivo nuevo (el Master o central del equipo): se hace desde la app Sentinel Guard por Bluetooth. Antes de empezar ten a mano tu red WiFi de 2.4 GHz con su contraseña y, si quieres recibir avisos, tu ID de Telegram.
 
 1. En la app, pulsa "Agregar" en la barra inferior (o el icono + de la pantalla Inicio).
-2. Pon el equipo en modo emparejamiento: busca el orificio trasero del Master, inserta un clip, mantén pulsado unos 5 segundos (entra a partir de 3 segundos) y suelta al oír los cinco pitidos; no llegues a 10 segundos (eso borra el equipo con un reset de fabrica).
+2. Pon el equipo en modo emparejamiento: busca el orificio trasero del Master, inserta un clip, mantén presionado de 5 a 8 segundos, hasta escuchar un pitido; no llegues a 10 segundos (eso borra el equipo con un reset de fabrica).
 3. Acercate al dispositivo. El Bluetooth alcanza unos 10 metros.
 4. Cuando aparezca "Sentinel Master", tocalo. En la pantalla "Configurar dispositivo" (Paso 2 de 3) ingresa el nombre de tu red WiFi (de la lista o con "Escribirla a mano..."), su contraseña, tu ID de Telegram en "Avisos por Telegram (opcional)" y el "Nombre del dispositivo". Pulsa "Confirmar".
 5. El Master se conecta a WiFi, queda registrado en tu cuenta y se reinicia. La app termina con "CONFIGURACION COMPLETA".
@@ -33,6 +33,10 @@ Si te preguntas como vinculo un dispositivo, como registro un dispositivo, como 
 Desde el pitido tienes 5 minutos para emparejar el equipo. Si se pasa ese tiempo, el Master sale del modo emparejamiento y se reinicia solo; vuelve a ponerlo en modo emparejamiento con el clip. Los sensores, la bengala y el teclado no vienen vinculados de fabrica: al encender cada uno, el Master lo deja en espera y hay que autorizarlo una vez desde la app o Telegram (ver "Que es un sensor nuevo o en cuarentena?"). La sirena no necesita autorizacion.
 
 La guia detallada esta en "Configuracion del Master via Bluetooth (BLE)". Si el Bluetooth no encuentra el equipo, revisa "BLE no detecta el dispositivo" en Solucion de Problemas.
+
+## Cuantos sensores o modulos puedo vincular?
+
+La capacidad del equipo esta limitada a un maximo de 5 modulos vinculados en total (sensores, teclado y bengala). Si desvinculas uno y quieres volver a vincularlo, apagalo y enciendelo otra vez: llega de inmediato el aviso de vinculacion.
 
 ## Cuantos dispositivos puedo tener?
 
@@ -80,18 +84,18 @@ En la app, Perfil > "Chat ID de Telegram" > "Abrir el bot". En Telegram pulsa "I
 
 ## Como se cuanto dura la bateria de los sensores?
 
-Los sensores LoRa son de bajo consumo energetico. La duracion de la bateria depende del modelo del sensor y la frecuencia de uso. El sistema no mide el nivel de bateria, pero con el comando /sensors en Telegram puedes ver cada sensor, su senal y hace cuanto se escucho por ultima vez; un sensor que lleva mucho sin oirse puede tener la bateria agotada.
+Los sensores LoRa son de bajo consumo energetico. La duracion de la bateria depende del modelo del sensor y la frecuencia de uso. El sistema no mide el nivel de bateria, pero con el comando /sensores en Telegram puedes ver cada sensor, su senal y hace cuanto se escucho por ultima vez; un sensor que lleva mucho sin oirse puede tener la bateria agotada.
 
 ## Que es un sensor nuevo o en cuarentena?
 
 Por seguridad, cuando el Master escucha un sensor LoRa que no conoce, no lo deja disparar la alarma hasta que el dueño lo autorice. Al dueño le llega una notificacion "Sensor nuevo" y un mensaje privado de Telegram con botones. Se autoriza de dos formas:
 - En la app: ficha del equipo > "Sensores nuevos" > "Autorizar".
-- En Telegram: con el boton "Autorizar" del aviso, o con /sensors y su boton "Autorizar".
-Autorizalo solo si acabas de instalar ese sensor tu. Si la app o Telegram dicen que la central ya no lo tiene en espera (pasa si el Master se reinicio o si llegaron mas de 5 sensores nuevos a la vez), apaga y enciende el sensor para que vuelva a pedir permiso.
+- En Telegram: con el boton "Autorizar" del aviso, o con /sensores y su boton "Autorizar".
+Autorizalo solo si acabas de instalar ese sensor tu. Si la app o Telegram dicen que la central ya no lo tiene en espera (pasa si el Master se reinicio o si llegaron varios sensores nuevos a la vez), apaga y enciende el sensor para que vuelva a pedir permiso.
 
 ## Como elimino o renombro un sensor?
 
-- **Eliminar**: en la app, ficha del equipo > "Sensores LoRa" > papelera; o en Telegram con /sensors y el boton "Eliminar" del sensor (solo el dueño, en chat privado). Pide confirmacion porque esa zona deja de vigilarse. Si el sensor sigue encendido, la proxima vez que se active volvera a pedir permiso como sensor nuevo; para quitarlo del todo, apagalo o quitale la bateria.
+- **Eliminar**: en la app, ficha del equipo > "Sensores LoRa" > papelera; o en Telegram con /sensores y el boton "Eliminar" del sensor (solo el dueño, en chat privado). Pide confirmacion ("Si, eliminar") porque esa zona deja de vigilarse. Si el sensor sigue encendido, la proxima vez que se active volvera a pedir permiso como sensor nuevo; para quitarlo del todo, apagalo o quitale la bateria.
 - **Renombrar**: solo desde la app, con el lapiz junto al sensor (hasta 32 caracteres, se permiten acentos y ñ). El nombre es el que sale en los avisos de alarma.
 Al dueño siempre le llega un mensaje privado cuando se elimina o renombra un sensor, para que se entere si lo hizo otra persona.
 
@@ -109,13 +113,13 @@ Si. Desde la app, en la pantalla Inicio toca el equipo ("Ver detalles y ajustes"
 
 ## Que es el tiempo de salida?
 
-Es el periodo que tienes para salir del area protegida despues de armar el sistema. Por defecto es de 60 segundos y se cambia en la ficha del equipo ("Editar" > "Tiempo de salida"), entre 10 y 180 segundos. Si eliges menos de 10, no se aplica: el Master conserva el valor que tenia. Durante este tiempo el Master pita cada 5 segundos y los sensores no disparan la alarma, permitiendote salir sin activarla. No hay tiempo de entrada: al volver, desarma antes de entrar.
+Es el periodo que tienes para salir del area protegida despues de armar el sistema. Por defecto es de 60 segundos y se cambia en la ficha del equipo ("Editar" > "Tiempo de salida"), entre 10 y 180 segundos. Si eliges menos de 10, no se aplica: el Master conserva el valor que tenia. Durante este tiempo el Master emite pitidos intermitentes que se aceleran gradualmente y cierra con un pitido final largo; los sensores no disparan la alarma, permitiendote salir sin activarla. No hay tiempo de entrada: al volver, desarma antes de entrar.
 
 ## Como desvinculo, quito o borro un dispositivo?
 
 Si te preguntas como desvinculo un dispositivo, como borro un dispositivo, como quito un equipo o como elimino un equipo de mi cuenta, hay dos cosas distintas:
 
-- **Borrar el equipo de la app**: abre la ficha del equipo y toca "Borrar dispositivo", luego "Eliminar". Se borra el equipo de tu cuenta y su configuracion en la nube: listas de cuentas, destinatarios de Telegram y horarios. Ademas se manda a la central la orden de apagar su horario; si esta desconectada, se le manda en cuanto vuelva a conectarse, aunque pasen dias. En los equipos actualizados (octubre de 2026 en adelante), si la central esta conectada al borrarla (o en cuanto se reinicie), tambien olvida su horario, tiempo de salida y modo de bengala; conserva la WiFi y su nombre. En un equipo sin actualizar, la memoria local del Master (nombre, tiempo de salida y modo de bengala) no se borra. Para dejarla limpia del todo, haz el reset de fabrica (clip 10 segundos o mas). El equipo sigue funcionando, pero para volver a controlarlo desde la app hay que emparejarlo otra vez por Bluetooth (pestaña "Agregar", clip unos 5 segundos hasta los cinco pitidos). Solo el dueño de la central puede borrarla con toda su configuracion. Si la central ya es de otra cuenta (en la app sale como "Error al cargar"), "Borrar dispositivo" solo la quita de tu lista, sin tocar la central ni la cuenta de su dueño.
+- **Borrar el equipo de la app**: abre la ficha del equipo y toca "Borrar dispositivo", luego "Eliminar". Se borra el equipo de tu cuenta y su configuracion en la nube: listas de cuentas, destinatarios de Telegram y horarios. Ademas se manda a la central la orden de apagar su horario; si esta desconectada, se le manda en cuanto vuelva a conectarse, aunque pasen dias. En los equipos actualizados (octubre de 2026 en adelante), si la central esta conectada al borrarla (o en cuanto se reinicie), tambien olvida su horario, tiempo de salida y modo de bengala; conserva la WiFi y su nombre. En un equipo sin actualizar, la memoria local del Master (nombre, tiempo de salida y modo de bengala) no se borra. Para dejarla limpia del todo, haz el reset de fabrica (clip 10 segundos o mas). El equipo sigue funcionando, pero para volver a controlarlo desde la app hay que emparejarlo otra vez por Bluetooth (pestaña "Agregar", clip de 5 a 8 segundos hasta el pitido). Solo el dueño de la central puede borrarla con toda su configuracion. Si la central ya es de otra cuenta (en la app sale como "Error al cargar"), "Borrar dispositivo" solo la quita de tu lista, sin tocar la central ni la cuenta de su dueño.
 - **Quitar solo tu Telegram**: el comando /desvincular quita tu chat de los destinatarios de un equipo. Dejas de recibir sus avisos por Telegram y de controlarlo desde ahi, pero el equipo sigue en la app. Para volver, pide al administrador un nuevo codigo con /adduser, o que el dueño vuelva a poner tu Chat ID en la ficha del equipo.
 
 ## Puedo programar horarios diferentes por dispositivo?
@@ -130,4 +134,4 @@ Tu Chat ID se pone en la app en Perfil > "Chat ID de Telegram", en "Avisos por T
 
 ## Que pasa si mantengo el clip mas de 10 segundos (reset de fabrica)?
 
-Con el clip pulsado a partir de 3 segundos el Master entra en modo emparejamiento y suenan cinco pitidos muy seguidos (se oyen casi como uno): suelta en ese momento; lo recomendable es soltar hacia los 5 segundos. Si sigues pulsando hasta 10 segundos o mas, hace un reset de fabrica: borra la red WiFi, el nombre, el modo de bengala, el tiempo de salida, los horarios y el estado de armado guardados en el Master, y se reinicia. Despues hay que emparejarlo otra vez desde la app.
+Con el clip presionado de 5 a 8 segundos el Master emite un pitido y entra en modo emparejamiento: suelta en ese momento. Si sigues pulsando hasta 10 segundos o mas, hace un reset de fabrica: borra la red WiFi, el nombre, el modo de bengala, el tiempo de salida, los horarios y el estado de armado guardados en el Master, y se reinicia. Despues hay que emparejarlo otra vez desde la app.

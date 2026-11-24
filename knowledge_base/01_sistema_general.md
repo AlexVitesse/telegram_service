@@ -10,7 +10,7 @@ Sentinel Guard (tambien escrito SentinelGuard) es un sistema de alarma inteligen
 - **Sensores PIR (movimiento)**: Detectan presencia mediante infrarrojo. Angulo de deteccion de 110 grados y alcance de 7 metros.
 - **Sensores Magneticos**: Detectan apertura de puertas y ventanas. Constan de dos piezas: la pieza principal y un iman.
 - **Sirena**: Alarma sonora de 110dB con proteccion IP65 contra polvo y agua.
-- **Bengala de humo**: Libera una cortina de humo disuasoria (hasta 20 m³ segun el manual del equipo). Para los datos del cartucho, consulta su ficha tecnica.
+- **Bengala de humo**: Libera una cortina de humo no toxico con una cobertura de hasta 20 m³, que bloquea la vision del intruso. Ver las advertencias en "Bengala de Humo".
 - **Teclado**: Control local inalambrico para armar y desarmar el sistema. Acepta codigos de 4 a 6 digitos.
 
 ## Como se comunica el sistema

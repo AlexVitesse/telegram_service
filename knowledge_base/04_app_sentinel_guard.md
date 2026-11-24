@@ -10,7 +10,7 @@ La barra inferior tiene cuatro pestañas: "Inicio" (tus equipos), "Agregar" (emp
 
 La pantalla de inicio de sesion ofrece las siguientes opciones:
 
-- **Registro**: "Registrate" abre "Crear Cuenta": nombre de usuario, correo y contrasena de 6 a 20 caracteres.
+- **Registro**: "Registrate" abre "Crear Cuenta": nombre de usuario, correo y contrasena de exactamente 6 caracteres.
 - **Inicio de sesion**: Ingresar con correo y contrasena, con Google o con Apple.
 - **Olvide mi contrasena**: Envia un enlace de recuperacion al correo. Si no llega, revisa la carpeta de SPAM.
 - **Mantener sesion iniciada**: Casilla para no tener que ingresar las credenciales cada vez.
@@ -36,7 +36,7 @@ Se abre tocando la tarjeta del equipo o "Ver detalles y ajustes":
 
 - **Estado**: senal WiFi (Excelente, Buena, Regular o Debil, con su valor en dBm), numero de sensores LoRa y tiempo activo.
 - **Proteger equipo / Desarmar equipo**: arma o desarma solo ese equipo.
-- **Bengala**: tres modos: "Auto" (se dispara sola), "Pregunta" (Telegram pregunta antes de dispararla) y "Apagada" (no se dispara nunca).
+- **Bengala**: tres modos: "Auto" (se dispara sola), "Pregunta" (Telegram pregunta antes de dispararla) y "OFF" (Apagada: no se dispara nunca).
 - **Modo de prueba**: "Simular disparo" muestra como se veria una alarma sin enviar nada a la central.
 - **Sensores nuevos**: aparece solo si hay sensores esperando permiso (ver "Que es un sensor nuevo o en cuarentena" en Preguntas Frecuentes). Cada uno tiene el boton "Autorizar", que pide confirmacion. Mientras no se autoriza, ese sensor no dispara la alarma.
 - **Sensores LoRa**: lista de modulos autorizados, cada uno "Activo" u "Offline". Cada sensor tiene dos botones: el lapiz para renombrarlo (hasta 32 caracteres) y la papelera para eliminarlo (pide confirmacion). Funcionan tambien sin internet si el telefono esta en la misma red WiFi que la central.
@@ -90,7 +90,7 @@ Al tocar una notificacion se abre la pantalla Inicio; si el aviso es de un equip
 
 Para dar de alta, agregar, registrar o vincular un equipo se usa la pestaña "Agregar":
 
-1. Poner el Master en modo emparejamiento: clip en el orificio trasero, mantener pulsado unos 5 segundos y soltar al oir los cinco pitidos; no llegar a 10 segundos (eso borra el equipo).
+1. Poner el Master en modo emparejamiento: clip en el orificio trasero, mantener presionado de 5 a 8 segundos, hasta escuchar un pitido; no llegar a 10 segundos (eso borra el equipo).
 2. La app busca por Bluetooth y encuentra "Sentinel Master".
 3. En "Configurar dispositivo" se ingresa la red WiFi de 2.4 GHz (SSID y Password), los avisos por Telegram (opcional) y el nombre del dispositivo.
 4. Al tocar "Confirmar", el dispositivo se conecta a WiFi, queda registrado en la cuenta y se reinicia (unos 30 segundos).

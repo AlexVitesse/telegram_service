@@ -15,7 +15,7 @@
 - **/off** - Desarmar el sistema de alarma. Funciona igual que /on: seleccion directa con un dispositivo o menu con multiples. Incluye opcion "Desarmar TODOS". Espera de 5 segundos entre usos.
 - **/status** - Consulta el estado actual del dispositivo: en linea o sin respuesta, armado o desarmado, modo bengala e intensidad de senal WiFi (en dBm). El bot espera unos segundos la respuesta del dispositivo. Con varios equipos ofrece "Ver TODOS". Espera de 5 segundos entre usos.
 - **/disparo** - Ejecuta un disparo manual de la sirena/alarma en todos tus equipos. Requiere confirmacion con los botones "Confirmar" y "Cancelar" para evitar activaciones accidentales. Espera de 8 segundos entre usos (mas que otros comandos, por seguridad).
-- **/sensors** - Muestra el detalle de cada equipo: sus sensores (señal y hace cuanto se oyeron), señal WiFi, tiempo encendido, estado de armado, modo de bengala, tiempo de salida y horario. Al dueño del equipo, en chat privado, le salen botones debajo: "Eliminar [nombre del sensor]" (pide confirmacion con "Si, eliminar") y "Autorizar" para un sensor nuevo. Es la forma de borrar un sensor desde Telegram; renombrarlo solo se puede desde la app. Ojo: el comando es /sensors (en ingles); /sensores no existe.
+- **/sensores** (tambien /sensors) - Muestra el detalle de cada equipo: sus sensores (señal y hace cuanto se oyeron), señal WiFi, tiempo encendido, estado de armado, modo de bengala, tiempo de salida y horario. Al dueño del equipo, en chat privado, le salen botones debajo: "Eliminar [nombre del sensor]" (pide confirmacion con "Si, eliminar") y "Autorizar" para un sensor nuevo. Es la forma de borrar un sensor desde Telegram; renombrarlo solo se puede desde la app.
 
 ## Detener sirena sin desarmar
 
@@ -28,9 +28,9 @@ Esto es util cuando quieres silenciar la sirena pero mantener el sistema vigilan
 ## Comandos de bengala
 
 - **/bengala** - Abre el menu de configuracion de bengala con los botones "Modo Auto", "Modo Pregunta" y "Deshabilitar". Con varios equipos, primero eliges cual o "Configurar TODOS".
-- **/auto** - Activa el modo automatico de bengala (no existe "/modo auto": es /auto). La bengala se dispara automaticamente cuando se detecta una intrusion sin preguntar al usuario.
-- **/preguntar** - Activa el modo con pregunta (no existe "/modo pregunta": es /preguntar). Cuando se detecta una intrusion, el bot pregunta al usuario si desea disparar la bengala antes de hacerlo.
-- **/deshabilitar** - Deshabilita la bengala: no se disparara cuando se active la alarma. Para habilitarla de nuevo usa /auto o /preguntar.
+- **/modo auto** (tambien /auto) - Activa el modo automatico de bengala. La bengala se dispara automaticamente cuando se detecta una intrusion sin preguntar al usuario.
+- **/modo pregunta** (tambien /preguntar) - Activa el modo con pregunta. Cuando se detecta una intrusion, el bot pregunta al usuario si desea disparar la bengala antes de hacerlo.
+- **/deshabilitar** - Deshabilita la bengala: no se disparara cuando se active la alarma. Para habilitarla de nuevo usa /modo auto o /modo pregunta.
 
 La pregunta del modo Pregunta se contesta con los botones del propio mensaje de alarma. No existen los comandos /si ni /no.
 

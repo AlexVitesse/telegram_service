@@ -21,7 +21,7 @@
 ## BLE no detecta el dispositivo
 
 - Verificar que el Bluetooth del telefono esta activado.
-- Asegurar que el Master esta en modo emparejamiento: presionar el clip unos 5 segundos (entra a partir de 3 segundos) y soltar al oir los cinco pitidos; no llegar a 10 segundos (eso borra el equipo). El LED de estado debe quedar parpadeando.
+- Asegurar que el Master esta en modo emparejamiento: presionar el clip de 5 a 8 segundos, hasta escuchar un pitido; no llegar a 10 segundos (eso borra el equipo). El LED de estado debe quedar parpadeando.
 - Acercar el telefono al Master. La distancia maxima de BLE es aproximadamente 10 metros.
 - Acepta el permiso de Bluetooth (y en Android el de ubicacion o dispositivos cercanos, si lo pide) cuando la app lo solicite.
 - En la app el equipo aparece como "Sentinel Master". Si no aparece o no conecta en un minuto: apaga y enciende el Master y vuelve a ponerlo en modo emparejamiento con el clip.

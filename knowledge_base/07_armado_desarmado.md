@@ -16,11 +16,11 @@ Ingresa tu codigo de seguridad (4 a 6 digitos) seguido de la tecla #. El teclado
 
 Cuando se arma el sistema ocurre la siguiente secuencia:
 
-1. El Master pita para confirmar (3 pitidos cortos si se armo desde la app o Telegram, 1 pitido si fue con el teclado) y enciende el LED de armado.
-2. Inicia el tiempo de salida (60 segundos por defecto, configurable en la ficha del equipo).
-3. Durante el tiempo de salida suena un pitido doble cada 5 segundos.
-4. En los ultimos 10 segundos el zumbador suena de forma continua.
-5. Al terminar, una serie de 10 pitidos muy seguidos (se oye como un pitido final largo) indica que el armado esta completo y el sistema esta en vigilancia activa.
+1. El Modulo Master emite un pitido inicial y enciende un LED verde: empieza el tiempo de salida.
+2. El tiempo de salida es de 1 minuto por defecto (60 segundos), modificable desde la app en la ficha del equipo.
+3. Durante ese lapso el Master emite pitidos intermitentes que se aceleran gradualmente.
+4. Al final del conteo el sonido aumenta su frecuencia.
+5. Cierra con un pitido final largo: el equipo esta completamente armado y listo para detectar cualquier intrusion.
 
 El tiempo de salida permite al usuario abandonar el area protegida sin activar la alarma.
 
@@ -49,8 +49,8 @@ Ingresa tu codigo de seguridad seguido de la tecla #. El sistema reconoce automa
 
 Al desarmar el sistema:
 
-- El Master emite 3 pitidos cortos de confirmacion (con el teclado suenan 2 pitidos mas).
-- El LED de armado se apaga.
+- El Master emite un zumbido de confirmacion.
+- El LED se apaga, indicando que el sistema salio del modo armado.
 - El sistema deja de monitorear sensores (los ignora).
 - Si la sirena estaba sonando, se desactiva inmediatamente.
 - Si la bengala estaba en proceso de consulta, se cancela la secuencia.

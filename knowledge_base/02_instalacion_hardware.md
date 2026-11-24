@@ -4,7 +4,7 @@
 
 El Master debe colocarse cerca del modem o router de internet, en un punto lo mas central posible del lugar a proteger. Requiere alimentacion electrica permanente. Puede montarse en pared o colocarse sobre un estante.
 
-Al encender el Master, a los pocos segundos (el manual habla de unos 10) los LEDs y el zumbador se activan durante un segundo como prueba: es la señal de que arranco bien. Despues el LED de estado parpadea rapido mientras se conecta a la red WiFi y queda encendido fijo cuando ya esta conectado. Si el equipo estaba armado antes de apagarse, vuelve armado. Antes de montar el Master en su ubicacion definitiva, hay que emparejarlo desde la app por Bluetooth (red WiFi de 2.4 GHz y nombre del dispositivo). Conviene que el enchufe quede a menos de 1 metro.
+Al conectar el Master a la corriente y encenderlo, transcurridos aproximadamente 10 segundos emite un parpadeo luminoso acompañado de un pitido: es la señal de que inicio con exito y esta operando. Despues el LED de estado parpadea rapido mientras se conecta a la red WiFi y queda encendido fijo cuando ya esta conectado. Si el equipo estaba armado antes de apagarse, vuelve armado. Antes de montar el Master en su ubicacion definitiva, hay que emparejarlo desde la app por Bluetooth (red WiFi de 2.4 GHz y nombre del dispositivo). Conviene que el enchufe quede a menos de 1 metro.
 
 ## Instalacion del Sensor PIR (movimiento)
 
@@ -12,7 +12,7 @@ El sensor PIR detecta presencia mediante infrarrojo. Tiene un angulo de deteccio
 
 - Al encender, el LED parpadea confirmando el inicio.
 - Cuando detecta movimiento, el LED parpadea nuevamente.
-- Instalar a una altura media-alta en la pared (aproximadamente 1.5 a 2 metros).
+- Instalar a una altura media-alta en la pared (aproximadamente 2.2 metros): amplia la cobertura horizontal para detectar personas caminando y reduce las falsas alarmas por mascotas pequeñas.
 - El area frente al sensor debe estar despejada, sin obstrucciones como muebles grandes o cortinas que bloqueen la deteccion.
 - Evitar orientarlo hacia ventanas con luz solar directa o fuentes de calor, ya que pueden generar falsas detecciones.
 
@@ -22,8 +22,9 @@ El sensor magnetico detecta la apertura de puertas y ventanas. Esta compuesto po
 
 - La pieza principal se coloca en el marco fijo de la puerta o ventana.
 - El iman se coloca en la parte movil (la hoja de la puerta o ventana).
-- Al cerrar, ambas piezas deben quedar alineadas y casi tocandose (separacion maxima de pocos milimetros).
-- Al encender, el LED parpadea confirmando el inicio.
+- Al cerrar, ambas piezas deben quedar perfectamente alineadas y casi tocandose (separacion menor a 1 mm).
+- Limpiar y secar bien la superficie antes de adherir el dispositivo, para que quede bien fijo y evitar falsas alertas.
+- Al encender, el LED emite un solo parpadeo confirmando el inicio.
 - Cuando se separa el iman (se abre la puerta/ventana), el LED parpadea indicando deteccion.
 
 ## Instalacion de la Sirena
@@ -33,12 +34,13 @@ La sirena emite una alerta sonora de 110dB y tiene proteccion IP65 contra polvo 
 - La sirena consta de dos piezas: el modulo electronico y la bocina.
 - El modulo debe estar a un maximo de 1 metro de un enchufe electrico.
 - La bocina debe colocarse en un lugar elevado y de dificil acceso para evitar manipulacion.
-- Si se instala en exterior, orientar la bocina hacia abajo para evitar acumulacion de agua.
-- El LED del modulo se enciende cuando la alarma esta activa y la sirena esta sonando.
+- Si se instala en exterior, orientar la bocina hacia abajo para evitar acumulacion de agua, y evitar lugares cerrados que ahoguen el sonido.
+- Al conectarlo a la corriente, el LED del modulo emite un solo parpadeo confirmando el inicio.
+- El LED del modulo se queda encendido mientras la alarma esta activa y se apaga al desarmar.
 
 ## Instalacion de la Bengala de Humo
 
-La bengala libera una cortina de humo que dificulta la vision del intruso: segun el manual del equipo cubre hasta 20 m³ y el humo sale durante 10 a 20 segundos. Para los demas datos del cartucho (composicion, advertencias), consulta su ficha tecnica.
+La bengala libera una cortina de humo no toxico con una cobertura de hasta 20 m³ que bloquea la vision del intruso; la emision de humo dura entre 10 y 20 segundos. Lee las advertencias de seguridad en "Bengala de Humo".
 
 - Colocar el modulo a un maximo de 1 metro de un enchufe electrico.
 - Instalar a altura baja o media, ya que el humo sube naturalmente y asi se logra mejor cobertura.

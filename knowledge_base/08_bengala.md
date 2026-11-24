@@ -2,7 +2,7 @@
 
 ## Que es la bengala
 
-La bengala es un dispositivo de disuasion visual que libera una cortina de humo. Segun el manual del equipo, cubre hasta 20 m³ y el humo sale durante 10 a 20 segundos. Para los demas datos del cartucho (composicion, advertencias), consulta su ficha tecnica. Esta diseñada para desorientar a intrusos y dificultar la vision dentro del area protegida. Requiere alimentacion electrica continua para funcionar correctamente.
+La bengala es un dispositivo de disuasion visual intensa para eventos criticos, de activacion rapida. Libera una cortina de humo no toxico con una cobertura de hasta 20 m³; la emision de humo dura entre 10 y 20 segundos. Lee las precauciones de seguridad de abajo. Esta diseñada para desorientar a intrusos y dificultar la vision dentro del area protegida. Requiere alimentacion electrica continua para funcionar correctamente.
 
 ## Modos de configuracion
 
@@ -12,11 +12,11 @@ Desde el chat de Senti dentro de la app la bengala todavia NO se maneja: si se l
 
 ## Modo Auto
 
-Selecciona "Auto" en la app o usa el comando /auto en Telegram. En este modo, la bengala se dispara automaticamente al detectar una intrusion, sin intervencion humana. Es el maximo nivel de proteccion. Al activarse, el cartucho de humo se detona de forma instantanea e irreversible.
+Selecciona "Auto" en la app o envia el comando /modo auto en Telegram. En este modo, la bengala se dispara automaticamente al detectar una intrusion, sin intervencion humana. Es el maximo nivel de proteccion. Al activarse, el cartucho de humo se detona de forma instantanea e irreversible.
 
 ## Modo Pregunta
 
-Selecciona "Pregunta" en la app o usa el comando /preguntar en Telegram. Al detectar una intrusion, el sistema pausa la bengala y envia una notificacion interactiva al chat de Telegram con las siguientes opciones:
+Selecciona "Pregunta" en la app o envia el comando /modo pregunta en Telegram. Al detectar una intrusion, el sistema pausa la bengala y envia una notificacion interactiva al chat de Telegram con las siguientes opciones:
 
 - "Disparar bengala": detona la bengala.
 - "Dejar armado": detiene la sirena sin disparar la bengala y el sistema sigue armado.
@@ -30,7 +30,7 @@ Este modo permite evaluar la situacion antes de actuar, por ejemplo revisando ca
 
 ## Modo Deshabilitado
 
-Selecciona "Apagada" en la app (en el manual impreso aparece como "OFF") o usa el comando /deshabilitar (o "Deshabilitar" en el menu /bengala) en Telegram. En este modo, la bengala no se dispara nunca, sin importar el tipo de evento. Los sensores siguen detectando y enviando notificaciones normalmente, y la sirena funciona con normalidad. Ideal para cuando estas en casa pero con la alarma armada.
+Selecciona "OFF" (Apagada) en la app o usa el comando /deshabilitar (o "Deshabilitar" en el menu /bengala) en Telegram. En este modo, la bengala no se dispara nunca, sin importar el tipo de evento. Los sensores siguen detectando y enviando notificaciones normalmente, y la sirena funciona con normalidad. Ideal para cuando estas en casa pero con la alarma armada.
 
 ## Menu bengala en Telegram
 
@@ -45,11 +45,10 @@ El comando /bengala muestra el modo actual de la bengala y los botones "Modo Aut
 ## Precauciones de seguridad
 
 - Una vez activada, la bengala no se puede detener: el cartucho se consume entero.
-- Consulta la ficha tecnica del cartucho para sus datos y advertencias.
 - No tocar el cartucho usado: queda muy caliente. Espera al menos 10 minutos a que se enfrie.
 - Mantener el modulo alejado de materiales inflamables.
 - Si la bengala se activa por error y estas en el lugar, actua como ante un incendio: agachate, cubre boca y nariz con un paño y busca la salida mas cercana. Si la salida esta bloqueada, entra a la habitacion mas cercana, cierra la puerta, tapa las rendijas por donde entre el humo y espera a que se disipe.
-- Respirar este humo durante mucho tiempo requiere atencion medica: puede causar desde irritacion de ojos y nariz hasta problemas respiratorios.
+- Aunque el humo es no toxico, respirarlo durante mucho tiempo requiere atencion medica: puede causar desde irritacion de ojos y nariz hasta problemas respiratorios.
 - Para despejar el humo, ventila abriendo puertas y ventanas: tarda entre 3 y 10 minutos en dispersarse, segun el tamaño y la ventilacion del lugar.
 - El humo de la bengala puede activar detectores de humo convencionales instalados en el area.
 

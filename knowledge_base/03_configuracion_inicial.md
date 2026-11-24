@@ -33,7 +33,7 @@ Para crear una cuenta en la app:
 1. Abrir la app Sentinel Guard.
 2. Tocar "Registrate" (debajo de "¿No tienes cuenta?").
 3. En "Crear Cuenta" ingresar nombre de usuario (de 3 a 30 caracteres), un correo electronico valido y contrasena.
-4. La contrasena debe tener entre 6 y 20 caracteres; admite mayusculas, minusculas, numeros y caracteres especiales.
+4. La contrasena debe tener exactamente 6 caracteres; admite letras mayusculas y minusculas, numeros y caracteres especiales.
 5. Tocar "Crear Cuenta" y luego iniciar sesion con ese correo y contrasena.
 
 Tambien se puede entrar con Google o Apple sin crear una cuenta aparte.
@@ -48,7 +48,7 @@ En la app toca "Agregar" en la barra inferior, o el boton "Agregar" (o el icono 
 
 ### Paso 2: Poner el Master en modo emparejamiento
 
-Insertar un clip en el orificio trasero del Modulo Master y mantenerlo pulsado unos 5 segundos (el equipo entra a partir de 3 segundos) y soltar al oir los cinco pitidos cortos, que suenan tan seguidos que parecen un solo pitido; no llegar a 10 segundos (eso borra el equipo). Desde ese momento el LED de estado del Master parpadea: el equipo esta en modo emparejamiento.
+Insertar un clip en el orificio trasero del Modulo Master y mantener presionado el boton interno de 5 a 8 segundos, hasta escuchar un pitido; ese pitido indica que el equipo esta listo para la configuracion. No llegar a 10 segundos (eso borra el equipo). Desde ese momento el LED de estado del Master parpadea: el equipo esta en modo emparejamiento.
 
 Precaucion: si se mantiene pulsado 10 segundos o mas, se ejecuta un reset de fabrica que borra toda la configuracion guardada en el Master: red WiFi, nombre, modo de bengala, tiempo de salida, horarios y estado de armado.
 
@@ -88,7 +88,7 @@ Si la contrasena WiFi esta mal, el Master sigue en modo emparejamiento hasta que
 
 ## Tiempo limite de emparejamiento
 
-El modo emparejamiento dura 5 minutos desde los pitidos. Si no se completa en ese tiempo, el Master apaga el Bluetooth, sale del modo emparejamiento y se reinicia solo. Sera necesario repetir el proceso desde el Paso 2 (clip unos 5 segundos, hasta los cinco pitidos).
+El modo emparejamiento dura 5 minutos desde el pitido. Si no se completa en ese tiempo, el Master apaga el Bluetooth, sale del modo emparejamiento y se reinicia solo. Sera necesario repetir el proceso desde el Paso 2 (clip de 5 a 8 segundos, hasta el pitido).
 
 ## Vinculacion con Telegram
 
@@ -118,7 +118,7 @@ El kit Sentinel Guard incluye el Modulo Master, sensores PIR, sensores magnetico
 ### Paso 1: Encender el Master
 
 1. Conectar el Master a su fuente de alimentacion 12V.
-2. Al encender, los LEDs y el zumbador se activan un segundo como prueba.
+2. Transcurridos aproximadamente 10 segundos, el Master emite un parpadeo luminoso y un pitido: inicio con exito.
 3. Verificar que no haya interferencias fisicas en su ubicacion.
 
 ### Paso 2: Crear la cuenta y emparejar el Master
@@ -135,7 +135,7 @@ Los modulos no vienen vinculados de fabrica con el Master (no todos los kits usa
 4. Autorizarlo: al encenderse, el Master lo detecta y lo deja en espera ("sensor nuevo"). Al dueño le llega una notificacion y un mensaje de Telegram ("Sensor nuevo"); se autoriza en la app (ficha del equipo > "Sensores nuevos" > "Autorizar" y confirmar con "Autorizar") o con el boton "Autorizar" del mensaje de Telegram ("Ignorar" si no lo reconoces). Hasta entonces ese modulo no dispara la alarma. Ya autorizado, pasa a "Sensores LoRa" como "Activo".
 5. Si no llega el aviso, apaga y enciende el modulo.
 
-Esto aplica a los sensores de movimiento (PIR) y de puerta/ventana (magneticos), al teclado y a la bengala. La sirena no necesita autorizacion. Conviene encenderlos de uno en uno: el Master guarda como mucho 5 modulos en espera de autorizacion a la vez (ese limite es de modulos en espera, no del total de modulos).
+Esto aplica a los sensores de movimiento (PIR) y de puerta/ventana (magneticos), al teclado y a la bengala. La sirena no necesita autorizacion. Conviene encenderlos de uno en uno. La capacidad del equipo esta limitada a un maximo de 5 modulos vinculados en total.
 
 ### Paso 4: Telegram (opcional)
 

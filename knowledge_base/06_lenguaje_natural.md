@@ -75,7 +75,7 @@ Nota: Esto detiene la sirena pero mantiene el sistema armado. Es diferente de de
 - "activa el humo"
 - "lanza la bengala"
 
-Nota: escrito en el chat del bot, esto envia al equipo la orden de habilitar la bengala, no la detona en ese momento. Para dispararla durante una alarma en modo Pregunta usa el boton "Disparar bengala" del aviso. Para cambiar el modo usa /bengala, /auto, /preguntar o /deshabilitar.
+Nota: escrito en el chat del bot, esto envia al equipo la orden de habilitar la bengala, no la detona en ese momento. Para dispararla durante una alarma en modo Pregunta usa el boton "Disparar bengala" del aviso. Para cambiar el modo usa /bengala, /modo auto, /modo pregunta o /deshabilitar.
 
 ### Horarios
 - "arma lunes a viernes de 10pm a 6am"

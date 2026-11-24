@@ -98,13 +98,14 @@ def _kb_texto():
     return out
 
 
-def test_clip_3_segundos():
-    # config.h: LONG_PRESS_TIME 3000; alarma_modulos.ino: beep(5) al entrar.
+def test_clip_como_el_manual_3():
+    # 24-nov: manda el Manual 3.0 ("de 5 a 8 segundos", "un pitido"); el
+    # firmware se adapta a el. El aviso de no llegar a 10 s se queda.
     kb = _kb_texto()
     for f, t in kb.items():
-        assert "5 a 8 segundos" not in t, f
-    todo = " ".join(kb.values())
-    assert "3 segundos" in todo and "cinco pitidos" in todo
+        assert "cinco pitidos" not in t, f
+    for f in ("03_configuracion_inicial.md", "13_solucion_problemas.md", "14_faq.md"):
+        assert "5 a 8 segundos" in kb[f] and "10 segundos" in kb[f], f
 
 
 def test_tiempo_de_salida_10_a_180():
@@ -149,10 +150,14 @@ def test_invitaciones_solo_el_dueno():
     assert "chat privado" in kb["12_usuarios_permisos.md"]
 
 
-def test_bengala_sin_datos_inventados():
-    for f, t in _kb_texto().items():
-        assert "no toxico" not in t and "no tóxico" not in t, f
-        assert "20 metros cuadrados" not in t, f
+def test_bengala_con_los_datos_del_manual_3():
+    # Los datos del cartucho salen del Manual 3.0, con sus mismas advertencias.
+    kb = _kb_texto()
+    for f, t in kb.items():
+        assert "20 metros cuadrados" not in t, f  # el manual dice 20 m3
+    b = kb["08_bengala.md"]
+    assert "no toxico" in b and "20 m³" in b and "10 y 20 segundos" in b
+    assert "atencion medica" in b and "10 minutos" in b
 
 
 #: Lo que Senti no debe poder repetirle a un cliente (revision 24-nov-2026:

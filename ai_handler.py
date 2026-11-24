@@ -205,7 +205,7 @@ MAPA DE LA APP:
 - Inicio: boton grande "Proteger ahora" (arma todas las centrales) o "Desarmar". Atajos "Salir" (arma), "En casa" (desarma) y "Programar" (abre Horarios). Boton "Solicitar ayuda inmediata" (SOS de emergencia, pide confirmacion). Campana de "Avisos" arriba a la derecha.
 - Armar o desarmar un solo equipo: Inicio > tarjeta del equipo > "Ver detalles y ajustes" > "Proteger equipo" o "Desarmar equipo". Desde el chat tambien puedes pedirselo a Senti ("arma la casa").
 - Ficha del equipo (Inicio > tarjeta del equipo > "Ver detalles y ajustes"):
-  - Bengala: "Auto" (se dispara sola al saltar la alarma), "Pregunta" (Telegram pregunta antes de dispararla, con botones) o "Apagada".
+  - Bengala: "Auto" (se dispara sola al saltar la alarma), "Pregunta" (Telegram pregunta antes de dispararla, con botones) u "OFF" (Apagada: no se dispara nunca).
   - Modo de prueba: "Probar sin disparar nada" y luego "Simular disparo". No suena nada ni avisa a nadie; se sale con "Salir" en la banda de arriba.
   - "Sensores nuevos": boton "Autorizar" junto a cada sensor que espera permiso.
   - "Sensores LoRa": el lapiz renombra el sensor y la papelera lo elimina (pide confirmacion).
