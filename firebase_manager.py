@@ -1344,7 +1344,9 @@ class FirebaseManager:
                 # update: un miembro lee ESP32/{mac} entero (#274).
                 f"ESP32/{mac}/Local": None,
                 f"Miembros/{mac}/{uid}": {"nombre": nombre_miembro, "alta": int(time.time() * 1000),
-                                          "invitadoPor": dueno},
+                                          "invitadoPor": dueno,
+                                          # Para quitarle Usuario 2 de Telegram aunque cambie el suyo (#275)
+                                          "telegram": str(cuenta.get("telegram_id") or "").strip() or None},
                 f"Invitaciones/{codigo}/usadoPor": uid,
             })
             self._agregar_a_mi_lista(uid, mac)
@@ -1365,20 +1367,36 @@ class FirebaseManager:
 
     def _revocar(self, mac: str, uid: str, nodo: dict) -> bool:
         """
-        Quita a un miembro de todo (C3), para "quitar" y "salir": membresia,
-        nombre, su lista, Usuario 2 de Telegram si era el, y llave local nueva
-        (su telefono guarda la de ahora). False si no era miembro: no se toca nada.
+        Quita a un miembro de todo (C3), para "quitar" y "salir": su lista,
+        Usuario 2 de Telegram si era el, los codigos que canjeo para esta
+        central, llave local nueva (su telefono pudo guardar la de antes) y, AL
+        FINAL, la membresia y su nombre. False si no era miembro.
+
+        La membresia va la ultima a proposito (#275): antes se borraba primero y,
+        si algo fallaba despues, el reintento respondia "no_es_miembro" y se
+        quedaban Telegram_ID_2 y la llave vieja. Todo lo anterior se puede repetir.
         Llamar con `_lock_propiedad` tomado.
         """
         if uid not in self._miembros(nodo):
             return False
-        self.db.reference("/").update({f"ESP32/{mac}/miembros/{uid}": None, f"Miembros/{mac}/{uid}": None})
-        self._quitar_de_mi_lista(uid, mac)
-        chat = str(self.db.reference(f"Usuarios/{uid}/telegram_id").get() or "").strip()
-        if chat and chat == str(nodo.get("Telegram_ID_2") or "").strip():
-            self.db.reference(f"ESP32/{mac}/Telegram_ID_2").delete()
+        # Telegram: el chat de ahora y el que tenia al unirse; pudo cambiar el
+        # suyo en la cuenta antes de que lo quitaran.
+        alta = self.db.reference(f"Miembros/{mac}/{uid}").get()
+        chats = {str(self.db.reference(f"Usuarios/{uid}/telegram_id").get() or "").strip(),
+                 str(alta.get("telegram") or "").strip() if isinstance(alta, dict) else ""} - {""}
+        cambios = {f"ESP32/{mac}/miembros/{uid}": None, f"Miembros/{mac}/{uid}": None}
+        if str(nodo.get("Telegram_ID_2") or "").strip() in chats:
+            cambios[f"ESP32/{mac}/Telegram_ID_2"] = None
+        # Un codigo a medio canjear (fallo la lista, C4) le dejaba volver a entrar.
+        invitaciones = self.db.reference("Invitaciones").get() or {}
+        for codigo, inv in (invitaciones.items() if isinstance(invitaciones, dict) else []):
+            if isinstance(inv, dict) and inv.get("usadoPor") == uid and self._misma_mac(str(inv.get("mac") or ""), mac):
+                cambios[f"Invitaciones/{codigo}"] = None
         if self.mqtt_handler:
+            # Durable hasta el cmd_ack de la central (#276).
             self.mqtt_handler.send_command(Command.LOCAL_ROTATE.value, device_id=mac, queue_if_offline=True)
+        self._quitar_de_mi_lista(uid, mac)
+        self.db.reference("/").update(cambios)
         self.invalidate_cache()
         logger.info(f"{uid} ya no es miembro de {mac}")
         return True

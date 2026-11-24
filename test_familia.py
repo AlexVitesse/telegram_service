@@ -180,6 +180,54 @@ def test_quitar_no_toca_el_usuario_2_si_es_de_otro():
     assert fm.db.datos["ESP32"][MAC]["Telegram_ID_2"] == "999"
 
 
+def test_quitar_que_falla_a_medias_se_termina_al_reintentar():
+    # #275: antes la membresia se borraba primero y el reintento daba
+    # "no_es_miembro" con Telegram_ID_2 y la llave vieja aun vivos.
+    fm = _fm(_arbol())
+    real = fm._quitar_de_mi_lista
+    fm._quitar_de_mi_lista = MagicMock(side_effect=RuntimeError("red"))
+    try:
+        fm.quitar_miembro("jose", MAC, "ana")
+    except RuntimeError:
+        pass
+    fm._quitar_de_mi_lista = real
+    assert "ana" in fm.db.datos["ESP32"][MAC]["miembros"]       # sigue: se puede reintentar
+    assert isinstance(fm.quitar_miembro("jose", MAC, "ana"), dict)
+    d = fm.db.datos
+    assert "ana" not in d["ESP32"][MAC].get("miembros", {}) and "Telegram_ID_2" not in d["ESP32"][MAC]
+    assert "Dispositivos" not in d["Usuarios"]["ana"]
+
+
+def test_quitar_limpia_el_usuario_2_aunque_haya_cambiado_su_telegram():
+    fm = _fm(_arbol())
+    fm.db.datos["Miembros"][MAC]["ana"]["telegram"] = "222"     # el que tenia al unirse
+    fm.db.datos["Usuarios"]["ana"]["telegram_id"] = "777"      # lo cambia antes de que la quiten
+    fm.quitar_miembro("jose", MAC, "ana")
+    assert "Telegram_ID_2" not in fm.db.datos["ESP32"][MAC]
+
+
+def test_unirse_guarda_su_telegram_para_poder_quitarselo():
+    fm = _fm(_arbol())
+    fm.db.datos["Usuarios"]["pedro"]["telegram_id"] = "333"
+    assert isinstance(fm.unirse("pedro", _invitar(fm)), dict)
+    assert fm.db.datos["Miembros"][MAC]["pedro"]["telegram"] == "333"
+
+
+def test_codigo_a_medio_canjear_no_sirve_para_volver_tras_ser_quitado():
+    fm = _fm(_arbol())
+    codigo = _invitar(fm)
+    real = fm._agregar_a_mi_lista
+    fm._agregar_a_mi_lista = MagicMock(side_effect=RuntimeError("red"))
+    try:
+        fm.unirse("pedro", codigo)                              # membresia hecha, lista no
+    except RuntimeError:
+        pass
+    fm._agregar_a_mi_lista = real
+    fm.quitar_miembro("jose", MAC, "pedro")
+    assert fm.unirse("pedro", codigo) == "no_existe"
+    assert "pedro" not in fm.db.datos["ESP32"][MAC]["miembros"]
+
+
 # 6. Salir --------------------------------------------------------------------
 
 def test_un_miembro_que_borra_sale_y_la_central_sigue():
