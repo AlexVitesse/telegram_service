@@ -62,6 +62,12 @@ def _fm(cuentas=None):
     fb.vincular_chat_id = types.MethodType(
         FirebaseManager.vincular_chat_id, fb
     )
+    # /start pasa por vincular_desde_enlace (#277): ficha o uid sin centrales.
+    for nombre in ("vincular_desde_enlace", "_tiene_centrales"):
+        setattr(fb, nombre, types.MethodType(getattr(FirebaseManager, nombre), fb))
+    fb.FICHA_ENLACE, fb._miembros = FirebaseManager.FICHA_ENLACE, FirebaseManager._miembros
+    fb.centrales = {}
+    fb._get_all_devices = lambda: fb.centrales
     return fb
 
 
@@ -116,11 +122,12 @@ class UpdateFalso:
         self.effective_user = types.SimpleNamespace(first_name="Eric")
 
 
-def _correr_start(args, cuentas=None, autorizados=()):
+def _correr_start(args, cuentas=None, autorizados=(), centrales=None):
     """El handler suelto, sin construir el bot -abriria MQTT, Firebase y red-."""
     from telegram_bot import TelegramBot
 
     fb = _fm(cuentas)
+    fb.centrales = centrales or {}
     fb.get_authorized_devices = lambda cid: list(autorizados)
     fb.has_any_admin = lambda: True
 
@@ -140,6 +147,13 @@ def test_start_con_uid_vincula_y_lo_dice():
     fb, upd = _correr_start(["UID_DE_ERIC"], {"UID_DE_ERIC": {}})
     assert fb.cuentas["UID_DE_ERIC"]["telegram_id"] == "6679241035"
     assert "vinculado" in upd.message.respuestas[0]
+
+
+def test_start_con_uid_de_un_dueno_no_vincula():
+    """#277: un miembro ve el uid del dueño; /start <uid> no puede vincular su chat ahí."""
+    fb, upd = _correr_start(["UID_DUENO"], {"UID_DUENO": {}},
+                            centrales={"AA_BB_CC_DD_EE": {"ownerUid": "UID_DUENO"}})
+    assert fb.escrituras == []
 
 
 def test_el_payload_viejo_no_se_toma_por_un_uid():
