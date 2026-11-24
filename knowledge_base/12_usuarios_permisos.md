@@ -32,7 +32,9 @@ Cada central admite hasta **10 personas** ademas del dueño. Solo el dueño ve l
 
 ### Como salgo o dejo de tener acceso a una central compartida (soy miembro de la familia)
 
-Si eres miembro de la familia y quieres salir de una central que te compartieron, o dejar de tener acceso:
+Si eres miembro de la familia y quieres salir de una central que te compartieron, o dejar de tener acceso (por
+ejemplo: "ya no quiero estar en la alarma de mi mamá", "me quiero salir de la casa de mis papás", "quitarme de la
+alarma de un familiar"):
 1. Abre la ficha de esa central ("Ver detalles y ajustes").
 2. Baja hasta el final de la ficha y toca el boton **"Salir de esta central"**.
 3. La app pregunta "¿Salir de esta central?": dejaras de verla y de recibir sus avisos. Toca **"Salir"**.
@@ -40,6 +42,10 @@ Si eres miembro de la familia y quieres salir de una central que te compartieron
 Como miembro no ves la seccion "Personas con acceso" (es solo del dueño): el boton de salir esta al final de la
 ficha. Al dueño no le llega ningun aviso; simplemente dejas de aparecer en su lista. La central sigue igual para el
 dueño y los demas. Para volver, el dueño tiene que invitarte otra vez.
+
+Como miembro no puedes usar "Editar" en esa central. Si ademas el dueño te puso como destinatario de Telegram de
+esa central y ya no quieres esos avisos, pidele que te quite en "Editar"; salir de la central en la app no cambia
+Telegram si no eras su "Usuario 2".
 
 ### Cuanto dura el codigo de invitacion
 
