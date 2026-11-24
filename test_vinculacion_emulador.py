@@ -303,6 +303,32 @@ def v19_el_telegram_vinculado_no_pisa_el_de_la_central():
     assert db.reference(f"ESP32/{MAC}/Telegram_ID").get() == "111"
 
 
+def v20_enlace_con_ficha_vincula_la_cuenta_que_la_escribio():
+    # #277: la app 8.2 manda una ficha que la cuenta escribe en su propio nodo.
+    _alta_como_la_app(A, MAC)
+    ficha = "t-" + "a" * 21 + "Z"
+    db.reference(f"Usuarios/{A}/enlaceTelegram").set(ficha)
+    fm.invalidate_cache()
+    assert fm.vincular_desde_enlace("t-" + "b" * 22, "555") == "sin_cuenta"   # ficha de nadie
+    assert fm.vincular_desde_enlace(ficha, "555") == "vinculado"
+    assert db.reference(f"Usuarios/{A}/telegram_id").get() == "555"
+
+
+def v21_uid_a_pelo_de_cuenta_con_centrales_no_vincula():
+    # Un miembro ve el uid del dueño: con /start <uid> vinculaba su chat a esa cuenta.
+    _alta_como_la_app(A, MAC)
+    fm.invalidate_cache()
+    assert fm.vincular_desde_enlace(A, "666") == "sin_cuenta"
+    assert not db.reference(f"Usuarios/{A}/telegram_id").get(), "se vinculó con el uid a pelo"
+
+
+def v22_uid_a_pelo_de_cuenta_nueva_sigue_vinculando():
+    # Apps < 8.2: el recién registrado, sin centrales, sigue pudiendo.
+    db.reference(f"Usuarios/{C}").update({"userName": "Carla"})
+    fm.invalidate_cache()
+    assert fm.vincular_desde_enlace(C, "777") == "vinculado"
+
+
 # --------------------------------------------------------------------------
 
 def main() -> int:

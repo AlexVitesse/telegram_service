@@ -532,7 +532,7 @@ class TelegramBot:
         # "app" es el payload viejo, que no identificaba a nadie. Un chat_id es
         # numerico; un uid de Firebase, 28 alfanumericos.
         if payload and payload != "app" and not payload.lstrip("-").isdigit():
-            resultado = self.firebase_manager.vincular_chat_id(payload, chat_id)
+            resultado = self.firebase_manager.vincular_desde_enlace(payload, chat_id)
             if resultado in ("vinculado", "ya_estaba"):
                 cabecera = (
                     "✅ *Listo, ya estas vinculado*"

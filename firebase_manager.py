@@ -6,6 +6,7 @@ Maneja la conexion con Firebase Realtime Database (RTDB) para:
 - Obtener la informacion de un dispositivo
 """
 import logging
+import re
 import threading
 import time
 from typing import Callable, Optional, List, Dict, Any, TYPE_CHECKING
@@ -1502,6 +1503,44 @@ class FirebaseManager:
             self._propagar_chat_id(uid, chat_id, cuenta.get("Dispositivos"))
             return "vinculado"
         return "error"
+
+    FICHA_ENLACE = re.compile(r"^t-[A-Za-z0-9]{22}$")
+
+    def vincular_desde_enlace(self, payload: str, chat_id: str) -> str:
+        """
+        `/start <payload>` desde la app (#277). La app 8.2 manda una ficha
+        aleatoria que la cuenta escribio en su propio Usuarios/{uid}/enlaceTelegram
+        (solo ella puede): prueba de que el enlace es suyo.
+
+        Las apps < 8.2 mandan el uid a pelo, y con familia los uids ya no son
+        secretos (un miembro ve el del dueno). El uid solo se acepta para
+        cuentas sin centrales ni membresias -el recien registrado, para quien
+        se hizo esto-; a las demas el bot les dice su ID para escribirlo a mano.
+        Mismos resultados que vincular_chat_id.
+        """
+        if self.FICHA_ENLACE.match(payload):
+            try:
+                encontrados = (self.db.reference("Usuarios").order_by_child("enlaceTelegram")
+                               .equal_to(payload).get())
+            except Exception as e:
+                logger.error(f"No se pudo buscar la ficha de enlace: {e}")
+                return "error"
+            uids = list(encontrados) if isinstance(encontrados, dict) else []
+            if len(uids) != 1:
+                logger.warning(f"/start con una ficha que no es de una sola cuenta ({len(uids)})")
+                return "sin_cuenta"
+            return self.vincular_chat_id(uids[0], chat_id)
+        if self._tiene_centrales(payload):
+            logger.warning(f"/start con el uid de una cuenta con centrales ({payload}): se pide la ficha")
+            return "sin_cuenta"
+        return self.vincular_chat_id(payload, chat_id)
+
+    def _tiene_centrales(self, uid: str) -> bool:
+        """Dueno o miembro de alguna central (en el cache del listener)."""
+        for nodo in (self._get_all_devices() or {}).values():
+            if isinstance(nodo, dict) and (str(nodo.get("ownerUid") or "") == uid or uid in self._miembros(nodo)):
+                return True
+        return False
 
     def _propagar_chat_id(self, uid: str, chat_id: str, dispositivos) -> None:
         """
