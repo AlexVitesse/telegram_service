@@ -422,12 +422,15 @@ class TelegramBot:
         app.add_handler(CommandHandler("bengala", self._cmd_bengala))
         app.add_handler(CommandHandler("auto", self._cmd_auto))
         app.add_handler(CommandHandler("preguntar", self._cmd_preguntar))
+        # Manual 3.0: "/modo auto" y "/modo pregunta" (mismos handlers).
+        app.add_handler(CommandHandler("modo", self._cmd_modo))
         app.add_handler(CommandHandler("deshabilitar", self._cmd_deshabilitar))
 
         # Admin
         app.add_handler(CommandHandler("permisos", self._cmd_permisos))
         app.add_handler(CommandHandler("horarios", self._cmd_horarios))
-        app.add_handler(CommandHandler("sensors", self._cmd_sensors))
+        # "/sensores" es el nombre del Manual 3.0; "/sensors" se queda.
+        app.add_handler(CommandHandler(["sensors", "sensores"], self._cmd_sensors))
         app.add_handler(CommandHandler("adduser", self._cmd_adduser))
         app.add_handler(CommandHandler("desvincular", self._cmd_desvincular))
         app.add_handler(CommandHandler("reload_kb", self._cmd_reload_kb))
@@ -699,11 +702,12 @@ class TelegramBot:
         help_text += "`/bengala` - Menú de configuración\n"
         help_text += "`/auto` - Modo automático (sin pregunta)\n"
         help_text += "`/preguntar` - Modo con pregunta\n"
+        help_text += "`/modo auto` o `/modo pregunta` - Lo mismo, como en el manual\n"
         help_text += "`/deshabilitar` - Desactivar bengala\n\n"
         help_text += "🔗 *Dispositivos:*\n"
         help_text += "`/desvincular` - Desvincular un dispositivo\n\n"
         help_text += "📻 *Sensores:*\n"
-        help_text += "`/sensors` - Ver sensores. El dueño, en privado, tiene botones: 🗑 eliminar y ✅ autorizar uno nuevo\n\n"
+        help_text += "`/sensors` o `/sensores` - Ver sensores. El dueño, en privado, tiene botones: 🗑 eliminar y ✅ autorizar uno nuevo\n\n"
         help_text += "⏰ *Horarios:*\n"
         help_text += "`/horarios` - Ver/configurar programación por dispositivo\n"
         help_text += "`/horarios activar HH:MM` - Hora de armado\n"
@@ -1188,6 +1192,22 @@ class TelegramBot:
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=self._get_keyboard()
             )
+
+    # Sin @require_auth: lo ponen /auto y /preguntar, que son los que actuan.
+    async def _cmd_modo(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """/modo auto | /modo pregunta (Manual 3.0): delega en /auto y /preguntar."""
+        arg = context.args[0].lower() if context.args else ""
+        destino = {"auto": self._cmd_auto, "automatico": self._cmd_auto,
+                   "pregunta": self._cmd_preguntar, "preguntar": self._cmd_preguntar}.get(arg)
+        if destino:
+            return await destino(update, context)
+        await update.message.reply_text(
+            "Uso:\n"
+            "`/modo auto` - la bengala se dispara sola al saltar la alarma\n"
+            "`/modo pregunta` - el bot te pregunta antes de dispararla\n"
+            "`/deshabilitar` - la bengala no se dispara nunca",
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
     @require_auth
     async def _cmd_preguntar(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
