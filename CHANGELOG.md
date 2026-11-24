@@ -3,7 +3,7 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Una entrada por día de despliegue,
 con los commits de `main`. Lo más reciente, arriba.
 
-## 2026-11-24 — `950d03d..d77a7b8` (en producción 13:35 CST)
+## 2026-11-24 — `950d03d..f606570` (en producción)
 
 ### Agregado
 - Bot: `/modo auto`, `/modo pregunta` y `/sensores`, como el Manual alarma 3.0; siguen `/auto`, `/preguntar` y
@@ -12,6 +12,8 @@ con los commits de `main`. Lo más reciente, arriba.
   (`d77a7b8`).
 - KB de Senti: instalar la app, vincular Telegram desde la app, cambiar la red WiFi, SOS sin conexión, seguridad de
   la bengala y demás temas del Manual 3.0 (`aba092f`, `854a801`).
+- KB: qué es Senti y que no necesita configuración (antes "¿cómo configuro a Senti?" traía la configuración de la
+  central) (`f606570`).
 - Pruebas: `test_cache_eventos.py`, `test_comandos_manual3.py`, prueba anti-jerga en la KB, casos nuevos en las
   baterías de emulador (reglas 60, familia 25, vinculación 22).
 
