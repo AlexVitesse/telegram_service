@@ -314,72 +314,49 @@ class FirebaseManager:
             logger.error(f"Error reconectando listeners de Firebase: {e}")
             return False
 
+    @staticmethod
+    def _poner_en_ruta(raiz: dict, ruta: list, valor):
+        """Escribe `valor` en `raiz` siguiendo `ruta`; None borra la hoja."""
+        nodo = raiz
+        for clave in ruta[:-1]:
+            hijo = nodo.get(clave)
+            if not isinstance(hijo, dict):
+                if valor is None:
+                    return
+                hijo = nodo[clave] = {}
+            nodo = hijo
+        if valor is None:
+            nodo.pop(ruta[-1], None)
+        else:
+            nodo[ruta[-1]] = valor
+
     def _update_cache_from_event(self, event) -> None:
         """
-        Actualiza el cache local desde un evento del listener de Firebase.
-        Esto evita consultas .get() innecesarias ya que el listener mantiene
-        el cache actualizado en tiempo real.
+        Aplica un evento del listener al cache siguiendo la ruta COMPLETA.
+        `put` reemplaza el nodo de la ruta; `patch` escribe cada hijo (la clave
+        puede ser una subruta "a/b"); None borra. Antes solo se miraba el
+        segundo nivel: un evento en /{mac}/miembros/{uid} dejaba `miembros`
+        igual a {"rol": "familia"} y borrar un miembro borraba a todos.
         """
         try:
-            if event.path == "/" and isinstance(event.data, dict):
-                # Evento inicial o reset completo - reemplazar todo el cache
-                self._all_devices_cache = event.data
+            ruta = [p for p in (event.path or "/").split("/") if p]
+            if not ruta and event.event_type != "patch":
+                # Snapshot inicial o reset completo
+                self._all_devices_cache = event.data if isinstance(event.data, dict) else {}
                 self._cache_timestamp = time.time()
-                logger.debug(f"Cache actualizado desde listener (snapshot completo): {len(event.data)} dispositivos")
-
-            elif event.path == "/" and event.data is None:
-                # Todos los datos fueron eliminados
-                self._all_devices_cache = {}
-                self._cache_timestamp = time.time()
-                logger.debug("Cache vaciado desde listener (datos eliminados)")
-
-            elif self._all_devices_cache is not None:
-                # Actualización parcial - modificar el cache existente
-                parts = event.path.split('/')
-                if len(parts) >= 2 and parts[1]:
-                    device_id = parts[1]
-
-                    if event.data is None:
-                        # Dispositivo o campo eliminado
-                        if len(parts) == 2:
-                            # Dispositivo completo eliminado
-                            if device_id in self._all_devices_cache:
-                                del self._all_devices_cache[device_id]
-                                logger.debug(f"Cache: dispositivo {device_id} eliminado")
-                        elif len(parts) >= 3:
-                            # Campo específico eliminado
-                            field = parts[2]
-                            if device_id in self._all_devices_cache and isinstance(self._all_devices_cache[device_id], dict):
-                                if field in self._all_devices_cache[device_id]:
-                                    del self._all_devices_cache[device_id][field]
-                                    logger.debug(f"Cache: campo {field} eliminado de {device_id}")
-
-                    elif len(parts) == 2:
-                        # Actualización de dispositivo (puede ser completa o parcial/patch)
-                        if isinstance(event.data, dict):
-                            if device_id in self._all_devices_cache and isinstance(self._all_devices_cache[device_id], dict):
-                                # MERGE: Mezclar datos existentes con los nuevos (para patches parciales)
-                                self._all_devices_cache[device_id].update(event.data)
-                                logger.debug(f"Cache: dispositivo {device_id} actualizado (merge)")
-                            else:
-                                # Dispositivo nuevo, guardar completo
-                                self._all_devices_cache[device_id] = event.data
-                                logger.debug(f"Cache: dispositivo {device_id} creado")
-
-                    elif len(parts) >= 3:
-                        # Actualización de campo específico
-                        field = parts[2]
-                        if device_id not in self._all_devices_cache:
-                            self._all_devices_cache[device_id] = {}
-                        if isinstance(self._all_devices_cache[device_id], dict):
-                            self._all_devices_cache[device_id][field] = event.data
-                            logger.debug(f"Cache: {device_id}.{field} = {event.data}")
-
-                    self._cache_timestamp = time.time()
-
-            else:
-                # No hay cache, se cargará en la próxima consulta
+                logger.debug(f"Cache actualizado desde listener (snapshot completo): {len(self._all_devices_cache)} dispositivos")
+                return
+            if self._all_devices_cache is None:
                 logger.debug("Cache no inicializado, se cargará en próxima consulta")
+                return
+            if event.event_type == "patch" and isinstance(event.data, dict):
+                cambios = [(ruta + [p for p in k.split("/") if p], v) for k, v in event.data.items()]
+            else:
+                cambios = [(ruta, event.data)]
+            for r, valor in cambios:
+                if r:
+                    self._poner_en_ruta(self._all_devices_cache, r, valor)
+            self._cache_timestamp = time.time()
 
         except Exception as e:
             logger.error(f"Error actualizando cache desde evento: {e}")

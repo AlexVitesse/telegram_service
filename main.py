@@ -630,7 +630,11 @@ class AlarmBridgeService:
         from datetime import datetime
         from fcm_handler import NotificationType, PushNotification
         central = (firebase_manager._nodo(mac) or {}).get("Nombre") or mac
-        hora = datetime.fromtimestamp(ts / 1000).strftime("%H:%M")
+        try:
+            hora = datetime.fromtimestamp(ts / 1000).strftime("%H:%M")
+        except (TypeError, ValueError, OverflowError, OSError):
+            # ts fuera de rango: el aviso al dueño sale igual, con la hora de llegada
+            hora = datetime.now().strftime("%H:%M")
         texto = f"{nombre} {self._VERBO_ORDEN.get(accion, accion)} {central} a las {hora}"
         if local:
             texto += " (desde la red de la casa)"
