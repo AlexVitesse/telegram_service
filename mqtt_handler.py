@@ -36,7 +36,14 @@ PENDING_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pending
 #: caduca. Una central que vuelve a los 3 dias tiene que recibir el horario
 #: que se le cambio, no el que tenia. El resto sigue caducando a las 24 h.
 COMANDOS_CONFIG = (Command.SET_SCHEDULE.value, Command.SET_BENGALA_MODE.value,
-                   Command.SET_EXIT_TIME.value)
+                   Command.SET_EXIT_TIME.value, Command.LOCAL_ROTATE.value)
+
+#: De estos no basta con publicar: se quedan en la cola (sin caducar) hasta el
+#: cmd_ack de la central y se reenvian cada REENVIO_SIN_ACK_S. El cambio de
+#: llave al quitar a un miembro o al traspasar caducaba a las 24 h, y una
+#: central sin broker mas tiempo dejaba la llave vieja al expulsado (#276).
+COMANDOS_HASTA_ACK = (Command.LOCAL_ROTATE.value,)
+REENVIO_SIN_ACK_S = 10 * 60
 
 
 class MqttHandler:
@@ -293,6 +300,9 @@ class MqttHandler:
                         self.on_sensor_ack(d["cmd"], event.device_id, sensor, bool(d.get("ok")))
                 if d.get("ok"):
                     logger.info(f"{event.device_id} aplico {d.get('cmd')}")
+                    if d.get("cmd") in COMANDOS_HASTA_ACK:
+                        self._descartar_pendiente(event.device_id, d["cmd"])
+                        self._sin_ack().pop(normalizar_mac(event.device_id), None)
                     # El ack no trae el modo: es el ultimo que se le mando. Sin
                     # esto el VPS esperaba a la telemetria (hasta 2 min).
                     if d.get("cmd") == Command.SET_BENGALA_MODE.value:
@@ -570,7 +580,10 @@ class MqttHandler:
         # el viejo y el nuevo. Desde la cola no se toca: ahi la reencola
         # process_pending_commands.
         if cmd in COMANDOS_CONFIG and not _desde_cola:
-            if ok:
+            if ok and cmd in COMANDOS_HASTA_ACK:
+                self._queue_pending_command(target_device, cmd, args or {})   # hasta el cmd_ack
+                self._sin_ack()[normalizar_mac(target_device)] = time.time()
+            elif ok:
                 self._descartar_pendiente(target_device, cmd)  # el viejo pisaria a este
             else:
                 logger.warning(f"{cmd} a {target_device} no se publico: queda en cola")
@@ -589,6 +602,12 @@ class MqttHandler:
             total = len(cola)
             self._save_pending()
         logger.info(f"Comando {cmd} encolado para {device_id}. Total pendientes: {total}")
+
+    def _sin_ack(self) -> Dict[str, float]:
+        """MAC -> cuando se mando por ultima vez un COMANDOS_HASTA_ACK aun sin cmd_ack."""
+        if not hasattr(self, "_enviado_sin_ack"):
+            self._enviado_sin_ack = {}
+        return self._enviado_sin_ack
 
     def _claves_cola(self, device_id: str) -> List[str]:
         """Claves de la cola que son la misma central. Por MAC normalizada y no
@@ -670,15 +689,25 @@ class MqttHandler:
                     logger.info(f"Descartado comando expirado para {device_id}: {cmd}")
             enviar = sorted(enviar + list(ultimo.values()), key=lambda x: x[2])
 
-            fallidos = []
-            for cmd, args, ts in enviar:
+            fallidos, sin_ack = [], []
+            mac = normalizar_mac(device_id)
+            for cmd, args, ts in list(enviar):
+                if cmd in COMANDOS_HASTA_ACK:
+                    sin_ack.append((cmd, args, ts))           # se queda hasta el cmd_ack
+                    if now - self._sin_ack().get(mac, 0) < REENVIO_SIN_ACK_S:
+                        enviar.remove((cmd, args, ts))         # mandado hace poco: esperar
+                        continue
                 logger.info(f"Enviando comando pendiente a {device_id}: {cmd}")
                 if not self.send_command(cmd, args, device_id, queue_if_offline=False,
                                          _desde_cola=True):
                     fallidos.append((cmd, args, ts))
+                elif cmd in COMANDOS_HASTA_ACK:
+                    self._sin_ack()[mac] = now
             if fallidos:
                 logger.warning(f"{len(fallidos)} comando(s) para {device_id} no se publicaron: siguen en cola")
-                self._pending_commands.setdefault(device_id, []).extend(fallidos)
+            quedan = fallidos + [x for x in sin_ack if x not in fallidos]
+            if quedan:
+                self._pending_commands.setdefault(device_id, []).extend(quedan)
             self._save_pending()
 
         enviados = len(enviar) - len(fallidos)

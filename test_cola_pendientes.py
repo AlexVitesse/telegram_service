@@ -260,6 +260,31 @@ def test_vaciar_la_cola_con_fallo_no_la_duplica():
     _telemetria(h)
     assert h.get_pending_commands_count(MAC) == 1, h._pending_commands
 
+def test_cambio_de_llave_se_queda_hasta_el_ack_y_no_caduca():
+    # #276: al quitar a un miembro la llave vieja tiene que morir aunque la
+    # central pase dias sin broker, y aunque la publicacion "salga" sin llegar.
+    import mqtt_handler as mh
+    h = _handler(_archivo())
+    envios = lambda: _publicados(h).count("local_rotate")
+    h.send_command("local_rotate", device_id=MAC)            # online: publica...
+    una = envios()                                           # (id completo + recortado)
+    assert una >= 1
+    assert h.get_pending_commands_count(MAC) == 1           # ...y espera el ack
+    _telemetria(h)
+    assert envios() == una, "reenviado antes de REENVIO_SIN_ACK_S"
+    h._sin_ack()[MAC] = time.time() - mh.REENVIO_SIN_ACK_S - 1
+    h._pending_commands[MAC] = [("local_rotate", {}, time.time() - 3 * 24 * 3600)]   # 3 dias
+    _telemetria(h)
+    assert envios() == 2 * una, "caduco o no se reenvio"
+    assert h.get_pending_commands_count(MAC) == 1
+    h._handle_event(json.dumps({"deviceId": MAC, "eventType": "cmd_ack",
+                                "data": {"cmd": "local_rotate", "ok": True}}))
+    assert h.get_pending_commands_count(MAC) == 0, h._pending_commands
+    h._sin_ack()[MAC] = 0
+    _telemetria(h)
+    assert envios() == 2 * una, "siguio mandandolo tras el ack"
+
+
 if __name__ == "__main__":
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0
