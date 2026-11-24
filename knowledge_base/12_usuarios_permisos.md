@@ -28,8 +28,28 @@ Cada central admite hasta **10 personas** ademas del dueño. Solo el dueño ve l
 ### Quitar a alguien o salir
 
 - **El dueño quita a alguien:** en "Personas con acceso", toca **"Quitar"** junto a su nombre. Esa persona deja de ver la central al momento y le llega el aviso "Ya no tienes acceso". Si esa persona era el "Usuario 2" de Telegram de la central, tambien se le quita de ahi.
-- **Un miembro se sale:** en la ficha de la central, el boton de abajo dice **"Salir de esta central"**. La central sigue igual para el dueño y los demas.
+- **Un miembro se sale:** en la ficha de la central, el ultimo boton, al final (donde al dueño le aparece "Borrar dispositivo"), dice **"Salir de esta central"**. No esta en "Personas con acceso": esa seccion solo la ve el dueño. La central sigue igual para el dueño y los demas.
 - **Si la central cambia de dueño** (alguien la resetea y la da de alta con su cuenta) o el dueño la borra, todos los miembros pierden el acceso y los codigos pendientes dejan de valer.
+
+### Cuanto dura el codigo de invitacion
+
+El codigo de invitacion de la familia dura, vence o caduca asi: el **QR de "Invitar" dura 15 minutos** y el
+**codigo de "Invitar por WhatsApp" dura 24 horas**. Los dos sirven una sola vez: cuando alguien lo usa, ya no vale.
+Si se vencio, el dueño genera otro.
+
+### Un familiar puede cambiar, crear o borrar horarios?
+
+No. Un miembro de la familia ve los horarios del dueño en la app, pero **solo para leerlos**: no puede crearlos,
+cambiarlos ni borrarlos. Los horarios los cambia unicamente el dueño de la central, desde la app (seccion Horarios)
+o con /horarios en Telegram.
+
+### Me mandaron un codigo: como me uno?
+
+Depende de como es el codigo:
+- **Codigo de la app**, de 8 letras y numeros como ABCD-EFGH (o un QR): es una invitacion de la familia. Abre la
+  app Sentinel Guard, entra con tu cuenta y en Inicio toca **"Tengo un codigo"**; escanea el QR o escribe el codigo.
+- **Comando que empieza por /join_**: es un permiso del bot de Telegram, no de la app. Envialo tal cual al bot
+  @esp32_space_bot en un chat privado y espera a que el dueño lo apruebe.
 
 ### Familia de la app y destinatarios de Telegram son cosas distintas
 

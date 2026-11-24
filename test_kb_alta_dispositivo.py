@@ -81,6 +81,19 @@ def test_que_es_y_como_se_configura_senti():
         assert any("Senti es el asistente" in t for t in textos), (q, [t[:40] for t in textos])
 
 
+def test_familia_preguntas_tal_cual():
+    # 24-nov, Senti en produccion: "cuanto dura el codigo" -> sin informacion;
+    # horarios de un familiar -> "comandos de administradores"; mezclaba el
+    # codigo de la app con /join_ de Telegram.
+    casos = [("¿Cuánto dura el código de invitación?", "dura 15 minutos"),
+             ("¿Un familiar puede cambiar los horarios?", "solo para leerlos"),
+             ("Me mandaron un código, ¿cómo me uno?", "Depende de como es el codigo"),
+             ("¿Cómo dejo de tener acceso a una central compartida?", "Salir de esta central")]
+    for q, clave in casos:
+        textos = [r.chunk.text for r in _buscar(q)]
+        assert any(clave in t for t in textos), (q, [t[:40] for t in textos])
+
+
 def test_desvincular():
     _top_es_borrar("como desvinculo un dispositivo")
 
