@@ -108,6 +108,13 @@ def test_el_ack_dice_que_sensor_era():
     h.on_sensor_ack.assert_called_once_with("authorize_device", MAC, "MOV-NUEVO1", True)
 
 
+def test_el_tope_de_5_modulos_llega_con_su_motivo():
+    # Manual 3.0: maximo 5 modulos vinculados; el firmware rechaza el sexto.
+    h = _handler()
+    h._handle_event('{"deviceId": "%s", "eventType": "cmd_ack", "data": {"cmd": "authorize_device", "ok": false, "sensorId": "MOV-6", "motivo": "tope"}}' % MAC)
+    h.on_sensor_ack.assert_called_once_with("authorize_device", MAC, "MOV-6", False, motivo="tope")
+
+
 def test_el_ack_nuevo_trae_el_sensor():
     h = _handler()
     h._handle_event('{"deviceId": "%s", "eventType": "cmd_ack", "data": {"cmd": "remove_device", "ok": true, "sensorId": "MOV-X"}}' % MAC)

@@ -297,7 +297,9 @@ class MqttHandler:
                     pedido = self._autorizacion_pedida.pop(event.device_id, None)                         if d["cmd"] == Command.AUTHORIZE_DEVICE.value else None
                     sensor = d.get("sensorId") or pedido
                     if sensor and self.on_sensor_ack:
-                        self.on_sensor_ack(d["cmd"], event.device_id, sensor, bool(d.get("ok")))
+                        # "motivo" lo manda el firmware del Manual 3.0 ("tope": 5 modulos).
+                        extra = {"motivo": d["motivo"]} if d.get("motivo") else {}
+                        self.on_sensor_ack(d["cmd"], event.device_id, sensor, bool(d.get("ok")), **extra)
                 if d.get("ok"):
                     logger.info(f"{event.device_id} aplico {d.get('cmd')}")
                     if d.get("cmd") in COMANDOS_HASTA_ACK:

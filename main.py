@@ -595,7 +595,7 @@ class AlarmBridgeService:
             self.mqtt.send_command(Command.RENAME_DEVICE.value, {"sensorId": sensor, "name": nombre},
                                    device_id=device_id, queue_if_offline=True)
 
-    def _sensor_ack(self, orden: str, device_id: str, sensor: str, ok: bool):
+    def _sensor_ack(self, orden: str, device_id: str, sensor: str, ok: bool, motivo: str = ""):
         """
         cmd_ack de authorize/remove/rename. Se avisa SIEMPRE al dueño en privado
         (nunca al grupo): si alguien con su teléfono borra un sensor, se entera.
@@ -604,6 +604,9 @@ class AlarmBridgeService:
         if orden == Command.AUTHORIZE_DEVICE.value:
             firebase_manager.quitar_pendiente(device_id, sensor)
             texto = (f"✅ Sensor `{sensor}` autorizado en *{location}*. Ya puede disparar la alarma." if ok else
+                     # Manual 3.0: maximo 5 modulos vinculados en total.
+                     f"⚠️ *{location}* ya tiene el máximo de 5 módulos vinculados. "
+                     f"Elimina uno con /sensores para poder agregar `{sensor}`." if motivo == "tope" else
                      # Se reinició o llegó al tope de 5 pendientes: lo olvidó.
                      f"⚠️ *{location}* ya no tiene a `{sensor}` en espera. "
                      "Apaga y enciende el sensor para que vuelva a pedir permiso.")
