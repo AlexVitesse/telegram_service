@@ -13,7 +13,8 @@ con los commits de `main`. Lo más reciente, arriba.
 - KB de Senti: instalar la app, vincular Telegram desde la app, cambiar la red WiFi, SOS sin conexión, seguridad de
   la bengala y demás temas del Manual 3.0 (`aba092f`, `854a801`).
 - KB de familia con las preguntas tal cual las hace el cliente: cuánto dura el código, si un familiar cambia
-  horarios, código de la app frente a `/join_` de Telegram y dónde está "Salir de esta central".
+  horarios, código de la app frente a `/join_` de Telegram y un apartado propio para salir de una central compartida
+  (Senti lo ponía dentro de "Personas con acceso" y decía que avisaba al dueño; no avisa).
 - KB: qué es Senti y que no necesita configuración (antes "¿cómo configuro a Senti?" traía la configuración de la
   central) (`f606570`).
 - Pruebas: `test_cache_eventos.py`, `test_comandos_manual3.py`, prueba anti-jerga en la KB, casos nuevos en las

@@ -25,11 +25,21 @@ Cada central admite hasta **10 personas** ademas del dueño. Solo el dueño ve l
 - **No puede:** editar la central (nombre, tiempos, bengala, WiFi), autorizar, borrar ni renombrar sensores, cambiar los destinatarios de Telegram ni invitar o quitar a otras personas. Tampoco tiene el control sin internet (cuando la app habla directo con la central en la red de la casa): eso es solo del dueño, asi que un miembro necesita internet para armar o desarmar.
 - **Cada vez que un miembro arma, desarma o pide panico, al dueño le llega un aviso con su nombre.** Ese aviso no se puede apagar.
 
-### Quitar a alguien o salir
+### Quitar a alguien (solo el dueño)
 
 - **El dueño quita a alguien:** en "Personas con acceso", toca **"Quitar"** junto a su nombre. Esa persona deja de ver la central al momento y le llega el aviso "Ya no tienes acceso". Si esa persona era el "Usuario 2" de Telegram de la central, tambien se le quita de ahi.
-- **Un miembro se sale:** en la ficha de la central, el ultimo boton, al final (donde al dueño le aparece "Borrar dispositivo"), dice **"Salir de esta central"**. No esta en "Personas con acceso": esa seccion solo la ve el dueño. La central sigue igual para el dueño y los demas.
 - **Si la central cambia de dueño** (alguien la resetea y la da de alta con su cuenta) o el dueño la borra, todos los miembros pierden el acceso y los codigos pendientes dejan de valer.
+
+### Como salgo o dejo de tener acceso a una central compartida (soy miembro de la familia)
+
+Si eres miembro de la familia y quieres salir de una central que te compartieron, o dejar de tener acceso:
+1. Abre la ficha de esa central ("Ver detalles y ajustes").
+2. Baja hasta el final de la ficha y toca el boton **"Salir de esta central"**.
+3. La app pregunta "¿Salir de esta central?": dejaras de verla y de recibir sus avisos. Toca **"Salir"**.
+
+Como miembro no ves la seccion "Personas con acceso" (es solo del dueño): el boton de salir esta al final de la
+ficha. Al dueño no le llega ningun aviso; simplemente dejas de aparecer en su lista. La central sigue igual para el
+dueño y los demas. Para volver, el dueño tiene que invitarte otra vez.
 
 ### Cuanto dura el codigo de invitacion
 
