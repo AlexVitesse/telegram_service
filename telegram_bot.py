@@ -3135,9 +3135,10 @@ class TelegramBot:
             if not self.firebase_manager.es_dueno(mac, chat_id):
                 await query.edit_message_text("❌ Solo el dueño de la central puede autorizar sensores.")
             elif data.startswith("authno_"):
+                self.firebase_manager.ignorar_pendiente(mac, sensor)   # #313: queda en «Ignorados»
                 await query.edit_message_text(
-                    f"Ignorado: {sensor} sigue sin poder disparar la alarma. "
-                    "Puedes autorizarlo después desde la app.")
+                    f"Ignorado: {sensor} no podrá disparar la alarma y no te volveremos a avisar. "
+                    "Si cambias de idea, autorízalo con /sensores o en la app (Sensores > Ignorados).")
             else:
                 self.mqtt_handler.send_command(Command.AUTHORIZE_DEVICE.value, {"sensorId": sensor},
                                                device_id=mac, queue_if_offline=True)

@@ -112,6 +112,11 @@ Los sensores LoRa son de bajo consumo energetico. La duracion de la bateria depe
 Por seguridad, cuando el Master escucha un sensor LoRa que no conoce, no lo deja disparar la alarma hasta que el dueño lo autorice. Al dueño le llega una notificacion "Sensor nuevo" y un mensaje privado de Telegram con botones. Se autoriza de dos formas:
 - En la app: ficha del equipo > "Sensores nuevos" > "Autorizar".
 - En Telegram: con el boton "Autorizar" del aviso, o con /sensores y su boton "Autorizar".
+
+### Y si no lo reconozco, o le di "Ignorar" por error?
+
+"Ignorar" (en el aviso de Telegram y, en las versiones nuevas de la app, junto a "Autorizar") no lo borra: ese sensor sigue sin poder disparar la alarma, no te vuelve a avisar y pasa a la lista "Ignorados" de la ficha del equipo (versiones nuevas de la app). Si fue un error, autorizalo desde ahi ("Ignorados" > "Autorizar"), en "Sensores nuevos" si tu app aun no tiene "Ignorados", o en Telegram con /sensores y su boton "Autorizar". No se acumulan: el Master guarda como maximo 5 sensores en espera y, si llega otro, olvida el mas viejo.
+
 Autorizalo solo si acabas de instalar ese sensor tu. Si la app o Telegram dicen que la central ya no lo tiene en espera (pasa si el Master se reinicio o si llegaron varios sensores nuevos a la vez), apaga y enciende el sensor para que vuelva a pedir permiso.
 
 ## Como elimino o renombro un sensor?

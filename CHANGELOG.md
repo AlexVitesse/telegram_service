@@ -11,6 +11,10 @@ con los commits de `main`. Lo más reciente, arriba.
   que la `Orden` de la app, con aviso al dueño; lo demás responde "solo el dueño". `/help` muestra solo lo suyo. Los
   avisos de la central le siguen llegando en la app, no por Telegram. KB 12 y 05 al día. `test_telegram_familia.py`.
 
+### Cambiado
+- Sensores nuevos (#313): «Ignorar» en Telegram marca `Pendientes/{id}/ignorado` en vez de solo cambiar el texto; no
+  vuelve a avisar y se autoriza después con `/sensores` o en la app («Ignorados»). KB 04 y 14.
+
 ### Arreglado
 - `/horarios on` y «activa el horario» por Senti se deshacían solos (#315): el `update()` del bot en `/Horarios`
   llega al listener como `patch` en "/" con rutas planas, se tomaba por el árbol entero y el horario recién habilitado

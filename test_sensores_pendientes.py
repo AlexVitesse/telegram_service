@@ -195,6 +195,16 @@ def test_la_lista_borra_los_pendientes_que_la_central_olvido():
     pendientes.child.return_value.delete.assert_called_once()
 
 
+def test_ignorar_marca_sin_borrar_y_no_crea_pendientes_a_medias():
+    """#313: «Ignorar» deja el pendiente (Autorizar despues) con ignorado=True."""
+    from test_retro_banco import _fm as fm_arbol
+    fm = fm_arbol({"ESP32": {MAC: {"Pendientes": {"MOV-1": {"tipo": "MOV", "desde": 1}}}}})
+    assert fm.ignorar_pendiente(MAC, "MOV-1") is True
+    assert fm.db.datos["ESP32"][MAC]["Pendientes"]["MOV-1"] == {"tipo": "MOV", "desde": 1, "ignorado": True}
+    assert fm.ignorar_pendiente(MAC, "MOV-YA-NO-ESTA") is False
+    assert "MOV-YA-NO-ESTA" not in fm.db.datos["ESP32"][MAC]["Pendientes"]
+
+
 def test_teclado_de_sensores():
     from mqtt_protocol import SensorInfo
     from telegram_bot import teclado_sensores

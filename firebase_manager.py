@@ -231,6 +231,25 @@ class FirebaseManager:
         except Exception as e:
             logger.error(f"No se pudo guardar la lista de sensores de {device_id}: {e}")
 
+    def ignorar_pendiente(self, device_id: str, sensor_id: str) -> bool:
+        """
+        #313: «Ignorar» (Telegram o app) marca `Pendientes/{id}/ignorado`. No se
+        borra: sigue sin disparar, no se vuelve a avisar (anotar_pendiente ve
+        que ya existe) y se puede autorizar despues con /sensores o la app.
+        Solo si el pendiente sigue ahi: no se crea uno a medias.
+        """
+        if not self.is_available() or not sensor_id:
+            return False
+        try:
+            ref = self.db.reference(f"ESP32/{normalizar_mac(device_id)}/Pendientes/{sensor_id}")
+            if not ref.get():
+                return False
+            ref.update({"ignorado": True})
+            return True
+        except Exception as e:
+            logger.error(f"No se pudo ignorar el sensor pendiente {sensor_id} de {device_id}: {e}")
+            return False
+
     def quitar_pendiente(self, device_id: str, sensor_id: str) -> None:
         if not self.is_available() or not sensor_id:
             return
