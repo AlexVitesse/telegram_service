@@ -18,6 +18,11 @@ con los commits de `main`. Lo más reciente, arriba.
   vuelve a avisar y se autoriza después con `/sensores` o en la app («Ignorados»). KB 04 y 14.
 
 ### Arreglado
+- Una telemetría hecha durante la cuenta de salida (`armed=false` a propósito) que llegaba tarde podía marcar como
+  desarmada una central armada: pasado el margen, medido con la hora del VPS, llamaba a `set_armed_state(False)`, que
+  escribe `Estado` (#309; el 25-nov dejó `Telemetry.armed=false` en LORA Test; el 26-nov se midieron 37 s de
+  retraso en el banco). Ahora se mira la hora de la central: si la telemetría es de antes del último armado o
+  desarmado + tiempo de salida + 5 s, no toca el estado ni el campo `armed`. `test_telemetria_tardia.py`.
 - `/horarios on` y «activa el horario» por Senti se deshacían solos (#315): el `update()` del bot en `/Horarios`
   llega al listener como `patch` en "/" con rutas planas, se tomaba por el árbol entero y el horario recién habilitado
   quedaba "huérfano": deshabilitado y mandado así a la central. Ahora solo un `put` en la raíz vale como árbol

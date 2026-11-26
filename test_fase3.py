@@ -53,6 +53,7 @@ def test_cmd_ack_no_llega_a_nadie():
     h.firebase_manager.get_device_location.return_value = ""
     h.device_manager = MagicMock()
     h.last_arm_event_time = {}
+    h.last_arm_event_ts = {}
     h.prueba_fisica = {}
     h._ids_vistos, h._arranques_por_confirmar = OrderedDict(), {}
     h._on_event_callback = MagicMock()
@@ -147,6 +148,7 @@ def test_system_boot_pide_el_horario_como_arranque():
     h.firebase_manager.get_device_location.return_value = ""
     h.device_manager = MagicMock()
     h.last_arm_event_time = {}
+    h.last_arm_event_ts = {}
     h.prueba_fisica = {}
     h._ids_vistos, h._arranques_por_confirmar = OrderedDict(), {}
     h._on_event_callback = None

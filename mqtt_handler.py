@@ -92,6 +92,11 @@ class MqttHandler:
         # Timestamp del último evento de armado/desarmado por dispositivo
         # Usado para evitar que telemetría vieja sobrescriba el estado
         self.last_arm_event_time: Dict[str, float] = {}
+        #: Hora de la CENTRAL (NTP) del ultimo armado/desarmado. Una telemetria
+        #: hecha antes de ese momento + la cuenta de salida no dice nada del
+        #: estado actual, llegue cuando llegue (#309: una del 25-nov tardo y
+        #: llego con armed=false despues de la cuenta).
+        self.last_arm_event_ts: Dict[str, float] = {}
 
         # Tiempo de salida (bomba) por dispositivo - usado para calcular gracia
         # Se actualiza desde telemetría del ESP32
@@ -268,9 +273,11 @@ class MqttHandler:
             elif event.event_type == EventType.SYSTEM_ARMED:
                 self.device_manager.set_armed_state(event.device_id, True)
                 self.last_arm_event_time[event.device_id] = time.time()
+                self.last_arm_event_ts[event.device_id] = event.timestamp if event.timestamp > 1_600_000_000 else time.time()
             elif event.event_type == EventType.SYSTEM_DISARMED:
                 self.device_manager.set_armed_state(event.device_id, False)
                 self.last_arm_event_time[event.device_id] = time.time()
+                self.last_arm_event_ts[event.device_id] = event.timestamp if event.timestamp > 1_600_000_000 else time.time()
             # La bengala se cuenta cuando la central lo confirma, venga de donde
             # venga la orden (app, Telegram, red local). Antes solo los botones de
             # Telegram la marcaban: tras deshabilitar y habilitar desde la app el
@@ -406,6 +413,12 @@ class MqttHandler:
             grace_period = exit_time + 5  # tiempo_bomba + 5 segundos de margen
             time_since_event = time.time() - last_event_time
             should_update_armed_state = time_since_event > grace_period
+            # Y por la hora de la central: el mensaje puede llegar tarde (37 s
+            # medidos el 26-nov) y uno de la cuenta de salida trae armed=false.
+            if telemetry.timestamp > 1_600_000_000:
+                ultimo = self.last_arm_event_ts.get(telemetry.device_id, 0)
+                if telemetry.timestamp < ultimo + grace_period:
+                    should_update_armed_state = False
 
             # Informar al DeviceManager sobre el estado de armado y otra info de telemetria
             if should_update_armed_state:
@@ -443,7 +456,7 @@ class MqttHandler:
 
             # ✅ NUEVO: Guardar telemetría en Firebase para que la App pueda leerla
             if self.firebase_manager.is_available():
-                self._save_telemetry_to_firebase(telemetry)
+                self._save_telemetry_to_firebase(telemetry, con_armado=should_update_armed_state)
 
             logger.debug(f"Telemetria de {telemetry.device_id}: armed={telemetry.armed}")
 
@@ -920,7 +933,7 @@ class MqttHandler:
         """Obtiene la ubicacion del dispositivo"""
         return self.device_location
 
-    def _save_telemetry_to_firebase(self, telemetry: MqttTelemetry):
+    def _save_telemetry_to_firebase(self, telemetry: MqttTelemetry, con_armado: bool = True):
         """
         Guarda la telemetría del dispositivo en Firebase para que la App pueda leerla.
         Ruta: ESP32/{device_id}/Telemetry/
@@ -971,6 +984,9 @@ class MqttHandler:
             if telemetry.sched_max:
                 telemetry_data["sched_max"] = telemetry.sched_max
 
+            if not con_armado:
+                # Telemetria de antes de que acabara la cuenta: su armed es viejo (#309).
+                telemetry_data.pop("armed", None)
             path = f"ESP32/{device_id}/Telemetry"
             self.firebase_manager.update_data(path, telemetry_data)
             logger.debug(f"Telemetría guardada en Firebase para {device_id}")

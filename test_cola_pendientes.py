@@ -47,6 +47,7 @@ def _handler(archivo):
     h.last_telemetry, h.last_telemetry_time = {}, {}
     h.ultimo_mensaje = {}
     h.last_arm_event_time, h.device_exit_time = {}, {}
+    h.last_arm_event_ts = {}   # #309
     h.sensors_list, h.sensors_list_time = {}, {}
     h._on_event_callback = h._on_telemetry_callback = None
     h._on_reconnect_callback = h._on_sensors_list_callback = None

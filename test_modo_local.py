@@ -33,6 +33,7 @@ def _handler(dispositivos=(MAC,), nodo=None):
     h.firebase_manager.get_device_location.return_value = ""
     h.device_manager = MagicMock()
     h.last_arm_event_time = {}
+    h.last_arm_event_ts = {}
     h.prueba_fisica = {}
     h._ids_vistos, h._arranques_por_confirmar = OrderedDict(), {}
     h._on_event_callback = MagicMock()
