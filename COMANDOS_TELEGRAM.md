@@ -75,6 +75,12 @@ Muestra la guia de comandos disponibles.
 
 ## Comandos de Seguridad
 
+> **Familiares de la app (#308, en `dev`):** quien es miembro de una central en "Personas con acceso" y tiene su
+> Telegram vinculado (`Usuarios/{uid}/telegram_id`) puede usar `/on`, `/off`, `/status` y `/disparo` en esa central,
+> también escribiéndolo («arma la alarma»). La orden va como la `Orden` de la app: el dueño recibe el aviso con el
+> nombre. El resto de comandos y botones sigue siendo del dueño/Usuario 2. Los avisos por Telegram no le llegan (los
+> recibe en la app). Al quitarlo de `miembros` pierde el acceso al momento.
+
 ### `/status`
 Consulta el estado actual del sistema.
 

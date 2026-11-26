@@ -5,7 +5,14 @@ con los commits de `main`. Lo más reciente, arriba.
 
 ## Sin desplegar — en `dev`
 
+### Agregado
+- Telegram para familiares de la app (#308): un miembro de "Personas con acceso" con su Telegram vinculado usa
+  `/on`, `/off`, `/status` y `/disparo` (y Senti para armar, desarmar y estado) en esa central. Va por el mismo camino
+  que la `Orden` de la app, con aviso al dueño; lo demás responde "solo el dueño". `/help` muestra solo lo suyo. Los
+  avisos de la central le siguen llegando en la app, no por Telegram. KB 12 y 05 al día. `test_telegram_familia.py`.
+
 ### Arreglado
+- Vincular Telegram borra el "sin cuenta" que el bot guardaba 5 min de ese chat (#308).
 - Senti: los modelos gpt-oss de Groq van con `reasoning_effort="low"`; el razonamiento se comía `max_tokens` y Groq
   devolvía vacío (24-nov). Segundo modelo de Groq de respaldo con su propio tope de tokens/minuto
   (`GROQ_FALLBACK_MODEL`, por defecto `openai/gpt-oss-120b`) antes de caer a Ollama: el 429 del plan gratuito

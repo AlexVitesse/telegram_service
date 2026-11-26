@@ -67,9 +67,21 @@ Depende de como es el codigo:
 - **Comando que empieza por /join_**: es un permiso del bot de Telegram, no de la app. Envialo tal cual al bot
   @esp32_space_bot en un chat privado y espera a que el dueño lo apruebe.
 
+### Soy familiar en la app: puedo usar el bot de Telegram?
+
+Si. Vincula tu Telegram con tu cuenta: en la app entra en Perfil > Editar Informacion > "Chat ID de Telegram" y toca "Abrir el bot"; en Telegram pulsa "Iniciar". Desde ese momento, en el chat privado con el bot puedes hacer lo mismo que en la app como familiar:
+- Armar (/on), desarmar (/off) y ver el estado (/status), o escribirlo con tus palabras: "arma la alarma", "como esta la casa".
+- Activar la sirena con /disparo (pide confirmar).
+
+Lo demas es solo del dueño: horarios, sensores, bengala, modo, invitar y aprobar personas. Si lo pides, el bot te contesta que eso solo lo puede hacer el dueño de la central.
+
+Cada vez que armas, desarmas o activas la sirena por Telegram, al dueño le llega un aviso con tu nombre, igual que desde la app. Si el dueño te quita de "Personas con acceso" o tu sales de la central, el bot deja de obedecerte al momento.
+
+Los avisos de la central (alarma, armado, conexion) te siguen llegando en la app; por Telegram no.
+
 ### Familia de la app y destinatarios de Telegram son cosas distintas
 
-Ser miembro de la familia en la app **no** te da acceso por Telegram, y estar en Telegram no te pone en la familia de la app. Los destinatarios de Telegram (dos usuarios y un grupo) se siguen editando en la ficha del equipo, en "Editar".
+Ser familiar no te pone entre los destinatarios de Telegram de la central, y estar en Telegram no te pone en la familia de la app. Los destinatarios de Telegram (dos usuarios y un grupo) son los que reciben los avisos por Telegram y se siguen editando en la ficha del equipo, en "Editar".
 
 ## Como se configuran o programan los permisos del sistema
 

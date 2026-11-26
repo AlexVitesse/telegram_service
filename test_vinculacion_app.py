@@ -23,6 +23,7 @@ import types
 
 class FirebaseFalso:
     """Solo lo que toca vincular_chat_id: leer una cuenta y actualizarla."""
+    _cache_uid = {}   # vincular_chat_id la limpia al vincular (#308)
 
     def __init__(self, cuentas=None):
         self.cuentas = cuentas if cuentas is not None else {}
@@ -130,11 +131,13 @@ def _correr_start(args, cuentas=None, autorizados=(), centrales=None):
     fb.centrales = centrales or {}
     fb.get_authorized_devices = lambda cid: list(autorizados)
     fb.has_any_admin = lambda: True
+    fb.centrales_familia = lambda cid: []   # #308
 
     b = types.SimpleNamespace()
     b.firebase_manager = fb
     b.mqtt_handler = None
     b._get_keyboard = lambda: None
+    b._centrales_control = types.MethodType(TelegramBot._centrales_control, b)
     b.handler = types.MethodType(TelegramBot._cmd_start, b)
 
     upd = UpdateFalso("6679241035")

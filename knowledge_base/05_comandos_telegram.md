@@ -11,6 +11,8 @@
 
 ## Comandos de seguridad
 
+Si eres familiar de una central en la app ("Personas con acceso") y vinculaste tu Telegram, puedes usar /on, /off, /status y /disparo en esa central; /help te muestra solo esos. Lo demas es del dueño.
+
 - **/on** - Armar el sistema de alarma. Si solo tienes un dispositivo vinculado, se arma directamente. Si tienes multiples dispositivos, aparece un menu de seleccion con la opcion adicional "Armar TODOS". Entre un uso y otro del mismo comando hay que esperar 5 segundos.
 - **/off** - Desarmar el sistema de alarma. Funciona igual que /on: seleccion directa con un dispositivo o menu con multiples. Incluye opcion "Desarmar TODOS". Espera de 5 segundos entre usos.
 - **/status** - Consulta el estado actual del dispositivo: en linea o sin respuesta, armado o desarmado, modo bengala e intensidad de senal WiFi (en dBm). El bot espera unos segundos la respuesta del dispositivo. Con varios equipos ofrece "Ver TODOS". Espera de 5 segundos entre usos.

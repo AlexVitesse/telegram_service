@@ -538,7 +538,7 @@ class FirebaseManager:
 
     _ACCIONES_ORDEN = {"arm": Command.ARM, "disarm": Command.DISARM, "panic": Command.TRIGGER_ALARM}
 
-    def _orden_de_miembro(self, mac: str, orden) -> None:
+    def _orden_de_miembro(self, mac: str, orden) -> bool:
         """
         `ESP32/{mac}/Orden = {accion, por, ts, local?}` (#124 C1/C2).
 
@@ -546,24 +546,26 @@ class FirebaseManager:
         sincroniza `Answer` como patch del nodo -que no manda ordenes- y avisa
         al dueno con el nombre del miembro. Deduplica por `ts`: el listener
         reconecta y RTDB reentrega escrituras guardadas sin red.
+
+        True si la orden se aplico (la usa tambien Telegram, #308).
         """
         if not isinstance(orden, dict):
-            return
+            return False
         accion, por, ts = orden.get("accion"), str(orden.get("por") or ""), orden.get("ts")
         local = orden.get("local") is True
         if accion not in self._ACCIONES_ORDEN or not por or not isinstance(ts, (int, float)):
-            return
+            return False
         nodo = self._nodo(mac) or {}
         dueno = str(nodo.get("ownerUid") or "")
         miembros = nodo.get("miembros") if isinstance(nodo.get("miembros"), dict) else {}
         if por != dueno and por not in miembros:
             logger.warning(f"[{mac}] Orden de {por}, que no es dueno ni miembro: se ignora")
-            return
+            return False
         # Solo la repeticion exacta (misma persona, mismo ts). Comparar contra el
         # ts mas alto de la central dejaba que el reloj adelantado de un
         # telefono -o un ts absurdo- tirara las ordenes de los demas.
         if self._ultima_orden.get(mac) == (por, ts):
-            return
+            return False
         self._ultima_orden[mac] = (por, ts)
 
         logger.info(f"Orden de miembro: {accion.upper()} para {mac} por {por} (local={local})")
@@ -575,7 +577,7 @@ class FirebaseManager:
                 # No se encola: armar/desarmar horas despues seria peor.
                 self._ultima_orden.pop(mac, None)
                 logger.error(f"[{mac}] {accion.upper()} de {por} no se pudo publicar por MQTT: no se aplica ni se avisa")
-                return
+                return False
         if accion in ("arm", "disarm"):
             self.db.reference(f"ESP32/{mac}").update({"Answer": accion == "arm"})
         elif self.on_sos:
@@ -585,6 +587,38 @@ class FirebaseManager:
             datos = self.db.reference(f"Miembros/{mac}/{por}").get() or {}
             nombre = str(datos.get("nombre") or "") if isinstance(datos, dict) else ""
             self.on_orden_miembro(mac, dueno, nombre or "Un miembro", accion, int(ts), local)
+        return True
+
+    def centrales_familia(self, chat_id: str) -> List[str]:
+        """
+        #308: centrales donde la cuenta de la app vinculada a este chat es
+        familiar (ESP32/{mac}/miembros). Por Telegram solo arma, desarma, pide
+        panico y ve el estado, como en la app. Fuera las que ya tiene como
+        dueno, Usuario 2 o grupo: esas siguen por el camino de siempre.
+
+        La membresia se mira en la cache del listener, asi que quitar a alguien
+        le corta Telegram al momento; la cuenta por chat se cachea 5 min.
+        """
+        if not chat_id or str(chat_id).startswith("-") or not self.is_available():
+            return []
+        uids = set(self._uids_por_chat_id(str(chat_id)))
+        if not uids:
+            return []
+        ya = set(self.get_authorized_devices(chat_id))
+        return [mac for mac, nodo in (self._get_all_devices() or {}).items()
+                if isinstance(nodo, dict) and mac not in ya and uids & set(self._miembros(nodo))]
+
+    def orden_familia(self, mac: str, chat_id: str, accion: str) -> bool:
+        """
+        Orden de un familiar desde Telegram: el mismo camino que la `Orden` de
+        la app (MQTT, `Answer`, SOS al grupo y aviso al dueno con su nombre).
+        """
+        miembros = self._miembros(self._nodo(mac) or {})
+        uid = next((u for u in self._uids_por_chat_id(str(chat_id)) if u in miembros), None)
+        if not uid:
+            logger.warning(f"[{mac}] Orden {accion} por Telegram de {chat_id}, que no es familiar: se ignora")
+            return False
+        return self._orden_de_miembro(mac, {"accion": accion, "por": uid, "ts": int(time.time() * 1000)})
 
     @staticmethod
     def _parse_schedule_time(time_str: str) -> tuple:
@@ -1500,6 +1534,9 @@ class FirebaseManager:
 
         if self.update_data(f"Usuarios/{uid}", {"telegram_id": str(chat_id)}):
             logger.info(f"Cuenta {uid} vinculada al chat {chat_id}")
+            # Si este chat escribio antes de vincularse, la cache lo tenia como
+            # "sin cuenta" 5 min: un familiar no podria usar el bot (#308).
+            self._cache_uid.pop(str(chat_id), None)
             self._propagar_chat_id(uid, chat_id, cuenta.get("Dispositivos"))
             return "vinculado"
         return "error"

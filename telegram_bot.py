@@ -153,7 +153,8 @@ def require_auth(func):
             )
             return
 
-        if not self.firebase_manager.get_authorized_devices(chat_id):
+        if (not self.firebase_manager.get_authorized_devices(chat_id)
+                and not self.firebase_manager.centrales_familia(chat_id)):
             logger.warning(f"Acceso denegado a {user.first_name} ({chat_id}) - sin dispositivos autorizados.")
             await update.message.reply_text(
                 "🚫 *Acceso no autorizado*\n\n"
@@ -382,6 +383,24 @@ class TelegramBot:
         """
         return self.firebase_manager.is_user_admin(chat_id) # MODIFIED LINE
 
+    def _centrales_control(self, chat_id: str) -> List[str]:
+        """Las que este chat puede armar, desarmar, disparar y consultar: las
+        suyas y aquellas donde es familiar en la app (#308)."""
+        return (self.firebase_manager.get_authorized_devices(chat_id)
+                + self.firebase_manager.centrales_familia(chat_id))
+
+    def _mandar(self, chat_id: str, device_id: str, accion: str) -> None:
+        """arm / disarm / panic. A una central de familia va como `Orden` de
+        miembro, para que el dueno reciba el aviso con el nombre (#308)."""
+        if device_id in self.firebase_manager.centrales_familia(chat_id):
+            self.firebase_manager.orden_familia(device_id, chat_id, accion)
+        elif accion == "arm":
+            self.mqtt_handler.send_arm(device_id=device_id)
+        elif accion == "disarm":
+            self.mqtt_handler.send_disarm(device_id=device_id)
+        else:
+            self.mqtt_handler.send_trigger_alarm(device_id=device_id)
+
     def _get_authorized_devices(self, chat_id: str) -> List[str]:
         """Obtiene la lista de dispositivos autorizados para un usuario"""
         if self.firebase_manager.is_available(): # MODIFIED LINE
@@ -564,8 +583,8 @@ class TelegramBot:
             logger.warning(f"Vinculacion desde la app no completada: {resultado}")
 
         # --- MODIFIED LOGIC ---
-        # Verificar si el usuario tiene dispositivos autorizados
-        authorized_devices = self.firebase_manager.get_authorized_devices(chat_id)
+        # Verificar si el usuario tiene dispositivos autorizados (o es familiar, #308)
+        authorized_devices = self._centrales_control(chat_id)
         if authorized_devices:
             # El ID va tambien aqui: las otras dos ramas de /start ya lo daban,
             # y justo el usuario que entra al perfil de la app a consultarlo
@@ -693,6 +712,23 @@ class TelegramBot:
         user = update.effective_user
         chat_id = str(update.effective_chat.id)
 
+        if not self.firebase_manager.get_authorized_devices(chat_id):
+            # Solo familiar de la app (#308): lo que puede hacer, nada mas.
+            await update.message.reply_text(
+                "📚 *GUÍA DE COMANDOS*\n\n"
+                "🔐 *Como familiar puedes:*\n"
+                "`/on` - Armar sistema\n"
+                "`/off` - Desarmar sistema\n"
+                "`/status` - Ver estado\n"
+                "`/disparo` - Activar alarma manual\n\n"
+                "También puedes escribirlo: «arma la alarma».\n"
+                "Horarios, sensores, bengala e invitar son del dueño de la central.\n\n"
+                "🆘 `/soporte` - Hablar con una persona del equipo",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=self._get_keyboard(),
+            )
+            return
+
         help_text = "📚 *GUÍA DE COMANDOS*\n\n"
         help_text += "🔐 *Seguridad:*\n"
         help_text += "`/on` - Armar sistema\n"
@@ -748,7 +784,7 @@ class TelegramBot:
                 await update.message.reply_text("❌ Error: El servicio no está conectado al sistema.")
                 return
 
-            devices = self.firebase_manager.get_authorized_devices(chat_id)
+            devices = self._centrales_control(chat_id)
             if not devices:
                 await update.message.reply_text("No tienes dispositivos autorizados.")
                 return
@@ -871,7 +907,7 @@ class TelegramBot:
                 await update.message.reply_text("❌ Error: El servicio no está conectado al sistema.")
                 return
 
-            devices = self.firebase_manager.get_authorized_devices(chat_id)
+            devices = self._centrales_control(chat_id)
             if not devices:
                 await update.message.reply_text("No tienes dispositivos autorizados.")
                 return
@@ -921,7 +957,7 @@ class TelegramBot:
         )
 
         for device_id in devices:
-            self.mqtt_handler.send_arm(device_id=device_id)
+            self._mandar(chat_id, device_id, "arm")
 
         # Esperar hasta 10 segundos con verificación cada 2s
         armed_count = 0
@@ -968,7 +1004,7 @@ class TelegramBot:
         )
 
         for device_id in devices:
-            self.mqtt_handler.send_disarm(device_id=device_id)
+            self._mandar(chat_id, device_id, "disarm")
 
         # Esperar hasta 10 segundos con verificación cada 2s
         disarmed_count = 0
@@ -1011,7 +1047,7 @@ class TelegramBot:
                 await update.message.reply_text("❌ Error: El servicio no está conectado al sistema.")
                 return
 
-            devices = self.firebase_manager.get_authorized_devices(chat_id)
+            devices = self._centrales_control(chat_id)
             if not devices:
                 await update.message.reply_text("No tienes dispositivos autorizados.")
                 return
@@ -1946,8 +1982,8 @@ class TelegramBot:
             )
             return
 
-        # Verificar autorización
-        authorized_devices = self.firebase_manager.get_authorized_devices(chat_id)
+        # Verificar autorización (con las centrales donde es familiar, #308)
+        authorized_devices = self._centrales_control(chat_id)
         if not authorized_devices:
             # Usuario NO registrado en chat privado: rutear a modo vendedor en
             # vez de bloquear. NO se usa @require_auth aqui a proposito: ese
@@ -2207,6 +2243,14 @@ class TelegramBot:
             )
             await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
             _log_action(msg, ok=False, error="device_not_found")
+            return
+
+        # Familia (#308): en sus centrales solo armar, desarmar y estado.
+        familia = set(self.firebase_manager.centrales_familia(chat_id))
+        if intent not in ("arm", "disarm", "status") and familia & set(target_ids):
+            msg = "🔐 Eso solo lo puede hacer el dueño de la central."
+            await update.message.reply_text(msg, reply_markup=self._get_keyboard())
+            _log_action(msg, ok=False, error="familia_sin_permiso")
             return
 
         # Ejecutar intent reutilizando los mismos flujos que los comandos directos
@@ -3101,7 +3145,10 @@ class TelegramBot:
             return
 
         devices = self.firebase_manager.get_authorized_devices(chat_id)
-        if not devices:
+        # Familia (#308): solo armar, desarmar, disparo y estado. El resto de
+        # botones sigue mirando `devices`, que no incluye sus centrales.
+        control = devices + self.firebase_manager.centrales_familia(chat_id)
+        if not control:
             await query.edit_message_text("No tienes dispositivos autorizados.")
             return
 
@@ -3109,13 +3156,13 @@ class TelegramBot:
         
         # Procesar callbacks
         if data == "trigger_confirm":
-            await query.edit_message_text(f"🚨 Enviando comando de disparo a {len(devices)} dispositivo(s)... Esperando confirmación (5s).", parse_mode=ParseMode.MARKDOWN)
-            for device_id in devices:
-                self.mqtt_handler.send_trigger_alarm(device_id=device_id)
+            await query.edit_message_text(f"🚨 Enviando comando de disparo a {len(control)} dispositivo(s)... Esperando confirmación (5s).", parse_mode=ParseMode.MARKDOWN)
+            for device_id in control:
+                self._mandar(chat_id, device_id, "panic")
             
             await asyncio.sleep(5)
 
-            for device_id in devices:
+            for device_id in control:
                 device_location = self.firebase_manager.get_device_location(device_id) or device_id
                 if self.mqtt_handler.is_device_online(device_id):
                     await self.send_message(chat_id, f"✅ *{device_location}* - Comando de disparo enviado. El dispositivo está EN LÍNEA.", "Markdown")
@@ -3306,18 +3353,18 @@ class TelegramBot:
         # Armar dispositivo específico
         elif data.startswith("arm_") and data != "arm_all":
             target_device = data.replace("arm_", "")
-            if target_device in devices:
+            if target_device in control:
                 await self._arm_devices(query, [target_device], single_device=True)
             else:
                 await query.edit_message_text("❌ No tienes acceso a este dispositivo.")
 
         # Armar todos los dispositivos
         elif data == "arm_all":
-            await self._arm_devices(query, devices)
+            await self._arm_devices(query, control)
 
         # Desarmar dispositivo específico
         elif data.startswith("disarm_") and data != "disarm_all":
-            target_device = self.firebase_manager.resolver_equipo(data[len("disarm_"):], entre=devices)
+            target_device = self.firebase_manager.resolver_equipo(data[len("disarm_"):], entre=control)
             if target_device:
                 await self._disarm_devices(query, [target_device])
             else:
@@ -3325,19 +3372,19 @@ class TelegramBot:
 
         # Desarmar todos los dispositivos
         elif data == "disarm_all":
-            await self._disarm_devices(query, devices)
+            await self._disarm_devices(query, control)
 
         # Ver estado de dispositivo específico
         elif data.startswith("status_") and data != "status_all":
             target_device = data.replace("status_", "")
-            if target_device in devices:
+            if target_device in control:
                 await self._get_device_status(query, [target_device])
             else:
                 await query.edit_message_text("❌ No tienes acceso a este dispositivo.")
 
         # Ver estado de todos los dispositivos
         elif data == "status_all":
-            await self._get_device_status(query, devices)
+            await self._get_device_status(query, control)
 
         # === Callbacks para desvincular dispositivos ===
 
