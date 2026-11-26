@@ -3,6 +3,14 @@
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Una entrada por día de despliegue,
 con los commits de `main`. Lo más reciente, arriba.
 
+## Sin desplegar — en `dev`
+
+### Arreglado
+- Senti: los modelos gpt-oss de Groq van con `reasoning_effort="low"`; el razonamiento se comía `max_tokens` y Groq
+  devolvía vacío (24-nov). Segundo modelo de Groq de respaldo con su propio tope de tokens/minuto
+  (`GROQ_FALLBACK_MODEL`, por defecto `openai/gpt-oss-120b`) antes de caer a Ollama: el 429 del plan gratuito
+  dejaba a Senti «no disponible» (#311).
+
 ## 2026-11-24 — desde `950d03d` (en producción)
 
 ### Agregado

@@ -465,6 +465,55 @@ def test_sin_api_key_no_se_manda_cabecera():
         asyncio.run(h.close())
 
 
+# --------------------------------------------------------------------------
+# Groq: razonamiento bajo y segundo modelo con su propio tope (26-nov)
+# --------------------------------------------------------------------------
+
+def test_un_429_de_groq_pasa_al_modelo_de_respaldo_de_groq():
+    h = _handler(llm_backend="groq", groq_api_key="x", groq_fallback_model="openai/gpt-oss-120b")
+    llamadas = []
+
+    async def groq(s, u, model="", *a, **k):
+        llamadas.append(model or "principal")
+        if not model:
+            raise RuntimeError("Error code: 429 rate_limit_exceeded")
+        return "respaldo"
+
+    async def ollama(*a, **k):
+        llamadas.append("ollama")
+        return "ollama"
+
+    h._call_groq, h._call_ollama = groq, ollama
+    assert asyncio.run(h._call_llm("s", "u")) == "respaldo"
+    assert llamadas == ["principal", "openai/gpt-oss-120b"], llamadas
+
+
+def test_respaldo_de_groq_igual_al_principal_no_se_duplica():
+    h = _handler(llm_backend="groq", groq_api_key="x", groq_model="m", groq_fallback_model="m")
+    assert [n for n, _ in h._cadena("s", "u", "", 0.1, 10)] == ["Groq", "Ollama"]
+
+
+def test_gpt_oss_en_groq_va_con_razonamiento_bajo():
+    h = _handler(llm_backend="groq", groq_api_key="x")
+    pedido = {}
+
+    def create(**kw):
+        pedido.update(kw)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="hola"))])
+
+    h._groq_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    assert asyncio.run(h._call_groq("s", "u")) == "hola"
+    assert pedido.get("reasoning_effort") == "low", pedido
+    pedido.clear()
+    asyncio.run(h._call_groq("s", "u", model="llama-x"))
+    assert "reasoning_effort" not in pedido, pedido  # otros modelos lo rechazan
+
+
+def test_config_trae_respaldo_de_groq_distinto_del_principal():
+    c = AIConfig()
+    assert c.groq_fallback_model and c.groq_fallback_model != c.groq_model, c.groq_fallback_model
+
+
 if __name__ == "__main__":
     pruebas = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fallos = 0

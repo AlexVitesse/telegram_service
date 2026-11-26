@@ -344,6 +344,7 @@ class TelegramBot:
                 ollama_api_key=config.ai.ollama_api_key,
                 groq_api_key=config.ai.groq_api_key,
                 groq_model=config.ai.groq_model,
+                groq_fallback_model=config.ai.groq_fallback_model,
                 intent_model=config.ai.intent_model,
                 chat_model=config.ai.chat_model,
                 timeout_sec=config.ai.llm_timeout_sec,

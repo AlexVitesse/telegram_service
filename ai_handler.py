@@ -278,6 +278,7 @@ class AIHandler:
         ollama_api_key: str = "",
         groq_api_key: str = "",
         groq_model: str = "openai/gpt-oss-20b",
+        groq_fallback_model: str = "",
         intent_model: str = "",
         chat_model: str = "",
         timeout_sec: float = 20.0,
@@ -297,6 +298,9 @@ class AIHandler:
         self._ollama_api_key = ollama_api_key
         self._groq_api_key = groq_api_key
         self._groq_model = groq_model
+        # Segundo modelo de Groq: tope de tokens/minuto propio, asi un 429 del
+        # principal no deja a Senti sin respuesta (visto 24-nov). Vacio = sin el.
+        self._groq_fallback_model = "" if groq_fallback_model == groq_model else groq_fallback_model
         # Modelos específicos por tarea (si no se especifican, usan el default del backend)
         default_task_model = ollama_model if llm_backend == "ollama" else groq_model
         self._intent_model = intent_model or default_task_model
@@ -451,6 +455,12 @@ class AIHandler:
 
         use_model = model or self._groq_model
 
+        extra = {}
+        if "gpt-oss" in use_model:
+            # El razonamiento de gpt-oss cuenta dentro de max_tokens: con el
+            # default se los comia todos y Groq devolvia contenido vacio (24-nov).
+            extra["reasoning_effort"] = "low"
+
         def _blocking_call():
             resp = self._groq_client.chat.completions.create(
                 model=use_model,
@@ -460,6 +470,7 @@ class AIHandler:
                 ],
                 temperature=temperature,
                 max_tokens=max_tokens,
+                **extra,
             )
             contenido = (resp.choices[0].message.content or "").strip()
             if not contenido:
@@ -481,8 +492,11 @@ class AIHandler:
             if self._groq_client:
                 cadena.append(("Groq", lambda: self._call_groq(*a, "", temperature, max_tokens)))
         else:
-            cadena = [("Groq", lambda: self._call_groq(*a, model, temperature, max_tokens)),
-                      ("Ollama", lambda: self._call_ollama(*a, "", temperature, max_tokens))]
+            cadena = [("Groq", lambda: self._call_groq(*a, model, temperature, max_tokens))]
+            if self._groq_fallback_model:
+                cadena.append(("Groq " + self._groq_fallback_model,
+                               lambda: self._call_groq(*a, self._groq_fallback_model, temperature, max_tokens)))
+            cadena.append(("Ollama", lambda: self._call_ollama(*a, "", temperature, max_tokens)))
         if self._ollama_local_url:
             cadena.append(("Ollama local", lambda: self._call_ollama(*a, "", temperature, max_tokens, local=True)))
         return cadena

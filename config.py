@@ -96,6 +96,9 @@ class AIConfig:
     # El default era "llama-3.1-8b-instant", que Groq retiro (404 model_not_found,
     # visto el 23-nov): con el, la reserva de Groq estaba muerta sin avisar.
     groq_model: str = _get_env("GROQ_MODEL", "openai/gpt-oss-20b")
+    # Respaldo dentro de Groq, con su propio tope de tokens/minuto (el gratuito
+    # de gpt-oss-20b es 8000 y dio 429 el 24-nov). Vacio = sin respaldo en Groq.
+    groq_fallback_model: str = _get_env("GROQ_FALLBACK_MODEL", "openai/gpt-oss-120b")
     # Ultima reserva: el Ollama del propio VPS (tiene gpt-oss:20b y GPU). Vacio =
     # desactivada. Se usa solo si fallan el principal y Groq por un error que no
     # sea timeout ni pila llena (esos no se cobran dos veces).
