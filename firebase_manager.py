@@ -720,7 +720,11 @@ class FirebaseManager:
 
         logger.debug(f"Evento de Horarios: Type={event.event_type}, Path={event.path}, Data={event.data}")
 
-        if event.path == '/':
+        # Solo un `put` en la raiz trae /Horarios entero. Un `patch` en la raiz
+        # (el `update()` de /horarios del bot) trae rutas "uid/devices/mac":
+        # tomarlo por el arbol completo dejaba todo "huerfano" y deshabilitaba
+        # el horario recien habilitado (#315, visto el 25-nov).
+        if event.path == '/' and event.event_type == 'put':
             self._recalcular_horarios(event.data if isinstance(event.data, dict) else {})
         else:
             self._recalcular_horarios()

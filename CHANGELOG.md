@@ -12,6 +12,10 @@ con los commits de `main`. Lo más reciente, arriba.
   avisos de la central le siguen llegando en la app, no por Telegram. KB 12 y 05 al día. `test_telegram_familia.py`.
 
 ### Arreglado
+- `/horarios on` y «activa el horario» por Senti se deshacían solos (#315): el `update()` del bot en `/Horarios`
+  llega al listener como `patch` en "/" con rutas planas, se tomaba por el árbol entero y el horario recién habilitado
+  quedaba "huérfano": deshabilitado y mandado así a la central. Ahora solo un `put` en la raíz vale como árbol
+  completo. `test_horario_patch.py`.
 - Vincular Telegram borra el "sin cuenta" que el bot guardaba 5 min de ese chat (#308).
 - Senti: los modelos gpt-oss de Groq van con `reasoning_effort="low"`; el razonamiento se comía `max_tokens` y Groq
   devolvía vacío (24-nov). Segundo modelo de Groq de respaldo con su propio tope de tokens/minuto
