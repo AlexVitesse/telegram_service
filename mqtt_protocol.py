@@ -194,6 +194,9 @@ class MqttTelemetry:
     #: con firmware anterior -que no publican el campo- se pintan averiadas sin
     #: estarlo. Por eso es Optional y por eso no se escribe cuando falta.
     lora_ok: Optional[bool] = None
+    #: #309: horarios habilitados en la central (toda la lista). None = firmware
+    #: anterior: solo queda auto_schedule_enabled, que mira el primero.
+    horarios_activos: Optional[int] = None
     location: str = ""
     name: str = ""
     #: Horario que la central TIENE: minutos del dia y dias en bits (0=Dom).
@@ -230,6 +233,7 @@ class MqttTelemetry:
             lora_sensors_active=d.get("lora_sensors_active", 0),
             lora_task_age_sec=d.get("lora_task_age_sec", -1),
             lora_ok=d.get("lora_ok"),   # ausente -> None, "no lo se"
+            horarios_activos=d.get("horarios_activos"),
             auto_schedule_enabled=d.get("auto_schedule_enabled", False),
             tiempo_bomba=d.get("tiempo_bomba", 60),  # Tiempo de salida desde ESP32
             tiempo_pre=d.get("tiempo_pre", 60),      # Tiempo de pre-alarma desde ESP32

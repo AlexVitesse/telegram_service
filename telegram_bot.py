@@ -1773,7 +1773,10 @@ class TelegramBot:
             response += f"├─ ⏰ Tiempo salida: {tiempo_bomba}s\n"
 
             # Horario
-            if telemetry and telemetry.auto_schedule_enabled:
+            # #309: con firmware nuevo, cualquier horario de la lista cuenta;
+            # auto_schedule_enabled solo mira el primero.
+            activos = getattr(telemetry, "horarios_activos", None) if telemetry else None
+            if telemetry and (activos > 0 if activos is not None else telemetry.auto_schedule_enabled):
                 cfg = scheduler.cfg(device_id)
                 schedule_info = cfg.format_status() if cfg.enabled else "Activo"
                 response += f"└─ 📅 Horario: {schedule_info}\n"

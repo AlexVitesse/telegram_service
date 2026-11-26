@@ -12,6 +12,8 @@ con los commits de `main`. Lo más reciente, arriba.
   avisos de la central le siguen llegando en la app, no por Telegram. KB 12 y 05 al día. `test_telegram_familia.py`.
 
 ### Cambiado
+- `/status`: con firmware nuevo el horario cuenta como activo si lo está cualquiera de la lista (`horarios_activos`,
+  #309); con firmware anterior sigue `auto_schedule_enabled`. Se guarda también en `Telemetry`.
 - Sensores nuevos (#313): «Ignorar» en Telegram marca `Pendientes/{id}/ignorado` en vez de solo cambiar el texto; no
   vuelve a avisar y se autoriza después con `/sensores` o en la app («Ignorados»). KB 04 y 14.
 

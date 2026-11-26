@@ -960,6 +960,8 @@ class MqttHandler:
             # averiadas a ojos de la app: ausente es "no lo se", no "esta mal".
             if telemetry.lora_ok is not None:
                 telemetry_data["lora_ok"] = telemetry.lora_ok
+            if telemetry.horarios_activos is not None:
+                telemetry_data["horarios_activos"] = telemetry.horarios_activos
             # Igual: sin `fw` el firmware es anterior; no se escribe nada.
             if telemetry.fw:
                 telemetry_data["fw"] = telemetry.fw
