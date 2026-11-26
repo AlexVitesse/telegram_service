@@ -6,6 +6,10 @@ con los commits de `main`. Lo más reciente, arriba.
 ## Sin desplegar — en `dev`
 
 ### Agregado
+- Traspaso con código de alta (#260): `/equipos/reclamar` acepta `codigo`; si su SHA-256 coincide con el que mandó
+  la central (evento `codigo_alta`, 15 min) se gasta y se traspasa; si aún no llegó, 409 (la app reintenta); si no
+  coincide, 403. Una central con firmware 2026.11.26+ ya no se traspasa sin código («Actualiza la app»); las de
+  firmware anterior siguen con la ventana de 15 min. `test_codigo_alta.py`.
 - Telegram para familiares de la app (#308): un miembro de "Personas con acceso" con su Telegram vinculado usa
   `/on`, `/off`, `/status` y `/disparo` (y Senti para armar, desarmar y estado) en esa central. Va por el mismo camino
   que la `Orden` de la app, con aviso al dueño; lo demás responde "solo el dueño". `/help` muestra solo lo suyo. Los

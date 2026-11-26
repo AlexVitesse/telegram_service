@@ -4,6 +4,8 @@ Manejador de conexion MQTT para el servicio Telegram Bridge
 Nueva arquitectura: ESP32 publica eventos genericos, Python maneja usuarios.
 Usa Firebase para buscar chats autorizados por dispositivo.
 """
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -120,6 +122,12 @@ class MqttHandler:
         # MAC normalizada -> cuando se vio por ultima vez un boton largo o un
         # arranque (ver _handle_event y api_server /equipos/reclamar).
         self.prueba_fisica: Dict[str, float] = {}
+        # #260: MAC -> (sha256 del codigo de alta que la central dio por BLE,
+        # cuando llego). Y las centrales que ya trabajan con codigo: a esas no
+        # se las traspasa sin el. ponytail: en memoria; si el VPS se reinicia a
+        # media alta, la app reintenta y el usuario vuelve a poner el clip.
+        self.codigos_alta: Dict[str, tuple] = {}
+        self.con_codigo_alta: set = set()
         # Ids de evento ya procesados (firmware con QoS 1, ver MqttEvent.event_id).
         # ponytail: en memoria y con tope; tras reiniciar el VPS un reenvio
         # justo en ese momento se avisaria dos veces. Persistir si llega a pasar.
@@ -323,6 +331,15 @@ class MqttHandler:
                 return
             if tipo == "config_mode_started":
                 self.prueba_fisica[normalizar_mac(event.device_id)] = time.time()
+            if tipo == "codigo_alta":
+                # Solo para /equipos/reclamar: ni avisos ni admin.
+                h = str((event.data or {}).get("h") or "").lower()
+                if len(h) == 64:
+                    mac = normalizar_mac(event.device_id)
+                    self.codigos_alta[mac] = (h, time.time())
+                    self.con_codigo_alta.add(mac)
+                    logger.info(f"{event.device_id}: codigo de alta recibido")
+                return
 
             # La central arranca con el horario que tenia en NVS; si cambio
             # mientras estaba apagada, se quedaba con el viejo.
@@ -1027,6 +1044,37 @@ class MqttHandler:
         if len(self._ids_vistos) > 2000:
             self._ids_vistos.popitem(last=False)
         return False
+
+    #: Desde esta version la central da codigo de alta por BLE (#260).
+    FW_CON_CODIGO_ALTA = "2026.11.26"
+    VIGENCIA_CODIGO_ALTA = 15 * 60
+
+    def exige_codigo_alta(self, mac: str) -> bool:
+        """Si esta central solo se traspasa con codigo (firmware nuevo)."""
+        mac = normalizar_mac(mac)
+        if mac in self.con_codigo_alta:
+            return True
+        t = next((t for k, t in self.last_telemetry.items() if normalizar_mac(k) == mac), None)
+        return bool(t and t.fw and t.fw >= self.FW_CON_CODIGO_ALTA)
+
+    def gastar_codigo_alta(self, mac: str, codigo: str) -> str:
+        """
+        "ok" (y se gasta), "espera" (la central aun no lo mando: se reinicia
+        tras recibir el WiFi) o "malo" (no coincide o caduco).
+        """
+        mac = normalizar_mac(mac)
+        guardado = self.codigos_alta.get(mac)
+        if not guardado:
+            return "espera"
+        h, cuando = guardado
+        if time.time() - cuando > self.VIGENCIA_CODIGO_ALTA:
+            self.codigos_alta.pop(mac, None)
+            return "malo"
+        dado = hashlib.sha256(codigo.strip().lower().encode()).hexdigest()
+        if not hmac.compare_digest(dado, h):
+            return "malo"
+        self.codigos_alta.pop(mac, None)
+        return "ok"
 
     def _confirmar_arranque(self, telemetry: MqttTelemetry):
         """Resuelve un system_boot de firmware viejo con el uptime de la telemetria."""

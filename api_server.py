@@ -508,7 +508,22 @@ class ApiSenti:
         if any(v and not v.lstrip("-").isdigit() for v in (telegram_id, group_id)):
             return web.json_response({"error": "Chat ID no válido."}, status=400)
 
-        if not self._vista_en_mano(mac):
+        # #260: con firmware nuevo, el codigo que la central dio por BLE es la
+        # prueba de tenerla en la mano. Con el viejo, la ventana de siempre.
+        mqtt = getattr(self._bot, "mqtt_handler", None)
+        codigo = str(cuerpo.get("codigo") or "").strip()
+        if codigo and mqtt:
+            r_codigo = mqtt.gastar_codigo_alta(mac, codigo)
+            if r_codigo == "espera":
+                return web.json_response({"error": "Esperando a que la central se conecte."}, status=409)
+            if r_codigo == "malo":
+                return web.json_response(
+                    {"error": "El código de la central no vale o caducó. Mantén el clip hasta el pitido y "
+                              "vuelve a darla de alta."}, status=403)
+        elif mqtt and mqtt.exige_codigo_alta(mac):
+            return web.json_response(
+                {"error": "Actualiza la app Sentinel Guard para dar de alta esta central."}, status=403)
+        elif not self._vista_en_mano(mac):
             return web.json_response(
                 {"error": "Mantén pulsado el botón de la central hasta el pitido y vuelve a intentarlo."},
                 status=409,

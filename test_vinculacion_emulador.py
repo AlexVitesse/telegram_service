@@ -60,7 +60,7 @@ def _api(peticiones, en_paralelo=False):
     async def p(url, api):
         api._uid_del_token = lambda t: t if t and t.startswith("uid") else None
         api._fcm = fcm
-        api._bot.mqtt_handler = SimpleNamespace(prueba_fisica=en_mano, send_command=bot)
+        api._bot.mqtt_handler = SimpleNamespace(prueba_fisica=en_mano, send_command=bot, exige_codigo_alta=lambda m: False)
         api._bot.send_message = MagicMock(side_effect=lambda *a, **k: asyncio.sleep(0))
         llamadas = [pedir(url, token=u, cuerpo=c, ruta=r) for u, r, c in peticiones]
         if en_paralelo:

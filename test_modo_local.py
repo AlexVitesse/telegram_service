@@ -125,7 +125,7 @@ def test_traspaso_pide_llave_nueva():
     from mqtt_protocol import Command
     fm = _fm(_arbol_jose())
     enviados = []
-    mqtt = SimpleNamespace(prueba_fisica={MAC_BANCO: time.time()},
+    mqtt = SimpleNamespace(prueba_fisica={MAC_BANCO: time.time()}, exige_codigo_alta=lambda m: False,
                            send_command=lambda *a, **kw: enviados.append((a, kw)) or True)
 
     async def p(url, api):

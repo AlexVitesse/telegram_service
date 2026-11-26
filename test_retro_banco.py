@@ -181,7 +181,7 @@ def _api(fm, uid, peticiones, en_mano=True):
 
     async def p(url, api):
         if en_mano:
-            api._bot.mqtt_handler = SimpleNamespace(prueba_fisica={MAC: time.time()})
+            api._bot.mqtt_handler = SimpleNamespace(prueba_fisica={MAC: time.time()}, exige_codigo_alta=lambda m: False)
         for ruta, cuerpo in peticiones:
             respuestas.append(await pedir(url, token="bueno", cuerpo=cuerpo, ruta=ruta))
     asyncio.run(con_api(fm, uid, p))
