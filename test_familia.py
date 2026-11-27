@@ -167,8 +167,8 @@ def test_quitar_solo_el_dueno_y_limpia_todo():
     assert "Dispositivos" not in d["Usuarios"]["ana"]
     assert "Telegram_ID_2" not in d["ESP32"][MAC]                 # era Ana: fuera
     assert d["ESP32"][MAC]["Telegram_ID"] == "111"
-    fm.mqtt_handler.send_command.assert_called_once_with(
-        Command.LOCAL_ROTATE.value, device_id=MAC, queue_if_offline=True)
+    fm.mqtt_handler.send_command.assert_called_once_with(   # solo la de familia (#283)
+        Command.LOCAL_ROTATE.value, {"familia": True}, device_id=MAC, queue_if_offline=True)
     (uid, aviso), _ = fcm.send_to_user.call_args
     assert uid == "ana" and "Ya no tienes acceso a Casa" in aviso.body
 

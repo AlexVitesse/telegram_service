@@ -1030,6 +1030,13 @@ class MqttHandler:
             return
         datos["actualizado"] = int(time.time())
         self.firebase_manager.update_data(f"Locales/{device_id}", datos)
+        # #283: la llave de familia (solo arm/disarm/panico/estado) donde los
+        # miembros la leen. Firmware anterior: no la manda y no se escribe.
+        llave_fam = str(d.get("key_fam") or "")
+        if len(llave_fam) == 64:
+            self.firebase_manager.update_data(f"ESP32/{device_id}/LocalFam", {
+                "ssid": datos["ssid"], "pass": datos["pass"], "key": llave_fam,
+                "port": datos["port"], "actualizado": datos["actualizado"]})
         self.firebase_manager.update_data(f"ESP32/{device_id}", {"Local": None if nodo.get("miembros") else datos})
         logger.info(f"{device_id}: credenciales del modo local guardadas")
 

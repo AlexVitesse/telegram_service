@@ -1458,8 +1458,11 @@ class FirebaseManager:
             if isinstance(inv, dict) and inv.get("usadoPor") == uid and self._misma_mac(str(inv.get("mac") or ""), mac):
                 cambios[f"Invitaciones/{codigo}"] = None
         if self.mqtt_handler:
-            # Durable hasta el cmd_ack de la central (#276).
-            self.mqtt_handler.send_command(Command.LOCAL_ROTATE.value, device_id=mac, queue_if_offline=True)
+            # Durable hasta el cmd_ack de la central (#276). Solo la llave de
+            # familia (#283): la del dueno no la tenia el miembro. El firmware
+            # anterior ignora el argumento y rota todo, como antes.
+            self.mqtt_handler.send_command(Command.LOCAL_ROTATE.value, {"familia": True},
+                                           device_id=mac, queue_if_offline=True)
         self._quitar_de_mi_lista(uid, mac)
         self.db.reference("/").update(cambios)
         self.invalidate_cache()

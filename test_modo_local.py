@@ -87,6 +87,27 @@ def test_creds_con_miembros_no_dejan_la_llave_en_el_nodo():
     assert llamadas[1] == (f"ESP32/{MAC}", {"Local": None}), llamadas
 
 
+def test_la_llave_de_familia_va_donde_la_leen_los_miembros():
+    # #283: solo vale para arm/disarm/panico/estado. La del dueno sigue en Locales.
+    fam = "f" * 64
+    h = _handler(nodo={"miembros": {"u2": {"rol": "familia"}}})
+    cap = _Captura()
+    raiz = logging.getLogger()
+    nivel = raiz.level
+    raiz.addHandler(cap)
+    raiz.setLevel(logging.DEBUG)
+    try:
+        h._handle_event(_creds(key_fam=fam))
+    finally:
+        raiz.removeHandler(cap)
+        raiz.setLevel(nivel)
+    escritas = dict(c.args for c in h.firebase_manager.update_data.call_args_list)
+    lf = escritas[f"ESP32/{MAC}/LocalFam"]
+    assert lf["key"] == fam and lf["key"] != LLAVE and lf["port"] == 8080, lf
+    assert escritas[f"ESP32/{MAC}"] == {"Local": None}             # la del dueno no
+    assert not [t for t in cap.textos if fam in t], "la llave de familia salio en el log"
+
+
 def test_creds_incompletas_se_ignoran():
     h = _handler()
     h._handle_event(_creds(key="corta"))

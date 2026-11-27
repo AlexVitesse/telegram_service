@@ -22,7 +22,7 @@ Cada central admite hasta **10 personas** ademas del dueño. Solo el dueño ve l
 ### Que puede hacer un miembro de la familia
 
 - **Si puede:** ver el estado de la central, armar, desarmar, usar el boton de panico (SOS) y recibir las notificaciones push. Ve los horarios del dueño, pero **solo para leerlos**.
-- **No puede:** editar la central (nombre, tiempos, bengala, WiFi), autorizar, borrar ni renombrar sensores, cambiar los destinatarios de Telegram ni invitar o quitar a otras personas. Tampoco tiene el control sin internet (cuando la app habla directo con la central en la red de la casa): eso es solo del dueño, asi que un miembro necesita internet para armar o desarmar.
+- **No puede:** editar la central (nombre, tiempos, bengala, WiFi), autorizar, borrar ni renombrar sensores, cambiar los destinatarios de Telegram ni invitar o quitar a otras personas. Sin internet (cuando la app habla directo con la central en la red de la casa) un miembro puede armar, desarmar y usar el panico si la central y la app estan actualizadas; con una central sin actualizar necesita internet para armar o desarmar. Lo demas, sin internet, solo lo hace el dueño.
 - **Cada vez que un miembro arma, desarma o pide panico, al dueño le llega un aviso con su nombre.** Ese aviso no se puede apagar.
 
 ### Quitar a alguien (solo el dueño)

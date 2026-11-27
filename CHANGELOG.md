@@ -6,6 +6,9 @@ con los commits de `main`. Lo más reciente, arriba.
 ## Sin desplegar — en `dev`
 
 ### Agregado
+- Modo local para familiares (#283): la llave de familia que manda la central (`key_fam`) se guarda en
+  `ESP32/{mac}/LocalFam`, que leen los miembros; la del dueño sigue solo en `Locales/{mac}`. Al quitar a un miembro se
+  pide `local_rotate {"familia": true}` (el firmware anterior ignora el argumento y rota todo, como antes). KB 12.
 - Traspaso con código de alta (#260): `/equipos/reclamar` acepta `codigo`; si su SHA-256 coincide con el que mandó
   la central (evento `codigo_alta`, 15 min) se gasta y se traspasa; si aún no llegó, 409 (la app reintenta); si no
   coincide, 403. Una central con firmware 2026.11.26+ ya no se traspasa sin código («Actualiza la app»); las de
