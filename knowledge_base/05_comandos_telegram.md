@@ -11,13 +11,13 @@
 
 ## Comandos de seguridad
 
-Si eres familiar de una central en la app ("Personas con acceso") y vinculaste tu Telegram, puedes usar /on, /off, /status y /disparo en esa central; /help te muestra solo esos. Lo demas es del dueño.
+Si eres familiar de una central en la app ("Personas con acceso") y vinculaste tu Telegram, o eres su "Usuario 2" (entraste con /join_), puedes usar /on, /off, /status y /disparo en esa central; /help te muestra solo esos. Horarios, bengala, modo y sensores son del dueño o de quien tenga permiso Administrador en la app; invitar y aprobar, solo del dueño.
 
 - **/on** - Armar el sistema de alarma. Si solo tienes un dispositivo vinculado, se arma directamente. Si tienes multiples dispositivos, aparece un menu de seleccion con la opcion adicional "Armar TODOS". Entre un uso y otro del mismo comando hay que esperar 5 segundos.
 - **/off** - Desarmar el sistema de alarma. Funciona igual que /on: seleccion directa con un dispositivo o menu con multiples. Incluye opcion "Desarmar TODOS". Espera de 5 segundos entre usos.
 - **/status** - Consulta el estado actual del dispositivo: en linea o sin respuesta, armado o desarmado, modo bengala e intensidad de senal WiFi (en dBm). El bot espera unos segundos la respuesta del dispositivo. Con varios equipos ofrece "Ver TODOS". Espera de 5 segundos entre usos.
 - **/disparo** - Ejecuta un disparo manual de la sirena/alarma en todos tus equipos. Requiere confirmacion con los botones "Confirmar" y "Cancelar" para evitar activaciones accidentales. Espera de 8 segundos entre usos (mas que otros comandos, por seguridad).
-- **/sensores** (tambien /sensors) - Muestra el detalle de cada equipo: sus sensores (señal y hace cuanto se oyeron), señal WiFi, tiempo encendido, estado de armado, modo de bengala, tiempo de salida y horario. Al dueño del equipo, en chat privado, le salen botones debajo: "Eliminar [nombre del sensor]" (pide confirmacion con "Si, eliminar") y "Autorizar" para un sensor nuevo. Es la forma de borrar un sensor desde Telegram; renombrarlo solo se puede desde la app.
+- **/sensores** (tambien /sensors) - Muestra el detalle de cada equipo: sus sensores (señal y hace cuanto se oyeron), señal WiFi, tiempo encendido, estado de armado, modo de bengala, tiempo de salida y horario. Al dueño del equipo (y a quien tenga permiso Administrador), en chat privado, le salen botones debajo: "Eliminar [nombre del sensor]" (pide confirmacion con "Si, eliminar") y "Autorizar" para un sensor nuevo. Es la forma de borrar un sensor desde Telegram; renombrarlo solo se puede desde la app.
 
 ## Detener sirena sin desarmar
 
@@ -39,7 +39,7 @@ La pregunta del modo Pregunta se contesta con los botones del propio mensaje de 
 ## Comandos de administracion
 
 - **/permisos** - Solo para administradores. En la version actual el bot responde que la lista de usuarios no esta disponible; los destinatarios de cada equipo se ven en la ficha del equipo en la app.
-- **/horarios** - Solo para administradores. Gestion de la programacion automatica de armado y desarmado: on, off, activar HH:MM, desactivar HH:MM y dias. Con varios equipos pregunta primero sobre cual actuar. Con /horarios cambiar eliges otro dispositivo. Consulta la documentacion de horarios para el detalle.
+- **/horarios** - Solo el dueño o quien tenga permiso Administrador. Gestion de la programacion automatica de armado y desarmado: on, off, activar HH:MM, desactivar HH:MM y dias. Con varios equipos pregunta primero sobre cual actuar. Con /horarios cambiar eliges otro dispositivo. Consulta la documentacion de horarios para el detalle.
 - **/adduser** - Solo el dueño de la central (no el "Usuario 2" ni un grupo). Genera un codigo de invitacion (un comando que empieza por /join_ seguido de un codigo) para compartir con un nuevo usuario. Si eres dueño de varias centrales, el bot te pregunta para cual.
 - **/desvincular** - Quita tu Telegram de los destinatarios de un equipo ("Ya no podras controlarlo desde Telegram"). Requiere confirmacion con "Si, desvincular". No borra el equipo de la app. Para volver, pide al administrador un nuevo codigo de invitacion o que te agregue de nuevo en la ficha del equipo.
 

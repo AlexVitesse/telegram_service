@@ -78,8 +78,15 @@ Muestra la guia de comandos disponibles.
 > **Familiares de la app (#308, en `dev`):** quien es miembro de una central en "Personas con acceso" y tiene su
 > Telegram vinculado (`Usuarios/{uid}/telegram_id`) puede usar `/on`, `/off`, `/status` y `/disparo` en esa central,
 > también escribiéndolo («arma la alarma»). La orden va como la `Orden` de la app: el dueño recibe el aviso con el
-> nombre. El resto de comandos y botones sigue siendo del dueño/Usuario 2. Los avisos por Telegram no le llegan (los
-> recibe en la app). Al quitarlo de `miembros` pierde el acceso al momento.
+> nombre. Los avisos por Telegram no le llegan (los recibe en la app). Al quitarlo de `miembros` pierde el acceso
+> al momento.
+>
+> **Roles (#314, en `dev`):** `/horarios`, `/bengala`, `/modo`, `/auto`, `/preguntar`, `/deshabilitar`, `/sensores`
+> (y sus botones, y lo mismo por Senti) solo en `centrales_ajustes`: las del dueño (`es_dueno`) y donde su cuenta es
+> miembro con `rol: "admin"`. El **Usuario 2** (`Telegram_ID_2`, el de `/join_`) queda como Familia: `/on`, `/off`,
+> `/status`, `/disparo`, sus avisos, los botones de la alarma (bengala / dejar armado) y `/desvincular`.
+> `/adduser` y `/approve_` siguen siendo solo del dueño. El rol lo cambia el dueño con
+> `POST /equipos/miembros/rol {"mac","uid","rol"}`.
 
 ### `/status`
 Consulta el estado actual del sistema.

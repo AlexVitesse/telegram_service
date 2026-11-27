@@ -35,7 +35,7 @@ if not HOST:
 NS = "demo-sentinel"
 MAC = "AA_BB_CC_DD_EE_FF"
 OTRA = "11_22_33_44_55_66"   # tambien de A, sin miembros
-A, B, C = "uid_dueno", "uid_familia", "uid_ajeno"
+A, B, C, D = "uid_dueno", "uid_familia", "uid_ajeno", "uid_admin"
 
 
 def _b64(d):
@@ -81,7 +81,7 @@ def _sembrar():
             MAC: {"ownerUid": A, "Nombre": "Casa", "Answer": False, "Telegram_ID": "1",
                   "Tiempo_Bomba": 30, "BengalaHab": True,
                   "Pendientes": {"x": {"autorizar": False}},
-                  "miembros": {B: {"rol": "familia"}}},
+                  "miembros": {B: {"rol": "familia"}, D: {"rol": "admin"}}},
             OTRA: {"ownerUid": A, "Nombre": "Oficina"},
         },
         "Miembros": {MAC: {B: {"nombre": "Beto", "alta": 1}}},
@@ -139,7 +139,9 @@ CASOS = [
     # Membresías (C3)
     (B, "PUT", f"ESP32/{MAC}/miembros/{C}", {"rol": "familia"}, False, "familia no invita"),
     (C, "PUT", f"ESP32/{MAC}/miembros/{C}", {"rol": "familia"}, False, "ajeno no se mete solo"),
-    (A, "PUT", f"ESP32/{MAC}/miembros/{C}", {"rol": "admin"}, False, "rol inventado"),
+    (A, "PUT", f"ESP32/{MAC}/miembros/{C}", {"rol": "dueno"}, False, "rol inventado"),
+    (A, "PUT", f"ESP32/{MAC}/miembros/{B}", {"rol": "admin"}, False, "el rol lo cambia solo el VPS (#314)"),
+    (B, "PUT", f"ESP32/{MAC}/miembros/{B}/rol", "admin", False, "familia no se hace administrador"),
     (A, "PUT", f"ESP32/{MAC}/miembros/{C}", {"rol": "familia"}, False, "dueño no mete miembros sin invitación (#279)"),
     (A, "PATCH", f"ESP32/{MAC}", {"Nombre": "Casa 2", f"miembros/{C}": {"rol": "familia"}}, False,
      "ni colado en un update del nodo (#279)"),
@@ -161,6 +163,29 @@ CASOS = [
     (C, "GET", f"Horarios/{A}/devices/{MAC}", None, False, "ajeno no lee horarios"),
     (B, "PUT", f"Horarios/{A}/devices/{MAC}/h1/enabled", False, False, "familia no edita horarios"),
     (B, "GET", f"Horarios/{B}/devices/{MAC}", None, True, "su propio árbol de horarios, como hoy"),
+    # Administrador (#314): además horarios, bengala y sensores; nada del dueño
+    (D, "PUT", f"ESP32/{MAC}/Orden", ORDEN(D), True, "admin manda Orden"),
+    (D, "PUT", f"ESP32/{MAC}/BengalaHab", False, True, "admin cambia BengalaHab"),
+    (D, "PATCH", f"ESP32/{MAC}", {"BengalaHab": True, "ModoBengala": 2}, True, "admin cambia el modo de bengala"),
+    (D, "PUT", f"ESP32/{MAC}/BengalaHab", "x", False, "BengalaHab no booleano"),
+    (D, "PUT", f"ESP32/{MAC}/Pendientes/x/autorizar", True, True, "admin autoriza un sensor"),
+    (D, "PUT", f"ESP32/{MAC}/Pendientes/x/ignorado", True, True, "admin ignora un sensor"),
+    (D, "PUT", f"ESP32/{MAC}/Sensors/MOV-1/borrar", True, True, "admin borra un sensor"),
+    (D, "PUT", f"ESP32/{MAC}/Sensors/MOV-1/renombrar", "Sala", True, "admin renombra un sensor"),
+    (D, "PUT", f"ESP32/{MAC}/Sensors/MOV-1", {"name": "x"}, False, "admin no reescribe el sensor entero"),
+    (D, "PUT", f"Horarios/{A}/devices/{MAC}/h1/enabled", False, True, "admin edita los horarios de su central"),
+    (D, "PUT", f"Horarios/{A}/devices/{OTRA}/h1/enabled", False, False, "admin no edita los de otra central"),
+    (D, "GET", f"Horarios/{A}", None, False, "admin no lee todos los horarios del dueño"),
+    (D, "PUT", f"ESP32/{MAC}/Nombre", "x", False, "admin no cambia el nombre"),
+    (D, "PUT", f"ESP32/{MAC}/Telegram_ID", "9", False, "admin no cambia Telegram_ID"),
+    (D, "PUT", f"ESP32/{MAC}/Tiempo_Bomba", 1, False, "admin no cambia Tiempo_Bomba"),
+    (D, "PUT", f"ESP32/{MAC}/Answer", True, False, "admin no escribe Answer"),
+    (D, "PUT", f"ESP32/{MAC}/ownerUid", D, False, "admin no se queda la central"),
+    (D, "PUT", f"ESP32/{MAC}/miembros/{C}", {"rol": "familia"}, False, "admin no invita"),
+    (D, "GET", f"Locales/{MAC}", None, False, "admin no lee la llave local del dueño"),
+    (D, "GET", f"Miembros/{MAC}", None, False, "admin no lee los nombres"),
+    (B, "PUT", f"ESP32/{MAC}/Sensors/MOV-1/borrar", True, False, "familia no borra sensores"),
+    (B, "PUT", f"ESP32/{MAC}/ModoBengala", 2, False, "familia no cambia el modo de bengala"),
     # Invitaciones: solo VPS
     (A, "GET", "Invitaciones", None, False, "nadie lee Invitaciones"),
     (B, "PUT", "Invitaciones/ZZZZZZZZ", {"mac": MAC}, False, "nadie escribe Invitaciones"),

@@ -17,6 +17,7 @@ red del VPS, y las peticiones llevan un ID token de Firebase.
     POST /equipos/invitar   {"mac", "remoto"}  -> {"ok", "codigo", "expira"}   (familia, #124)
     POST /equipos/unirse    {"codigo"}         -> {"ok", "mac", "nombre"}
     POST /equipos/miembros/quitar {"mac", "uid"}
+    POST /equipos/miembros/rol {"mac", "uid", "rol": "familia" | "admin"}  (#314)
 
 Quien contesta es `knowledge_qa.responder()`, el mismo que usa el bot, así que
 los dos canales dan **la misma respuesta a la misma pregunta**.
@@ -658,6 +659,33 @@ class ApiSenti:
         await self._push(quitado, "Acceso retirado", f"Ya no tienes acceso a {r['nombre']}.", mac)
         return web.json_response({"ok": True})
 
+    async def rol_miembro(self, request: web.Request) -> web.Response:
+        """#314: el dueno elige Familia o Administrador para un miembro."""
+        uid, error = await self._uid_obligatorio(request)
+        if error is not None:
+            return error
+        cuerpo, mac, error = await self._cuerpo_con_mac(request)
+        if error is not None:
+            return error
+        miembro, rol = str(cuerpo.get("uid") or ""), str(cuerpo.get("rol") or "")
+        if not _UID_VALIDO.fullmatch(miembro):
+            return web.json_response({"error": "Usuario no válido."}, status=400)
+        try:
+            r = await asyncio.to_thread(self._firebase.cambiar_rol, uid, mac, miembro, rol)
+        except Exception as e:
+            logger.error("No se pudo cambiar el rol de %s en %s: %s", miembro, mac, e)
+            return web.json_response({"error": "No se pudo cambiar. Inténtalo de nuevo."}, status=503)
+        if r == "rol_malo":
+            return web.json_response({"error": "Rol no válido."}, status=400)
+        if r == "no_es_dueno":
+            return web.json_response({"error": "Solo el dueño de la central puede cambiar permisos."}, status=403)
+        if r == "no_es_miembro":
+            return web.json_response({"error": "Esa persona ya no tiene acceso."}, status=404)
+        texto = ("Ahora puedes cambiar horarios, bengala y sensores" if rol == "admin"
+                 else "Ahora puedes armar, desarmar y ver el estado") + f" de {r['nombre']}."
+        await self._push(miembro, "Tus permisos cambiaron", texto, mac)
+        return web.json_response({"ok": True, "rol": rol})
+
     async def _push(self, uid: str, titulo: str, texto: str, mac: str) -> None:
         """ACCESS_CHANGED a una cuenta. Un fallo aqui no deshace lo ya hecho."""
         if self._fcm is None:
@@ -748,6 +776,7 @@ class ApiSenti:
         app.router.add_post("/equipos/invitar", self.invitar)
         app.router.add_post("/equipos/unirse", self.unirse)
         app.router.add_post("/equipos/miembros/quitar", self.quitar_miembro)
+        app.router.add_post("/equipos/miembros/rol", self.rol_miembro)
         app.router.add_route("OPTIONS", "/{cualquiera:.*}", self._preflight)
 
         self._runner = web.AppRunner(app, access_log=None)

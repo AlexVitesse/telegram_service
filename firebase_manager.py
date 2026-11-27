@@ -639,6 +639,53 @@ class FirebaseManager:
             return False
         return self._orden_de_miembro(mac, {"accion": accion, "por": uid, "ts": int(time.time() * 1000)})
 
+    ROLES = ("familia", "admin")
+
+    def _es_admin(self, nodo, uids) -> bool:
+        miembros = self._miembros(nodo)
+        return any(isinstance(miembros.get(u), dict) and miembros[u].get("rol") == "admin" for u in uids)
+
+    def centrales_ajustes(self, chat_id: str) -> List[str]:
+        """
+        #314: donde este chat cambia horarios, bengala, modo y sensores: las
+        suyas como dueno y aquellas donde su cuenta de la app es miembro
+        Administrador. Usuario 2 (Telegram_ID_2) y Familia solo arman, desarman,
+        piden panico y ven el estado. Invitar, quitar y aprobar siguen siendo
+        solo del dueno (es_dueno).
+        """
+        if not chat_id or str(chat_id).startswith("-") or not self.is_available():
+            return []
+        chat = str(chat_id)
+        propias = [d for d in self.get_authorized_devices(chat) if self.es_dueno(d, chat)]
+        uids = set(self._uids_por_chat_id(chat))
+        if not uids:
+            return propias
+        return propias + [mac for mac, nodo in (self._get_all_devices() or {}).items()
+                          if mac not in propias and isinstance(nodo, dict) and self._es_admin(nodo, uids)]
+
+    def puede_ajustar(self, mac: str, chat_id: str) -> bool:
+        """Dueno o Administrador de esta central (#314)."""
+        if self.es_dueno(mac, chat_id):
+            return True
+        if not chat_id or str(chat_id).startswith("-"):
+            return False
+        return self._es_admin(self._nodo(mac) or {}, set(self._uids_por_chat_id(str(chat_id))))
+
+    def cambiar_rol(self, uid_dueno: str, mac: str, uid: str, rol: str) -> Any:
+        """El dueno elige Familia o Administrador para un miembro (#314)."""
+        if rol not in self.ROLES:
+            return "rol_malo"
+        with self._lock_propiedad:
+            nodo = self.db.reference(f"ESP32/{mac}").get()
+            if not isinstance(nodo, dict) or str(nodo.get("ownerUid") or "") != uid_dueno:
+                return "no_es_dueno"
+            if uid not in self._miembros(nodo):
+                return "no_es_miembro"
+            self.db.reference(f"ESP32/{mac}/miembros/{uid}").update({"rol": rol})
+            self.invalidate_cache()
+            logger.info(f"{mac}: {uid} ahora es {rol}")
+            return {"nombre": nodo.get("Nombre") or mac}
+
     @staticmethod
     def _parse_schedule_time(time_str: str) -> tuple:
         """Parsea hora en formato HH:MM o YYYY-MM-DDTHH:MM"""

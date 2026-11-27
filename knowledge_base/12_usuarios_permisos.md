@@ -25,6 +25,16 @@ Cada central admite hasta **10 personas** ademas del dueño. Solo el dueño ve l
 - **No puede:** editar la central (nombre, tiempos, bengala, WiFi), autorizar, borrar ni renombrar sensores, cambiar los destinatarios de Telegram ni invitar o quitar a otras personas. Sin internet (cuando la app habla directo con la central en la red de la casa) un miembro puede armar, desarmar y usar el panico si la central y la app estan actualizadas; con una central sin actualizar necesita internet para armar o desarmar. Lo demas, sin internet, solo lo hace el dueño.
 - **Cada vez que un miembro arma, desarma o pide panico, al dueño le llega un aviso con su nombre.** Ese aviso no se puede apagar.
 
+### Familia o Administrador: que permisos le doy a cada persona
+
+Desde la version 8.2.1 de la app, el dueño elige para cada persona uno de dos permisos, en "Personas con acceso" (toca el permiso junto a su nombre). Quien se une entra como **Familia**; el dueño puede cambiarlo cuando quiera y a la persona le llega un aviso.
+
+- **Familia:** ver el estado, armar, desarmar y panico (SOS). Es lo descrito arriba.
+- **Administrador:** todo lo de Familia y ademas **horarios, bengala (habilitar y modo) y sensores** (autorizar, ignorar, borrar y renombrar), en la app y en Telegram.
+- **Siempre solo del dueño:** invitar y quitar personas, cambiar permisos, editar la central (nombre, tiempos, WiFi, destinatarios de Telegram), borrarla o pasarla a otra cuenta, y aprobar los /join_ de Telegram.
+
+Sin internet (red de la casa), un Administrador arma, desarma y usa el panico como Familia; los horarios, la bengala y los sensores los cambia con internet.
+
 ### Quitar a alguien (solo el dueño)
 
 - **El dueño quita a alguien:** en "Personas con acceso", toca **"Quitar"** junto a su nombre. Esa persona deja de ver la central al momento y le llega el aviso "Ya no tienes acceso". Si esa persona era el "Usuario 2" de Telegram de la central, tambien se le quita de ahi.
@@ -55,9 +65,9 @@ Si se vencio, el dueño genera otro.
 
 ### Un familiar puede cambiar, crear o borrar horarios?
 
-No. Un miembro de la familia ve los horarios del dueño en la app, pero **solo para leerlos**: no puede crearlos,
-cambiarlos ni borrarlos. Los horarios los cambia unicamente el dueño de la central, desde la app (seccion Horarios)
-o con /horarios en Telegram.
+Con permiso **Familia**, no: ve los horarios del dueño en la app, pero **solo para leerlos**. Si el dueño le da
+permiso **Administrador** (en "Personas con acceso", desde la version 8.2.1), si puede crearlos, cambiarlos y
+borrarlos, desde la app o con /horarios en Telegram.
 
 ### Me mandaron un codigo: como me uno?
 
@@ -73,7 +83,7 @@ Si. Vincula tu Telegram con tu cuenta: en la app entra en Perfil > Editar Inform
 - Armar (/on), desarmar (/off) y ver el estado (/status), o escribirlo con tus palabras: "arma la alarma", "como esta la casa".
 - Activar la sirena con /disparo (pide confirmar).
 
-Lo demas es solo del dueño: horarios, sensores, bengala, modo, invitar y aprobar personas. Si lo pides, el bot te contesta que eso solo lo puede hacer el dueño de la central.
+Horarios, sensores, bengala y modo son del dueño o de quien tenga permiso Administrador; invitar y aprobar personas, solo del dueño. Si lo pides sin permiso, el bot te contesta que eso solo lo puede hacer el dueño o un administrador de la central.
 
 Cada vez que armas, desarmas o activas la sirena por Telegram, al dueño le llega un aviso con tu nombre, igual que desde la app. Si el dueño te quita de "Personas con acceso" o tu sales de la central, el bot deja de obedecerte al momento.
 
@@ -95,7 +105,7 @@ Los permisos de usuario del bot se configuran (o programan) desde Telegram. Conf
 4. Paso 4: El nuevo usuario envia ese comando /join_... al bot desde un chat privado (no desde un grupo).
 5. Paso 5: El bot notifica al dueño del equipo con la solicitud del nuevo usuario. La solicitud expira en 5 minutos.
 6. Paso 6: El dueño aprueba el permiso tocando el comando /approve_... que le llega ya escrito en el aviso. Solo el dueño de esa central puede aprobarlo.
-7. Paso 7: El nuevo usuario queda registrado con permisos de acceso configurados.
+7. Paso 7: El nuevo usuario queda registrado como "Usuario 2" de la central: puede armar, desarmar, ver el estado y activar la sirena por Telegram, y recibe los avisos. Horarios, sensores y bengala no: para eso, compartele la central desde la app con permiso Administrador.
 
 Asi se configura un permiso nuevo en el sistema. Como se configuran los permisos: con los comandos /adduser, /approve_..., /desvincular y /permisos desde Telegram. Para revisar quien recibe los avisos de cada equipo, mira la ficha del equipo en la app (Ajustes > Avisos de Telegram).
 
@@ -109,10 +119,12 @@ Asi se configura un permiso nuevo en el sistema. Como se configuran los permisos
 
 ## Roles del sistema
 
-Sentinel Guard maneja dos roles de usuario:
+Cada central tiene un dueño y, si el quiere, mas personas con uno de estos permisos:
 
-- **Administrador (Admin)**: Control total del sistema, incluyendo gestion de usuarios, configuracion de dispositivos, horarios y permisos. Puede armar, desarmar, ver estado y administrar todos los dispositivos.
-- **Usuario**: Control basico de los dispositivos vinculados a su cuenta. Puede armar, desarmar, consultar estado y recibir notificaciones de alerta.
+- **Dueño**: todo. Es el unico que invita, quita, cambia permisos, edita la central y aprueba los /join_.
+- **Administrador** (familia de la app con ese permiso): armar, desarmar, panico, estado, horarios, bengala y sensores.
+- **Familia** (familia de la app): armar, desarmar, panico y estado.
+- **Usuario 2 de Telegram** (el que entra con /join_): lo mismo que Familia, solo por Telegram, y recibe los avisos por Telegram.
 
 ## Dueño del equipo - Administrador Principal
 

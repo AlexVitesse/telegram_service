@@ -6,6 +6,11 @@ con los commits de `main`. Lo más reciente, arriba.
 ## Sin desplegar — en `dev`
 
 ### Agregado
+- Permisos por persona (#314): Familia o Administrador, que elige el dueño con `POST /equipos/miembros/rol`
+  (`miembros/{uid}/rol` = `familia` | `admin`, aviso push a la persona). Administrador: además horarios, bengala,
+  modo y sensores, en Telegram (`centrales_ajustes`, `puede_ajustar`) y en la app (reglas RTDB). Invitar, quitar,
+  cambiar permisos, editar la central y aprobar `/join_` siguen siendo solo del dueño. `test_roles.py`; 84 casos de
+  reglas en el emulador. KB 12 y 05.
 - Modo local para familiares (#283): la llave de familia que manda la central (`key_fam`) se guarda en
   `ESP32/{mac}/LocalFam`, que leen los miembros; la del dueño sigue solo en `Locales/{mac}`. Al quitar a un miembro se
   pide `local_rotate {"familia": true}` (el firmware anterior ignora el argumento y rota todo, como antes). KB 12.
@@ -19,6 +24,9 @@ con los commits de `main`. Lo más reciente, arriba.
   avisos de la central le siguen llegando en la app, no por Telegram. KB 12 y 05 al día. `test_telegram_familia.py`.
 
 ### Cambiado
+- El "Usuario 2" de Telegram (`Telegram_ID_2`, el de `/join_`) queda como Familia (#314): arma, desarma, ve el
+  estado, `/disparo`, sus avisos y los botones de la alarma; horarios, bengala, modo y sensores ya no ("solo el dueño
+  o un administrador"). Hay que avisar a los clientes que lo usaban para eso.
 - `/status`: con firmware nuevo el horario cuenta como activo si lo está cualquiera de la lista (`horarios_activos`,
   #309); con firmware anterior sigue `auto_schedule_enabled`. Se guarda también en `Telemetry`.
 - Sensores nuevos (#313): «Ignorar» en Telegram marca `Pendientes/{id}/ignorado` en vez de solo cambiar el texto; no

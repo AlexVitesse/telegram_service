@@ -389,6 +389,17 @@ class TelegramBot:
         return (self.firebase_manager.get_authorized_devices(chat_id)
                 + self.firebase_manager.centrales_familia(chat_id))
 
+    async def _ajustes(self, update: Update, chat_id: str) -> List[str]:
+        """Centrales donde el chat cambia horarios, bengala, modo y sensores
+        (#314). Si no hay, contesta por que."""
+        devices = self.firebase_manager.centrales_ajustes(chat_id)
+        if not devices:
+            await update.message.reply_text(
+                "🔐 Eso solo lo puede hacer el dueño o un administrador de la central."
+                if self._centrales_control(chat_id) else "No tienes dispositivos autorizados.",
+                reply_markup=self._get_keyboard())
+        return devices
+
     def _mandar(self, chat_id: str, device_id: str, accion: str) -> None:
         """arm / disarm / panic. A una central de familia va como `Orden` de
         miembro, para que el dueno reciba el aviso con el nombre (#308)."""
@@ -712,17 +723,17 @@ class TelegramBot:
         user = update.effective_user
         chat_id = str(update.effective_chat.id)
 
-        if not self.firebase_manager.get_authorized_devices(chat_id):
-            # Solo familiar de la app (#308): lo que puede hacer, nada mas.
+        if not self.firebase_manager.centrales_ajustes(chat_id):
+            # Familia o Usuario 2 (#308, #314): lo que puede hacer, nada mas.
             await update.message.reply_text(
                 "📚 *GUÍA DE COMANDOS*\n\n"
-                "🔐 *Como familiar puedes:*\n"
+                "🔐 *Puedes:*\n"
                 "`/on` - Armar sistema\n"
                 "`/off` - Desarmar sistema\n"
                 "`/status` - Ver estado\n"
                 "`/disparo` - Activar alarma manual\n\n"
                 "También puedes escribirlo: «arma la alarma».\n"
-                "Horarios, sensores, bengala e invitar son del dueño de la central.\n\n"
+                "Horarios, sensores y bengala son del dueño o de un administrador de la central; invitar, solo del dueño.\n\n"
                 "🆘 `/soporte` - Hablar con una persona del equipo",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=self._get_keyboard(),
@@ -1106,9 +1117,8 @@ class TelegramBot:
         chat_id = str(update.effective_chat.id)
         logger.info(f"/bengala de {user.first_name}")
 
-        devices = self.firebase_manager.get_authorized_devices(chat_id)
+        devices = await self._ajustes(update, chat_id)
         if not devices:
-            await update.message.reply_text("No tienes dispositivos autorizados.")
             return
 
         # Si hay múltiples dispositivos, mostrar selector primero
@@ -1191,9 +1201,8 @@ class TelegramBot:
             await update.message.reply_text("❌ Error: Sistema no conectado")
             return
 
-        devices = self.firebase_manager.get_authorized_devices(chat_id)
+        devices = await self._ajustes(update, chat_id)
         if not devices:
-            await update.message.reply_text("No tienes dispositivos autorizados.")
             return
 
         # Si hay múltiples dispositivos, mostrar selector
@@ -1257,9 +1266,8 @@ class TelegramBot:
             await update.message.reply_text("❌ Error: Sistema no conectado")
             return
 
-        devices = self.firebase_manager.get_authorized_devices(chat_id)
+        devices = await self._ajustes(update, chat_id)
         if not devices:
-            await update.message.reply_text("No tienes dispositivos autorizados.")
             return
 
         # Si hay múltiples dispositivos, mostrar selector
@@ -1307,9 +1315,8 @@ class TelegramBot:
             await update.message.reply_text("❌ Error: Sistema no conectado")
             return
 
-        devices = self.firebase_manager.get_authorized_devices(chat_id)
+        devices = await self._ajustes(update, chat_id)
         if not devices:
-            await update.message.reply_text("No tienes dispositivos autorizados.")
             return
 
         # Si hay múltiples dispositivos, mostrar selector
@@ -1421,9 +1428,8 @@ class TelegramBot:
         logger.info(f"/horarios de {user.first_name} args={args}")
 
         # Obtener dispositivos del usuario
-        devices = self.firebase_manager.get_authorized_devices(chat_id)
+        devices = await self._ajustes(update, chat_id)
         if not devices:
-            await update.message.reply_text("No tienes dispositivos autorizados.")
             return
 
         # Sin argumentos: mostrar selector de dispositivo o estado
@@ -1637,12 +1643,8 @@ class TelegramBot:
         logger.info(f"/sensors de {user.first_name}")
 
         # Obtener dispositivos autorizados
-        devices = self.firebase_manager.get_authorized_devices(chat_id)
+        devices = await self._ajustes(update, chat_id)
         if not devices:
-            await update.message.reply_text(
-                "No tienes dispositivos autorizados.",
-                reply_markup=self._get_keyboard()
-            )
             return
 
         # Solicitar lista de sensores a todos los dispositivos
@@ -1788,7 +1790,7 @@ class TelegramBot:
             await self.send_message(chat_id, response, "Markdown")
 
             # Borrar o autorizar: solo el dueño y en su chat privado.
-            if sensors_list and sensors_list.sensors and self.firebase_manager.es_dueno(device_id, chat_id):
+            if sensors_list and sensors_list.sensors and self.firebase_manager.puede_ajustar(device_id, chat_id):
                 teclado = teclado_sensores(device_id, sensors_list.sensors)
                 if teclado:
                     await self.send_message(chat_id, f"Sensores de {name}:", reply_markup=teclado)
@@ -1821,7 +1823,7 @@ class TelegramBot:
         """
         # Si no se especifican dispositivos, usar todos los autorizados
         if target_devices is None:
-            devices = self.firebase_manager.get_authorized_devices(chat_id)
+            devices = self.firebase_manager.centrales_ajustes(chat_id)
         else:
             devices = target_devices
 
@@ -2248,10 +2250,11 @@ class TelegramBot:
             _log_action(msg, ok=False, error="device_not_found")
             return
 
-        # Familia (#308): en sus centrales solo armar, desarmar y estado.
-        familia = set(self.firebase_manager.centrales_familia(chat_id))
-        if intent not in ("arm", "disarm", "status") and familia & set(target_ids):
-            msg = "🔐 Eso solo lo puede hacer el dueño de la central."
+        # Familia (#308) y Usuario 2 (#314): solo armar, desarmar y estado; lo
+        # demas, en las del dueno o donde es Administrador.
+        if intent not in ("arm", "disarm", "status") and set(target_ids) - set(
+                self.firebase_manager.centrales_ajustes(chat_id)):
+            msg = "🔐 Eso solo lo puede hacer el dueño o un administrador de la central."
             await update.message.reply_text(msg, reply_markup=self._get_keyboard())
             _log_action(msg, ok=False, error="familia_sin_permiso")
             return
@@ -3112,8 +3115,8 @@ class TelegramBot:
         if data and data.split("_", 1)[0] in ("sdel", "sdelok", "sdelno"):
             pref, resto = data.split("_", 1)
             mac, sensor = resto[:14], resto[15:]
-            if not self.firebase_manager.es_dueno(mac, chat_id):
-                await query.edit_message_text("❌ Solo el dueño de la central puede eliminar sensores.")
+            if not self.firebase_manager.puede_ajustar(mac, chat_id):
+                await query.edit_message_text("❌ Solo el dueño o un administrador de la central puede eliminar sensores.")
             elif pref == "sdel":
                 await query.edit_message_text(
                     f"¿Eliminar {sensor}? Dejará de vigilar esa zona. Si sigue encendido, "
@@ -3135,8 +3138,8 @@ class TelegramBot:
         if data and (data.startswith("auth_") or data.startswith("authno_")):
             resto = data.split("_", 1)[1]
             mac, sensor = resto[:14], resto[15:]
-            if not self.firebase_manager.es_dueno(mac, chat_id):
-                await query.edit_message_text("❌ Solo el dueño de la central puede autorizar sensores.")
+            if not self.firebase_manager.puede_ajustar(mac, chat_id):
+                await query.edit_message_text("❌ Solo el dueño o un administrador de la central puede autorizar sensores.")
             elif data.startswith("authno_"):
                 self.firebase_manager.ignorar_pendiente(mac, sensor)   # #313: queda en «Ignorados»
                 await query.edit_message_text(
@@ -3148,10 +3151,12 @@ class TelegramBot:
                 await query.edit_message_text(f"⏳ Autorizando {sensor}…")
             return
 
-        devices = self.firebase_manager.get_authorized_devices(chat_id)
-        # Familia (#308): solo armar, desarmar, disparo y estado. El resto de
-        # botones sigue mirando `devices`, que no incluye sus centrales.
-        control = devices + self.firebase_manager.centrales_familia(chat_id)
+        # #314: `devices` = donde cambia ajustes (dueno o Administrador).
+        # Familia y Usuario 2: solo armar, desarmar, disparo y estado (`control`);
+        # desvincularse lo puede cualquiera vinculado (`vinculadas`).
+        vinculadas = self.firebase_manager.get_authorized_devices(chat_id)
+        devices = self.firebase_manager.centrales_ajustes(chat_id)
+        control = vinculadas + self.firebase_manager.centrales_familia(chat_id)
         if not control:
             await query.edit_message_text("No tienes dispositivos autorizados.")
             return
@@ -3179,7 +3184,7 @@ class TelegramBot:
 
         # Callbacks para recordatorio de alarma activa
         elif data == "bengala_confirm" or data.startswith("bengala_confirm_"):
-            alarming_devices = await self._centrales_del_aviso(query, data, "bengala_confirm", devices)
+            alarming_devices = await self._centrales_del_aviso(query, data, "bengala_confirm", vinculadas)
             if alarming_devices is None:
                 return
             if alarming_devices:
@@ -3203,7 +3208,7 @@ class TelegramBot:
 
         elif data == "bengala_cancel" or data.startswith("bengala_cancel_"):
             # Dejar armado - detener sirena pero mantener armado
-            objetivo = await self._centrales_del_aviso(query, data, "bengala_cancel", devices)
+            objetivo = await self._centrales_del_aviso(query, data, "bengala_cancel", vinculadas)
             if objetivo is None:
                 return
             await query.edit_message_text("🔇 Deteniendo sirena...")
@@ -3395,7 +3400,7 @@ class TelegramBot:
         # Seleccionar dispositivo para desvincular (muestra confirmación)
         elif data.startswith("unlink_select_"):
             target_device = data.replace("unlink_select_", "")
-            if target_device in devices:
+            if target_device in vinculadas:
                 location = self.firebase_manager.get_device_location(target_device) or target_device
 
                 keyboard = InlineKeyboardMarkup([
@@ -3419,7 +3424,7 @@ class TelegramBot:
         # Confirmar desvinculación
         elif data.startswith("unlink_") and data != "unlink_cancel":
             target_device = data.replace("unlink_", "")
-            if target_device in devices:
+            if target_device in vinculadas:
                 location = self.firebase_manager.get_device_location(target_device) or target_device
 
                 # Desvincular el dispositivo
